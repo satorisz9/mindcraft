@@ -18,7 +18,7 @@ export class HuggingFace {
   }
 
   async sendRequest(turns, systemMessage) {
-    const stop_seq = '***';
+    const stop_seq = '<|EOT|>';
     // Build a single prompt from the conversation turns
     const prompt = toSinglePrompt(turns, null, stop_seq);
     // Fallback model if none was provided

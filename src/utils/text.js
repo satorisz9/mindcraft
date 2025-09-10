@@ -13,7 +13,7 @@ export function stringifyTurns(turns) {
     return res.trim();
 }
 
-export function toSinglePrompt(turns, system=null, stop_seq='***', model_nickname='assistant') {
+export function toSinglePrompt(turns, system=null, stop_seq='<|EOT|>', model_nickname='assistant') {
     let prompt = system ? `${system}${stop_seq}` : '';
     let role = '';
     turns.forEach((message) => {

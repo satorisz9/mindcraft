@@ -13,7 +13,7 @@ export class Cerebras {
         this.client = new CerebrasSDK({ apiKey: getKey('CEREBRAS_API_KEY') });
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = '***') {
+    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>') {
         // Format messages array
         const messages = strictFormat(turns);
         messages.unshift({ role: 'system', content: systemMessage });

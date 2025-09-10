@@ -18,10 +18,10 @@ export class Hyperbolic {
      *
      * @param {Array} turns - An array of message objects, e.g. [{role: 'user', content: 'Hi'}].
      * @param {string} systemMessage - The system prompt or instruction.
-     * @param {string} stopSeq - A stopping sequence, default '***'.
+     * @param {string} stopSeq - A stopping sequence, default '<|EOT|>'.
      * @returns {Promise<string>} - The model's reply.
      */
-    async sendRequest(turns, systemMessage, stopSeq = '***') {
+    async sendRequest(turns, systemMessage, stopSeq = '<|EOT|>') {
         // Prepare the messages with a system prompt at the beginning
         const messages = [{ role: 'system', content: systemMessage }, ...turns];
 

@@ -20,7 +20,7 @@ export class ReplicateAPI {
 	}
 
 	async sendRequest(turns, systemMessage) {
-		const stop_seq = '***';
+		const stop_seq = '<|EOT|>';
 		const prompt = toSinglePrompt(turns, null, stop_seq);
 		let model_name = this.model_name || 'meta/meta-llama-3-70b-instruct';
 

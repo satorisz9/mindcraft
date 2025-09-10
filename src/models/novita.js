@@ -19,7 +19,7 @@ export class Novita {
     this.openai = new OpenAIApi(config);
   }
 
-	async sendRequest(turns, systemMessage, stop_seq='***') {
+	async sendRequest(turns, systemMessage, stop_seq='<|EOT|>') {
       let messages = [{'role': 'system', 'content': systemMessage}].concat(turns);
 
       

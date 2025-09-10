@@ -18,7 +18,7 @@ export class Mercury {
         this.openai = new OpenAIApi(config);
     }
 
-    async sendRequest(turns, systemMessage, stop_seq='***') {
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>') {
         if (typeof stop_seq === 'string') {
             stop_seq = [stop_seq];
         } else if (!Array.isArray(stop_seq)) {

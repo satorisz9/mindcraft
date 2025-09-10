@@ -22,7 +22,7 @@ export class VLLM {
         this.vllm = new OpenAIApi(vllm_config);
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = '***') {
+    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>') {
         let messages = [{ 'role': 'system', 'content': systemMessage }].concat(turns);
         let model = this.model_name || "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B";  
         

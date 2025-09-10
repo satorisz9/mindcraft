@@ -15,7 +15,7 @@ export class Qwen {
         this.openai = new OpenAIApi(config);
     }
 
-    async sendRequest(turns, systemMessage, stop_seq='***') {
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>') {
         let messages = [{'role': 'system', 'content': systemMessage}].concat(turns);
 
         messages = strictFormat(messages);
@@ -32,6 +32,8 @@ export class Qwen {
             console.log('Awaiting Qwen api response...');
             // console.log('Messages:', messages);
             let completion = await this.openai.chat.completions.create(pack);
+            // console.log('Qwen Received: ', completion);
+            // console.log('Qwen Received: ', completion.choices[0].message);
             if (completion.choices[0].finish_reason == 'length')
                 throw new Error('Context length exceeded');
             console.log('Received.');

@@ -15,7 +15,7 @@ export class GLHF {
         });
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = '***') {
+    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>') {
         // Construct the message array for the API request.
         let messages = [{ role: 'system', content: systemMessage }].concat(turns);
         const pack = {
