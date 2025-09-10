@@ -7,7 +7,7 @@ export class GPT {
     constructor(model_name, url, params) {
         this.model_name = model_name;
         this.params = params;
-        url = 'https://xiaoai.plus/v1';
+   
         let config = {};
         if (url)
             config.baseURL = url;
