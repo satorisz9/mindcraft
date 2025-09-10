@@ -1,142 +1,296 @@
-import { writeFile, readFile, mkdirSync } from 'fs';
+import { readFile, writeFile } from 'fs/promises';
 import { makeCompartment, lockdown } from './library/lockdown.js';
 import * as skills from './library/skills.js';
 import * as world from './library/world.js';
 import { Vec3 } from 'vec3';
-import {ESLint} from "eslint";
+import { ESLint } from "eslint";
+import { PatchApplier } from './patch_applier.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export class Coder {
     constructor(agent) {
         this.agent = agent;
-        this.file_counter = 0;
-        this.fp = '/bots/'+agent.name+'/action-code/';
-        this.code_template = '';
-        this.code_lint_template = '';
-
-        readFile('./bots/execTemplate.js', 'utf8', (err, data) => {
-            if (err) throw err;
-            this.code_template = data;
-        });
-        readFile('./bots/lintTemplate.js', 'utf8', (err, data) => {
-            if (err) throw err;
-            this.code_lint_template = data;
-        });
-        mkdirSync('.' + this.fp, { recursive: true });
+        this.patchApplier = new PatchApplier(agent);
+        this.code_lint_template = null;
+        this._loadLintTemplate();
+    }
+    
+    async _loadLintTemplate() {
+        try {
+            this.code_lint_template = await readFile('./bots/lintTemplate.js', 'utf8');
+        } catch (err) {
+            console.error('Failed to load lintTemplate.js:', err);
+            throw new Error('lintTemplate.js file is required but could not be loaded');
+        }
     }
 
     async generateCode(agent_history) {
         this.agent.bot.modes.pause('unstuck');
         lockdown();
-        // this message history is transient and only maintained in this function
-        let messages = agent_history.getHistory(); 
-        messages.push({role: 'system', content: 'Code generation started. Write code in codeblock in your response:'});
+        
+        let messages = agent_history.getHistory();
+        messages.push({
+            role: 'system', 
+            content: 'Code generation started. Use patch format to write code. Remember: strict workspace restrictions are enforced.'
+        });
 
         const MAX_ATTEMPTS = 5;
-        const MAX_NO_CODE = 3;
 
-        let code = null;
-        let no_code_failures = 0;
-        for (let i=0; i<MAX_ATTEMPTS; i++) {
-            if (this.agent.bot.interrupt_code)
-                return null;
-            const messages_copy = JSON.parse(JSON.stringify(messages));
-            let res = await this.agent.prompter.promptCoding(messages_copy);
-            if (this.agent.bot.interrupt_code)
-                return null;
-            let contains_code = res.indexOf('```') !== -1;
-            if (!contains_code) {
-                if (res.indexOf('!newAction') !== -1) {
-                    messages.push({
-                        role: 'assistant', 
-                        content: res.substring(0, res.indexOf('!newAction'))
-                    });
-                    continue; // using newaction will continue the loop
-                }
-                
-                if (no_code_failures >= MAX_NO_CODE) {
-                    console.warn("Action failed, agent would not write code.");
-                    return 'Action failed, agent would not write code.';
-                }
-                messages.push({
-                    role: 'system', 
-                    content: 'Error: no code provided. Write code in codeblock in your response. ``` // example ```'}
-                );
-                console.warn("No code block generated. Trying again.");
-                no_code_failures++;
-                continue;
-            }
-            code = res.substring(res.indexOf('```')+3, res.lastIndexOf('```'));
-            const result = await this._stageCode(code);
-            const executionModule = result.func;
-            const lintResult = await this._lintCode(result.src_lint_copy);
-            if (lintResult) {
-                const message = 'Error: Code lint error:'+'\n'+lintResult+'\nPlease try again.';
-                console.warn("Linting error:"+'\n'+lintResult+'\n');
-                messages.push({ role: 'system', content: message });
-                continue;
-            }
-            if (!executionModule) {
-                console.warn("Failed to stage code, something is wrong.");
-                return 'Failed to stage code, something is wrong.';
-            }
+        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+            if (this.agent.bot.interrupt_code) return null;
 
             try {
-                console.log('Executing code...');
-                await executionModule.main(this.agent.bot);
+                const response = await this.agent.prompter.promptCoding(messages);
+                console.log('=============================');
+                console.log('Response:', response);
+                console.log('=============================');
+                if (!this.patchApplier.isPatchResponse(response)) {
+                    console.log('Response is not in patch format. Please use the required patch syntax with proper workspace paths.');
+                    messages.push({
+                        role: 'system',
+                        content: 'Response is not in patch format. Please use the required patch syntax with proper workspace paths.'
+                    });
+                    continue;
+                }
 
-                const code_output = this.agent.actions.getBotOutputSummary();
-                const summary = "Agent wrote this code: \n```" + this._sanitizeCode(code) + "```\nCode Output:\n" + code_output;
-                return summary;
-            } catch (e) {
-                if (this.agent.bot.interrupt_code)
-                    return null;
+                const patchContent = this.patchApplier.extractPatchFromResponse(response);
                 
-                console.warn('Generated code threw error: ' + e.toString());
-                console.warn('trying again...');
+                // Double security check before applying
+                const preValidation = this.patchApplier.validatePatchWorkspaces(patchContent);
+                if (!preValidation.valid) {
+                    console.log('SECURITY: Workspace violation detected. You can only modify files in: ' + this.patchApplier.allowedWorkspaces.join(', '));
+                    messages.push({
+                        role: 'system',
+                        content: `SECURITY: Workspace violation detected. You can only modify files in: ${this.patchApplier.allowedWorkspaces.join(', ')}`
+                    });
+                    continue;
+                }
+                
+                const patchResult = await this.patchApplier.applyPatch(patchContent, '.');
+                
+                if (!patchResult.success) {
+                    console.log('Patch application failed: ' + patchResult.message);
+                    messages.push({
+                        role: 'system',
+                        content: `Patch application failed: ${patchResult.message}`
+                    });
+                    continue;
+                }
 
-                const code_output = this.agent.actions.getBotOutputSummary();
+                const validationResult = await this.validateGeneratedCode(patchResult.operations);
+                if (!validationResult.success) {
+                    console.log('Code validation failed: ' + validationResult.errors.join('\n'));
+                    messages.push({
+                        role: 'system',
+                        content: `Code validation failed:\n${validationResult.errors.join('\n')}`
+                    });
+                    continue;
+                }
 
-                messages.push({
-                    role: 'assistant',
-                    content: res
-                });
+                const executionResult = await this.executeCode(validationResult.executableFiles);
+                if (executionResult.success) {
+                    console.log('Code executed successfully from ' + validationResult.executableFiles.join(', '));
+                    return executionResult.summary;
+                } else {
+                    console.log('Code execution failed: ' + executionResult.errorMessage);
+                    messages.push({
+                        role: 'assistant',
+                        content: response
+                    });
+                    messages.push({
+                        role: 'system',
+                        content: `Code execution failed: ${executionResult.errorMessage}`
+                    });
+                }
+
+            } catch (error) {
                 messages.push({
                     role: 'system',
-                    content: `Code Output:\n${code_output}\nCODE EXECUTION THREW ERROR: ${e.toString()}\n Please try again:`
+                    content: `Code generation error: ${error.message}`
                 });
+                console.warn(`SECURITY: Attempt ${i + 1} failed: ${error.message}`);
             }
         }
+
         return `Code generation failed after ${MAX_ATTEMPTS} attempts.`;
     }
-    
-    async  _lintCode(code) {
-        let result = '#### CODE ERROR INFO ###\n';
-        // Extract everything in the code between the beginning of 'skills./world.' and the '('
-        const skillRegex = /(?:skills|world)\.(.*?)\(/g;
-        const skills = [];
-        let match;
-        while ((match = skillRegex.exec(code)) !== null) {
-            skills.push(match[1]);
+
+    async validateGeneratedCode(operations) {
+        const errors = [];
+        const executableFiles = [];
+
+        for (const op of operations) {
+            if (op.operation === 'Add' || op.operation === 'Update') {
+                try {
+                    const fileContent = await readFile(op.path, 'utf8');
+                    const lintResult = await this._lintCode(fileContent);
+                    
+                    if (lintResult) {
+                        errors.push(`${op.path}: ${lintResult}`);
+                    } else {
+                        executableFiles.push(op.path);
+                    }
+                } catch (error) {
+                    errors.push(`${op.path}: Failed to read file - ${error.message}`);
+                }
+            }
         }
+
+        return {
+            success: errors.length === 0,
+            errors: errors,
+            executableFiles: executableFiles
+        };
+    }
+
+    async executeCode(executableFiles) {
+        const mainFile = executableFiles.find(f => f.includes('action-code'));
+        if (!mainFile) {
+            return {
+                success: false,
+                errorMessage: 'No executable action-code file found'
+            };
+        }
+
+        try {
+            const fileContent = await readFile(mainFile, 'utf8');
+            
+            const compartment = makeCompartment({
+                skills,
+                log: skills.log,
+                world,
+                Vec3,
+            });
+
+            // Check if it's IIFE format (action-code) or module format (learned-skills)
+            const content = fileContent.trim();
+            const isIIFE = content.match(/^\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)$/m);
+            
+            if (isIIFE) {
+                // Execute IIFE directly
+                const iifeFunction = compartment.evaluate(content);
+                await iifeFunction(this.agent.bot);
+            } else {
+                // Execute as module (for learned-skills)
+                const executionModule = compartment.evaluate(fileContent);
+                if (executionModule.main) {
+                    await executionModule.main(this.agent.bot);
+                } else {
+                    // If it's a skill function, we can't execute it directly
+                    throw new Error('Skill functions cannot be executed directly. They should be called from action-code.');
+                }
+            }
+            
+            const code_output = this.agent.actions.getBotOutputSummary();
+            return {
+                success: true,
+                summary: `Code executed successfully from ${mainFile}\nOutput: ${code_output}`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                errorMessage: `Execution error: ${error.message}`
+            };
+        }
+    }
+    
+    /**
+     * Extract user code from execTemplate format
+     * Handles both IIFE format: (async (bot) => { ... }) and module format
+     */
+    _extractUserCode(fileContent) {
+        // Remove any leading/trailing whitespace
+        const content = fileContent.trim();
+        
+        // Check if it's IIFE format (action-code)
+        const iifeMatch = content.match(/^\(async\s*\(\s*bot\s*\)\s*=>\s*\{([\s\S]*?)\}\)$/m);
+        if (iifeMatch) {
+            return iifeMatch[1].trim();
+        }
+        
+        // Check if it's module format (learned-skills)
+        const moduleMatch = content.match(/^async\s+function\s+\w+\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*module\.exports/m);
+        if (moduleMatch) {
+            return moduleMatch[1].trim();
+        }
+        
+        // If no specific format detected, return as-is
+        return content;
+    }
+    
+    /**
+     * Wrap extracted user code in lintTemplate format for validation
+     */
+    _wrapCodeForLinting(userCode) {
+        if (!this.code_lint_template) {
+            throw new Error('Lint template not loaded yet');
+        }
+        
+        // Replace the /* CODE HERE */ placeholder with the user code
+        const indentedUserCode = userCode.split('\n').map(line => '    ' + line).join('\n');
+        const lintTemplate = this.code_lint_template.replace('/* CODE HERE */', indentedUserCode);
+        
+        return lintTemplate;
+    }
+
+    async _lintCode(code) {
+        let result = '#### CODE ERROR INFO ###\n';
+        
+        // Extract user code from execTemplate format
+        const userCode = this._extractUserCode(code);
+        
+        // Ensure lint template is loaded
+        if (!this.code_lint_template) {
+            await this._loadLintTemplate();
+        }
+        
+        // Wrap in lintTemplate format for validation
+        const lintableCode = this._wrapCodeForLinting(userCode);
+        
+        //------- TODO: remove this,just for debug -------
+        // Save the lintable code to bot's action-code directory for debugging
+        const botName = this.agent.name;
+        const debugFilePath = path.join(__dirname, '../../bots', botName, 'action-code', 'debug_lint_template.js');
+        try {
+            await writeFile(debugFilePath, lintableCode);
+            console.log('Lint template code written to file: ' + debugFilePath);
+        } catch (err) {
+            console.error('Failed to write debug lint template:', err);
+        }
+        //------- TODO: remove this,just for debug -------
+
+        // Check skill functions
+        const skillRegex = /(?:skills|world)\.(.*?)\(/g;
+        const skillsUsed = [];
+        let match;
+        while ((match = skillRegex.exec(userCode)) !== null) {
+            skillsUsed.push(match[1]);
+        }
+        
         const allDocs = await this.agent.prompter.skill_libary.getAllSkillDocs();
-        // check function exists
-        const missingSkills = skills.filter(skill => !!allDocs[skill]);
+        // console.log('$$_lintCode: All docs: ' + JSON.stringify(allDocs));
+        const missingSkills = skillsUsed.filter(skill => !!allDocs[skill]);
+        // console.log('$$_lintCode: Missing skills: ' + JSON.stringify(missingSkills));
         if (missingSkills.length > 0) {
             result += 'These functions do not exist.\n';
             result += '### FUNCTIONS NOT FOUND ###\n';
             result += missingSkills.join('\n');
-            console.log(result)
+            console.log('$$_lintCode: ' + result);
             return result;
         }
 
+        // ESLint check on wrapped code
         const eslint = new ESLint();
-        const results = await eslint.lintText(code);
-        const codeLines = code.split('\n');
+        const results = await eslint.lintText(lintableCode);
+        const codeLines = lintableCode.split('\n');
         const exceptions = results.map(r => r.messages).flat();
 
         if (exceptions.length > 0) {
             exceptions.forEach((exc, index) => {
-                if (exc.line && exc.column ) {
+                if (exc.line && exc.column) {
                     const errorLine = codeLines[exc.line - 1]?.trim() || 'Unable to retrieve error line content';
                     result += `#ERROR ${index + 1}\n`;
                     result += `Message: ${exc.message}\n`;
@@ -145,81 +299,9 @@ export class Coder {
                 }
             });
             result += 'The code contains exceptions and cannot continue execution.';
-        } else {
-            return null;//no error
+            return result;
         }
 
-        return result ;
-    }
-    // write custom code to file and import it
-    // write custom code to file and prepare for evaluation
-    async _stageCode(code) {
-        code = this._sanitizeCode(code);
-        let src = '';
-        code = code.replaceAll('console.log(', 'log(bot,');
-        code = code.replaceAll('log("', 'log(bot,"');
-
-        console.log(`Generated code: """${code}"""`);
-
-        // this may cause problems in callback functions
-        code = code.replaceAll(';\n', '; if(bot.interrupt_code) {log(bot, "Code interrupted.");return;}\n');
-        for (let line of code.split('\n')) {
-            src += `    ${line}\n`;
-        }
-        let src_lint_copy = this.code_lint_template.replace('/* CODE HERE */', src);
-        src = this.code_template.replace('/* CODE HERE */', src);
-
-        let filename = this.file_counter + '.js';
-        // if (this.file_counter > 0) {
-        //     let prev_filename = this.fp + (this.file_counter-1) + '.js';
-        //     unlink(prev_filename, (err) => {
-        //         console.log("deleted file " + prev_filename);
-        //         if (err) console.error(err);
-        //     });
-        // } commented for now, useful to keep files for debugging
-        this.file_counter++;
-        
-        let write_result = await this._writeFilePromise('.' + this.fp + filename, src);
-        // This is where we determine the environment the agent's code should be exposed to.
-        // It will only have access to these things, (in addition to basic javascript objects like Array, Object, etc.)
-        // Note that the code may be able to modify the exposed objects.
-        const compartment = makeCompartment({
-            skills,
-            log: skills.log,
-            world,
-            Vec3,
-        });
-        const mainFn = compartment.evaluate(src);
-        
-        if (write_result) {
-            console.error('Error writing code execution file: ' + result);
-            return null;
-        }
-        return { func:{main: mainFn}, src_lint_copy: src_lint_copy };
-    }
-
-    _sanitizeCode(code) {
-        code = code.trim();
-        const remove_strs = ['Javascript', 'javascript', 'js']
-        for (let r of remove_strs) {
-            if (code.startsWith(r)) {
-                code = code.slice(r.length);
-                return code;
-            }
-        }
-        return code;
-    }
-
-    _writeFilePromise(filename, src) {
-        // makes it so we can await this function
-        return new Promise((resolve, reject) => {
-            writeFile(filename, src, (err) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve();
-                }
-            });
-        });
+        return null; // no error
     }
 }

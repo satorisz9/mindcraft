@@ -191,6 +191,14 @@ export class Prompter {
                 prompt = prompt.replaceAll('$BLUEPRINTS', blueprints.slice(0, -2));
             }
         }
+        if (prompt.includes('$WORKSPACES')) {
+            const workspaces = settings.code_workspaces || [];
+            const workspaceList = workspaces
+                .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
+                .map(ws => `- ${ws}`)
+                .join('\n');
+            prompt = prompt.replaceAll('$WORKSPACES', workspaceList);
+        }
 
         // check if there are any remaining placeholders with syntax $<word>
         let remaining = prompt.match(/\$[A-Z_]+/g);
