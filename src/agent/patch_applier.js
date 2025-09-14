@@ -1,8 +1,8 @@
-import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import settings from '../../settings.js';
+import { applyPatch as applyPatchJS } from '../../apply-patch-js/src/lib.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +10,6 @@ const __dirname = path.dirname(__filename);
 export class PatchApplier {
     constructor(agent) {
         this.agent = agent;
-        this.patchToolPath = path.join(__dirname, '../../apply-patch/target/release/apply_patch');
         this.allowedWorkspaces = this.initializeWorkspaces(agent);
     }
 
@@ -114,11 +113,8 @@ export class PatchApplier {
                 };
             }
 
-            // Ensure the patch tool is built
-            await this.ensurePatchToolBuilt();
-
-            // Apply the patch using the Rust tool via stdin
-            const result = await this.runPatchTool(patchContent, workingDir);
+            // Apply the patch using the JavaScript implementation
+            const result = await this.runPatchToolJS(patchContent, workingDir);
 
             return {
                 ...result,
@@ -135,88 +131,34 @@ export class PatchApplier {
     }
 
     /**
-     * Run the patch tool with the given patch content via stdin
+     * Run the patch tool using the JavaScript implementation
      */
-    async runPatchTool(patchContent, workingDir) {
-        return new Promise((resolve, reject) => {
-            const process = spawn(this.patchToolPath, [], {
-                cwd: workingDir,
-                stdio: ['pipe', 'pipe', 'pipe']
-            });
-
-            let stdout = '';
-            let stderr = '';
-
-            process.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            process.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
-
-            process.on('close', (code) => {
-                if (code === 0) {
-                    resolve({
-                        success: true,
-                        message: stdout || 'Patch applied successfully'
-                    });
-                } else {
-                    resolve({
-                        success: false,
-                        message: stderr || `Patch tool exited with code ${code}`
-                    });
-                }
-            });
-
-            process.on('error', (error) => {
-                reject(error);
-            });
-
-            // Send patch content to stdin
-            process.stdin.write(patchContent);
-            process.stdin.end();
-        });
-    }
-
-    /**
-     * Ensure the patch tool is built
-     */
-    async ensurePatchToolBuilt() {
-        const patchDir = path.join(__dirname, '../../apply-patch');
-        
+    async runPatchToolJS(patchContent, workingDir) {
         try {
-            await fs.access(this.patchToolPath);
+            // Change to the working directory for the patch application
+            const originalCwd = process.cwd();
+            process.chdir(workingDir);
+            
+            try {
+                // Apply the patch using the JavaScript implementation
+                const result = await applyPatchJS(patchContent);
+                
+                return {
+                    success: true,
+                    message: result.message || 'Patch applied successfully'
+                };
+            } finally {
+                // Always restore the original working directory
+                process.chdir(originalCwd);
+            }
         } catch (error) {
-            console.log('Building patch tool...');
-            await this.buildPatchTool(patchDir);
+            return {
+                success: false,
+                message: error.message || 'Patch application failed'
+            };
         }
     }
 
-    /**
-     * Build the patch tool using cargo
-     */
-    async buildPatchTool(patchDir) {
-        return new Promise((resolve, reject) => {
-            const process = spawn('cargo', ['build', '--release'], {
-                cwd: patchDir,
-                stdio: 'inherit'
-            });
-
-            process.on('close', (code) => {
-                if (code === 0) {
-                    console.log('Patch tool built successfully');
-                    resolve();
-                } else {
-                    reject(new Error(`Failed to build patch tool, exit code: ${code}`));
-                }
-            });
-
-            process.on('error', (error) => {
-                reject(error);
-            });
-        });
-    }
 
     /**
      * Generate a patch instruction for AI to edit existing code
