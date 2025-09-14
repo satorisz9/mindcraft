@@ -301,7 +301,7 @@ export const actionsList = [
         {
         name: '!placeHere',
         description: 'Place a given block in the current location. Do NOT use to build structures, only use for single blocks/torches.',
-        params: {'type': { type: 'BlockName', description: 'The block type to place.' }},
+        params: {'type': { type: 'BlockOrItemName', description: 'The block type to place.' }},
         perform: runAsAction(async (agent, type) => {
             let pos = agent.bot.entity.position;
             await skills.placeBlock(agent.bot, type, pos.x, pos.y, pos.z);
@@ -382,6 +382,26 @@ export const actionsList = [
             agent.self_prompter.stop();
             return 'Self-prompting stopped.';
         }
+    },
+    {
+        name: '!showVillagerTrades',
+        description: 'Show trades of a specified villager.',
+        params: {'id': { type: 'int', description: 'The id number of the villager that you want to trade with.' }},
+        perform: runAsAction(async (agent, id) => {
+            await skills.showVillagerTrades(agent.bot, id);
+        })
+    },
+    {
+        name: '!tradeWithVillager',
+        description: 'Trade with a specified villager.',
+        params: {
+            'id': { type: 'int', description: 'The id number of the villager that you want to trade with.' },
+            'index': { type: 'int', description: 'The index of the trade you want executed (1-indexed).', domain: [1, Number.MAX_SAFE_INTEGER] },
+            'count': { type: 'int', description: 'How many times that trade should be executed.', domain: [1, Number.MAX_SAFE_INTEGER] },
+        },
+        perform: runAsAction(async (agent, id, index, count) => {
+            await skills.tradeWithVillager(agent.bot, id, index, count);
+        })
     },
     {
         name: '!startConversation',
