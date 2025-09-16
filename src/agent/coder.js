@@ -37,7 +37,7 @@ export class Coder {
             content: 'Code generation started. Use patch format to write code. Remember: strict workspace restrictions are enforced.'
         });
 
-        const MAX_ATTEMPTS = 1;
+        const MAX_ATTEMPTS = 5;
 
         for (let i = 0; i < MAX_ATTEMPTS; i++) {
             if (this.agent.bot.interrupt_code) return null;
