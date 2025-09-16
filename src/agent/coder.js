@@ -37,7 +37,7 @@ export class Coder {
             content: 'Code generation started. Use patch format to write code. Remember: strict workspace restrictions are enforced.'
         });
 
-        const MAX_ATTEMPTS = 5;
+        const MAX_ATTEMPTS = 1;
 
         for (let i = 0; i < MAX_ATTEMPTS; i++) {
             if (this.agent.bot.interrupt_code) return null;
@@ -90,22 +90,41 @@ export class Coder {
                     continue;
                 }
 
-                const executionResult = await this.executeCode(validationResult.executableFiles);
-                if (executionResult.success) {
-                    console.log('Code executed successfully from ' + validationResult.executableFiles.join(', '));
-                    return executionResult.summary;
-                } else {
-                    console.log('Code execution failed: ' + executionResult.errorMessage);
-                    messages.push({
-                        role: 'assistant',
-                        content: response
-                    });
-                    messages.push({
-                        role: 'system',
-                        content: `Code execution failed: ${executionResult.errorMessage}`
-                    });
-                }
+                // Filter executable files to only include action-code files
+                const actionCodePath = path.normalize(`bots/${this.agent.name}/action-code`);
+                const executableActionFiles = validationResult.executableFiles.filter(file => {
+                    const normalizedFile = path.normalize(file);
+                    return normalizedFile.startsWith(actionCodePath + path.sep) || 
+                           normalizedFile === actionCodePath;
+                });
 
+                // Generate operation summary for reporting
+                const operationSummary = patchResult.operations.map(op => 
+                    `${op.operation}: ${op.path}`
+                ).join(', ');
+
+                // Check if we have action-code files to execute
+                if (executableActionFiles.length === 0) {
+                    console.log('No executable action-code files found. Code validation completed but no execution needed.');
+                    return `Code files created/updated successfully: ${operationSummary}. No action-code files to execute.`;
+                }else{
+                    // Execute action-code files
+                    const executionResult = await this.executeCode(executableActionFiles);
+                    if (executionResult.success) {
+                        console.log('Code executed successfully from ' + executableActionFiles.join(', '));
+                        return `${operationSummary}. ${executionResult.summary}`;
+                    } else {
+                        console.log('Code execution failed: ' + executionResult.errorMessage);
+                        messages.push({
+                            role: 'assistant',
+                            content: response
+                        });
+                        messages.push({
+                            role: 'system',
+                            content: `Code execution failed: ${executionResult.errorMessage}`
+                        });
+                    }                    
+                }
             } catch (error) {
                 messages.push({
                     role: 'system',
