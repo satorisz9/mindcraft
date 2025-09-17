@@ -176,11 +176,19 @@ export class Prompter {
             let goal_text = '';
             for (let goal in last_goals) {
                 if (last_goals[goal])
-                    goal_text += `You recently successfully completed the goal ${goal}.\n`
+                    goal_text += `You recently successfully completed the goal ${goal}.\n`;
                 else
-                    goal_text += `You recently failed to complete the goal ${goal}.\n`
+                    goal_text += `You recently failed to complete the goal ${goal}.\n`;
             }
             prompt = prompt.replaceAll('$LAST_GOALS', goal_text.trim());
+        }
+        if (prompt.includes('$TOOLS')) {
+            // Get tool descriptions from ToolManager for JSON tool commands
+            let toolDescriptions = '';
+            if (this.agent.coder && this.agent.coder.codeToolsManager) {
+                toolDescriptions = this.agent.coder.codeToolsManager.getFormattedToolDescriptions();
+            }
+            prompt = prompt.replaceAll('$TOOLS', toolDescriptions);
         }
         if (prompt.includes('$BLUEPRINTS')) {
             if (this.agent.npc.constructions) {
@@ -192,7 +200,7 @@ export class Prompter {
             }
         }
         if (prompt.includes('$WORKSPACES')) {
-            const workspaces = settings.code_workspaces || [];
+            const workspaces = this.agent.code_workspaces || [];
             const workspaceList = workspaces
                 .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
                 .map(ws => `- ${ws}`)
@@ -256,8 +264,8 @@ export class Prompter {
             }
 
             if (generation?.includes('</think>')) {
-                const [_, afterThink] = generation.split('</think>')
-                generation = afterThink
+                const [_, afterThink] = generation.split('</think>');
+                generation = afterThink;
             }
 
             return generation;
@@ -289,7 +297,7 @@ export class Prompter {
         let resp = await this.chat_model.sendRequest([], prompt);
         await this._saveLog(prompt, to_summarize, resp, 'memSaving');
         if (resp?.includes('</think>')) {
-            const [_, afterThink] = resp.split('</think>')
+            const [_, afterThink] = resp.split('</think>');
             resp = afterThink;
         }
         return resp;
