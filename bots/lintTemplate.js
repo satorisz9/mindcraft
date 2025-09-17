@@ -6,5 +6,6 @@ const log = skills.log;
 
 export async function main(bot) {
     /* CODE HERE */
+    await Promise.resolve(); // Ensure function has await expression for ESLint
     log(bot, 'Code finished.');
 }
