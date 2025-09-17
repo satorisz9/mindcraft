@@ -27,6 +27,8 @@ export class Agent {
         this.prompter = new Prompter(this, settings.profile);
         this.name = this.prompter.getName();
         console.log(`Initializing agent ${this.name}...`);
+        
+        this.code_workspaces = settings.code_workspaces;
         this.history = new History(this);
         this.coder = new Coder(this);
         this.npc = new NPCContoller(this);
