@@ -1,5 +1,5 @@
 const settings = {
-    "minecraft_version": "auto", // or specific version like "1.21.6"
+    "minecraft_version": "1.21.1", // or specific version like "1.21.6"
     "host": "127.0.0.1", // or "localhost", "your.ip.address.here"
     "port": 55916, // set to -1 to automatically scan for open ports
     "auth": "offline", // or "microsoft"
@@ -10,12 +10,12 @@ const settings = {
     
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [
-        "./andy.json",
+        // "./andy.json",
         // "./profiles/gpt.json",
         // "./profiles/claude.json",
         // "./profiles/gemini.json",
         // "./profiles/llama.json",
-        // "./profiles/qwen.json",
+        "./profiles/qwen.json",
         // "./profiles/grok.json",
         // "./profiles/mistral.json",
         // "./profiles/deepseek.json",
@@ -26,7 +26,7 @@ const settings = {
         // individual profiles override values from the base profile
     ],
 
-    "load_memory": false, // load memory from previous session
+    "load_memory": true, // load memory from previous session
     "init_message": "Respond with hello world and your name", // sends to all on spawn
     "only_chat_with": [], // users that the bots listen to and send general messages to. if empty it will chat publicly
 
@@ -40,7 +40,7 @@ const settings = {
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
     "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
 
-    "allow_insecure_coding": false, // allows newAction command and model can write/run code on your computer. enable at own risk
+    "allow_insecure_coding": true, // allows newAction command and model can write/run code on your computer. enable at own risk
     "allow_vision": false, // allows vision model to interpret screenshots as inputs
     "blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"] , // commands to disable and remove from docs. Ex: ["!setMode"]
     "code_timeout_mins": -1, // minutes code is allowed to run. -1 for no timeout
@@ -48,8 +48,9 @@ const settings = {
 
     // code workspace configuration - strictly enforced security measure
     "code_workspaces": [
-        "bots/{BOT_NAME}/action-code",
-        "bots/{BOT_NAME}/learned-skills"
+        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/action-code",
+        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/learned-skills",
+        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/"
     ],
 
     "max_messages": 15, // max number of messages to keep in context
@@ -61,7 +62,7 @@ const settings = {
 
     "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
   
-    "log_all_prompts": false, // log ALL prompts to file
-}
+    "log_all_prompts": true, // log ALL prompts to file
+};
 
 export default settings;
