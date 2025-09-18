@@ -113,10 +113,17 @@ export class Prompter {
             this.convo_examples = new Examples(this.embedding_model, settings.num_examples);
             this.coding_examples = new Examples(this.embedding_model, settings.num_examples);
             
+            const processedCodingExamples = this.profile.coding_examples.map(example => 
+                example.map(turn => ({
+                    ...turn,
+                    content: turn.content.replaceAll('$NAME', this.agent.name)
+                }))
+            );
+            
             // Wait for both examples to load before proceeding
             await Promise.all([
                 this.convo_examples.load(this.profile.conversation_examples),
-                this.coding_examples.load(this.profile.coding_examples),
+                this.coding_examples.load(processedCodingExamples),
                 this.skill_libary.initSkillLibrary()
             ]).catch(error => {
                 // Preserve error details
@@ -153,11 +160,14 @@ export class Prompter {
             const code_task_content = messages.slice().reverse().find(msg =>
                 msg.role !== 'system' && msg.content.includes('!newAction(')
             )?.content?.match(/!newAction\((.*?)\)/)?.[1] || '';
-
             prompt = prompt.replaceAll(
-                '$CODE_DOCS',
-                await this.skill_libary.getRelevantSkillDocs(code_task_content, settings.relevant_docs_count)
+                '$CODE_DOCS',await this.skill_libary.getAllSkillDocs()
             );
+            // prompt = prompt.replaceAll(
+            //     '$CODE_DOCS',
+            //     await this.skill_libary.getRelevantSkillDocs(code_task_content, settings.relevant_docs_count)
+            // );
+            
         }
         if (prompt.includes('$EXAMPLES') && examples !== null)
             prompt = prompt.replaceAll('$EXAMPLES', await examples.createExampleMessage(messages));
@@ -212,6 +222,26 @@ export class Prompter {
         let remaining = prompt.match(/\$[A-Z_]+/g);
         if (remaining !== null) {
             console.warn('Unknown prompt placeholders:', remaining.join(', '));
+        }
+        // Write prompt to log file with proper formatting
+        try {
+            const fs = await import('fs');
+            const path = await import('path');
+            
+            const logsDir = path.default.join(__dirname, '../../logs');
+            if (!fs.default.existsSync(logsDir)) {
+                fs.default.mkdirSync(logsDir, { recursive: true });
+            }
+            
+            const logFile = path.default.join(logsDir, 'prompt-test.md');
+            const timestamp = new Date().toISOString();
+            // Convert \n escape sequences to actual newlines for better readability
+            const formattedPrompt = prompt.replace(/\\n/g, '\n');
+            const logEntry = `\n## Prompt Generated at ${timestamp}\n\n\`\`\`\n${formattedPrompt}\n\`\`\`\n\n---\n`;
+            
+            fs.default.appendFileSync(logFile, logEntry, 'utf8');
+        } catch (error) {
+            console.warn('Failed to write prompt to log file:', error.message);
         }
         return prompt;
     }
@@ -280,14 +310,31 @@ export class Prompter {
             return '```//no response```';
         }
         this.awaiting_coding = true;
-        await this.checkCooldown();
-        let prompt = this.profile.coding;
-        prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
+        
+        try {
+            await this.checkCooldown();
+            
+            // Read prompt from coding.md file if it exists, otherwise use profile.coding
+            let prompt;
+            try {
+                const codingMdPath = './profiles/defaults/coding.md';
+                prompt = await fs.readFile(codingMdPath, 'utf8');
+            } catch (error) {
+                console.log('coding.md not found, using profile.coding');
+                prompt = this.profile.coding;
+            }
+            
+            prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
 
-        let resp = await this.code_model.sendRequest(messages, prompt);
-        this.awaiting_coding = false;
-        await this._saveLog(prompt, messages, resp, 'coding');
-        return resp;
+            let resp = await this.code_model.sendRequest(messages, prompt);
+            await this._saveLog(prompt, messages, resp, 'coding');
+            return resp;
+        } catch (error) {
+            console.error('Error in promptCoding:', error.message);
+            throw error;
+        } finally {
+            this.awaiting_coding = false;
+        }
     }
 
     async promptMemSaving(to_summarize) {
