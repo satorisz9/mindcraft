@@ -84,33 +84,24 @@ export class LintTool {
             const { file_path, file_paths, operations } = params;
             
             let filesToValidate = [];
-            //console.log('=============Lint files1=============');
             // Determine which files to validate
             if (operations && Array.isArray(operations)) {
-                //console.log('=============Lint files2=============');
                 // Validate files from tool operations
                 filesToValidate = operations
                     .filter(op => op.tool === 'Write' || op.tool === 'Edit' || op.tool === 'MultiEdit')
                     .map(op => op.path);
-                //console.log('=============Files to validate:=============');
                 console.log(filesToValidate);
             } else if (file_paths && Array.isArray(file_paths)) {
-                //console.log('=============Lint files3=============');
                 filesToValidate = file_paths;
             } else if (file_path) {
-                //console.log('=============Lint files4=============');
                 filesToValidate = [file_path];
             } else {
                 throw new Error('[Lint Tool] Missing required parameter: file_path, file_paths, or operations');
             }
-            //console.log('=============Lint files5=============');
             const errors = [];
             const executableFiles = [];
-            //console.log('=============Lint files6=============');
             for (const filePath of filesToValidate) {
-                //console.log('=============Lint files7=============');
                 try {
-                    //console.log('=============Lint files8=============');
                     // Validate file path is absolute
                     if (!path.isAbsolute(filePath)) {
                         errors.push(`${filePath}: File path must be absolute`);
@@ -119,9 +110,7 @@ export class LintTool {
 
                     // Read and validate file
                     const fileContent = await readFile(filePath, 'utf8');
-                    //console.log('=============Lint files9=============');
                     const lintResult = await this._lintCode(fileContent, this.agent);
-                    //console.log('=============Lint files10=============');
                     
                     if (lintResult) {
                         errors.push(`${filePath}: ${lintResult}`);
@@ -129,16 +118,22 @@ export class LintTool {
                         executableFiles.push(filePath);
                     }
                 } catch (error) {
-                    //console.log('=============Lint files11=============');
                     errors.push(`${filePath}: Failed to read file - ${error.message}`);
                 }
             }
-            //console.log('=============Lint files12=============');
+            let message;
+            if (errors.length === 0) {
+                message = `## Lint Validation Success ##\nSuccessfully validated ${filesToValidate.length} file(s)\n\nExecutable files:\n${executableFiles.map(f => `- ${f}`).join('\n')}`;
+            } else {
+                message = `## Lint Validation Failed ##\nValidation failed for ${errors.length} file(s)\n\nErrors:\n${errors.map(e => `- ${e}`).join('\n')}`;
+                if (executableFiles.length > 0) {
+                    message += `\n\nValid files:\n${executableFiles.map(f => `- ${f}`).join('\n')}`;
+                }
+            }
+
             return {
                 success: errors.length === 0,
-                message: errors.length === 0 
-                    ? `Successfully validated ${filesToValidate.length} file(s)`
-                    : `Validation failed for ${errors.length} file(s)`,
+                message: message,
                 errors: errors,
                 executableFiles: executableFiles,
                 validatedCount: filesToValidate.length,
@@ -146,16 +141,13 @@ export class LintTool {
             };
 
         } catch (error) {
-            //console.log('=============Lint files13=============');
             return {
                 success: false,
-                message: `## Lint Tool Error ##\n**Error:** ${error.message}`
+                message: `## Lint Tool unused ##\n**Error:** ${error.message}`
             };
         }
     }
 
-    // Removed legacy code extraction and wrapping methods
-    // Now supporting native ES6 modules directly
 
     /**
      * Lint JavaScript code for syntax and skill validation
@@ -164,7 +156,7 @@ export class LintTool {
      * @returns {string|null} Error message or null if valid
      */
     async _lintCode(code) {
-        let result = '#### CODE LINT ERROR INFO ###\n';
+        let result = '\n#### CODE LINT ERROR INFO ###\n';
         
         try {
             // Lint the code directly without extraction or wrapping
@@ -189,12 +181,13 @@ export class LintTool {
                 return skillMatch ? skillMatch[1] : (worldMatch ? worldMatch[1] : null);
             }).filter(Boolean);
             
-            const missingSkills = skills.filter(skill => !availableSkills.includes(skill));
+            let missingSkills = skills.filter(skill => !availableSkills.includes(skill));
             if (missingSkills.length > 0) {
                 result += '## Missing Functions ##\n';
                 result += 'The following functions do not exist:\n';
                 result += missingSkills.map(skill => `- ${skill}`).join('\n');
-                console.log(result);
+                result += '\n##Relevant skills:\n' + await this.agent.prompter.skill_libary.getRelevantSkillDocs(missingSkills.map(skill => `- ${skill}`).join('\n'), 2) + '\n';
+                // console.log(result);
                 return result;
             }
 

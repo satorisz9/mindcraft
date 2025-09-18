@@ -111,9 +111,17 @@ export class ReadTool {
             const truncated = offset !== undefined || limit !== undefined;
             const fullLength = lines.length;
 
+            const fileName = path.basename(file_path);
+            const sizeInfo = `${stats.size} bytes`;
+            const lineInfo = truncated ? 
+                `lines ${startLine}-${endLine} of ${fullLength}` : 
+                `${fullLength} lines`;
+            
+            const message = `<file name="${fileName}" ${truncated ? `start_line="${startLine}" end_line="${endLine}" ` : ''}full_length="${fullLength}">\n${formattedContent}\n</file>`;
+
             return {
                 success: true,
-                message: `Read ${path.basename(file_path)} (${stats.size} bytes)`,
+                message: message,
                 file_path,
                 size: stats.size,
                 start_line: startLine,

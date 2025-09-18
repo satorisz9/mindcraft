@@ -7,6 +7,9 @@ import { LSTool } from './ls.js';
 import { ReadTool } from './read.js';
 import { ExecuteTool } from './execute.js';
 import { LintTool } from './lint.js';
+import { TodoWriteTool } from './todoWrite.js';
+import fs from 'fs';
+import path from 'path';
 
 // ANSI color codes for console output
 const colors = {
@@ -28,7 +31,7 @@ const colors = {
 };
 
 /**
- * Tool Manager - Manages all available tools, executes commands, and provides tool descriptions for prompts
+ * Tool Manager - Manages all available tools, executes tools, and provides tool descriptions for prompts
  */
 export class ToolManager {
     constructor(agent = null) {
@@ -73,6 +76,7 @@ export class ToolManager {
         this.tools.set('Grep', new GrepTool(this.agent));
         this.tools.set('LS', new LSTool(this.agent));
         this.tools.set('Read', readTool);
+        this.tools.set('TodoWrite', new TodoWriteTool(this.agent));
 
         // Set tool registry for cross-tool communication
         readTool.setToolRegistry(this.tools);
@@ -127,24 +131,24 @@ export class ToolManager {
     }
 
     /**
-     * Execute multiple commands in sequence
-     * @param {Array} commands - Array of command objects
+     * Execute multiple tools in sequence
+     * @param {Array} tools - Array of command objects
      * @returns {Array} Array of execution results
      */
-    async executeCommands(commands) {
+    async executetools(tools) {
         const results = [];
         
-        // Validate commands parameter
-        if (!commands || !Array.isArray(commands)) {
-            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} executeCommands: commands parameter is not a valid array`);
+        // Validate tools parameter
+        if (!tools || !Array.isArray(tools)) {
+            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} executetools: tools parameter is not a valid array`);
             return results;
         }
         
-        console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Executing ${colors.brightMagenta}${commands.length}${colors.reset} command(s)...`);
+        console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Executing ${colors.brightMagenta}${tools.length}${colors.reset} command(s)...`);
         
-        for (let i = 0; i < commands.length; i++) {
-            const command = commands[i];
-            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Command ${colors.brightMagenta}${i + 1}/${commands.length}${colors.reset}:`);
+        for (let i = 0; i < tools.length; i++) {
+            const command = tools[i];
+            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Command ${colors.brightMagenta}${i + 1}/${tools.length}${colors.reset}:`);
             
             const result = await this.executeCommand(command);
             results.push(result);
@@ -159,9 +163,9 @@ export class ToolManager {
         const failureCount = results.length - successCount;
         
         if (failureCount === 0) {
-            console.log(`${colors.brightGreen}[OK] [ToolManager]${colors.reset} All ${colors.brightMagenta}${commands.length}${colors.reset} commands executed successfully`);
+            console.log(`${colors.brightGreen}[OK] [ToolManager]${colors.reset} All ${colors.brightMagenta}${tools.length}${colors.reset} tools executed successfully`);
         } else {
-            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} Commands completed: ${colors.brightGreen}${successCount} success${colors.reset}, ${colors.brightRed}${failureCount} failed${colors.reset}`);
+            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} tools completed: ${colors.brightGreen}${successCount} success${colors.reset}, ${colors.brightRed}${failureCount} failed${colors.reset}`);
         }
         
         return results;
@@ -185,9 +189,9 @@ export class ToolManager {
     }
 
     /**
-     * Check if a response contains JSON tool commands
+     * Check if a response contains JSON tool tools
      * @param {string} response - The response text to check
-     * @returns {boolean} True if response contains JSON commands
+     * @returns {boolean} True if response contains JSON tools
      */
     isJSONToolResponse(response) {
         if (!response || typeof response !== 'string') {
@@ -285,15 +289,15 @@ export class ToolManager {
     }
 
     /**
-     * Extract JSON commands from a response
+     * Extract JSON tools from a response
      * @param {string} response - The response text
      * @returns {Array} Array of command objects
      */
-    extractJSONCommands(response) {
-        const commands = [];
+    extractJSONtools(response) {
+        const tools = [];
         
         if (!response || typeof response !== 'string') {
-            return commands;
+            return tools;
         }
 
         // Strategy 1: Try to parse the entire response as JSON first
@@ -307,25 +311,25 @@ export class ToolManager {
                     if (cmd && typeof cmd === 'object' && cmd.name) {
                         // Create command object with tool name and params
                         const { name, ...params } = cmd;
-                        commands.push({ tool: name, params });
+                        tools.push({ tool: name, params });
                     }
                 }
             }
-            // Handle legacy formats: single commands and arrays
+            // Handle legacy formats: single tools and arrays
             else if (Array.isArray(parsed)) {
                 for (const cmd of parsed) {
                     if (cmd && typeof cmd === 'object' && cmd.tool) {
-                        commands.push(cmd);
+                        tools.push(cmd);
                     }
                 }
             } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                commands.push(parsed);
+                tools.push(parsed);
             }
             
-            // If we successfully parsed JSON and found commands, return them
-            if (commands.length > 0) {
-                console.log(`Extracted ${commands.length} JSON command(s) from direct parsing`);
-                return commands;
+            // If we successfully parsed JSON and found tools, return them
+            if (tools.length > 0) {
+                console.log(`Extracted ${tools.length} JSON command(s) from direct parsing`);
+                return tools;
             }
         } catch (error) {
             // Direct parsing failed, continue to code block parsing
@@ -348,13 +352,13 @@ export class ToolManager {
                         if (cmd && typeof cmd === 'object' && cmd.name) {
                             // Create command object with tool name and params
                             const { name, ...params } = cmd;
-                            commands.push({ tool: name, params });
+                            tools.push({ tool: name, params });
                         }
                     }
                 }
                 // Check if this is a legacy tool command
                 else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                    commands.push(parsed);
+                    tools.push(parsed);
                 }
             } catch (error) {
                 // Continue to next match
@@ -362,10 +366,10 @@ export class ToolManager {
             }
         }
         
-        // If we found commands from object extraction, return them
-        if (commands.length > 0) {
-            console.log(`Extracted ${commands.length} JSON command(s) from object parsing`);
-            return commands;
+        // If we found tools from object extraction, return them
+        if (tools.length > 0) {
+            console.log(`Extracted ${tools.length} JSON command(s) from object parsing`);
+            return tools;
         }
 
         // Strategy 3: Look for code block wrapped JSON (original behavior)
@@ -376,46 +380,46 @@ export class ToolManager {
                 const jsonContent = match[1].trim();
                 const parsed = JSON.parse(jsonContent);
                 
-                // Handle both single commands and arrays
+                // Handle both single tools and arrays
                 if (Array.isArray(parsed)) {
                     for (const cmd of parsed) {
                         if (cmd && typeof cmd === 'object' && cmd.tool) {
-                            commands.push(cmd);
+                            tools.push(cmd);
                         }
                     }
                 } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                    commands.push(parsed);
+                    tools.push(parsed);
                 }
             } catch (error) {
                 console.warn('Failed to parse JSON command from code block:', error.message);
             }
         }
         
-        if (commands.length > 0) {
-            console.log(`Extracted ${commands.length} JSON command(s) from code blocks`);
+        if (tools.length > 0) {
+            console.log(`Extracted ${tools.length} JSON command(s) from code blocks`);
         } else {
-            console.log('No valid JSON commands found in response');
+            console.log('No valid JSON tools found in response');
         }
         
-        return commands;
+        return tools;
     }
 
     /**
-     * Validate that commands only operate within allowed workspaces
-     * @param {Array} commands - Array of command objects
+     * Validate that tools only operate within allowed workspaces
+     * @param {Array} tools - Array of command objects
      * @returns {Object} Validation result
      */
-    validateCommandWorkspaces(commands) {
+    validateCommandWorkspaces(tools) {
         try {
-            if (!Array.isArray(commands)) {
-                //console.log(`SECURITY: validateCommandWorkspaces - commands is not an array: ${typeof commands}`);
-                return { valid: false, error: 'Commands must be an array' };
+            if (!Array.isArray(tools)) {
+                //console.log(`SECURITY: validateCommandWorkspaces - tools is not an array: ${typeof tools}`);
+                return { valid: false, error: 'tools must be an array' };
             }
 
-            //console.log(`SECURITY: validateCommandWorkspaces - processing ${commands.length} commands`);
+            //console.log(`SECURITY: validateCommandWorkspaces - processing ${tools.length} tools`);
             //console.log(`SECURITY: validateCommandWorkspaces - this.workspaces:`, this.workspaces);
 
-            for (const command of commands) {
+            for (const command of tools) {
                 if (!command || !command.params) {
                     //console.log(`SECURITY: validateCommandWorkspaces - skipping command without params:`, command);
                     continue;
@@ -437,9 +441,11 @@ export class ToolManager {
                 }
 
                 const normalizedPath = filePath.substring(1); // Remove leading '/'
-                const isAllowed = (this.workspaces || []).some(workspace => 
-                    normalizedPath.startsWith(workspace + '/') || normalizedPath === workspace
-                );
+                const isAllowed = (this.workspaces || []).some(workspace => {
+                    // Remove trailing slash from workspace for consistent comparison
+                    const cleanWorkspace = workspace.endsWith('/') ? workspace.slice(0, -1) : workspace;
+                    return normalizedPath.startsWith(cleanWorkspace + '/') || normalizedPath === cleanWorkspace;
+                });
 
                 if (!isAllowed) {
                     //console.log(`SECURITY: Blocked file access outside workspace: ${filePath}`);
@@ -455,46 +461,49 @@ export class ToolManager {
         } catch (error) {
             console.error(`SECURITY: validateCommandWorkspaces - Error in validation:`, error);
             console.error(`SECURITY: validateCommandWorkspaces - Error stack:`, error.stack);
-            console.error(`SECURITY: validateCommandWorkspaces - Commands:`, JSON.stringify(commands, null, 2));
+            console.error(`SECURITY: validateCommandWorkspaces - tools:`, JSON.stringify(tools, null, 2));
             console.error(`SECURITY: validateCommandWorkspaces - this.workspaces:`, this.workspaces);
             return { 
                 valid: false, 
-                error: `Workspace validation failed: ${error.message}. Commands type: ${typeof commands}, workspaces: ${this.workspaces}` 
+                error: `Workspace validation failed: ${error.message}. tools type: ${typeof tools}, workspaces: ${this.workspaces}` 
             };
         }
     }
 
     /**
-     * Execute JSON commands with workspace validation
-     * @param {Array} commands - Array of command objects
+     * Execute JSON tools with workspace validation
+     * @param {Array} tools - Array of command objects
      * @returns {Object} Execution result
      */
-    async executeJSONCommands(commands) {
+    async executeJSONtools(tools) {
+        let message = '';
         try {
-            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Starting JSON commands execution...`);
-            
+            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Starting JSON tools execution...`);
             // Validate workspaces
-            const validation = this.validateCommandWorkspaces(commands);
+            const validation = this.validateCommandWorkspaces(tools);
+  
             if (!validation.valid) {
+                message += `Workspace validation failed: ${validation.error}`;
                 console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} Workspace validation failed: ${validation.error}`);
                 return {
                     success: false,
-                    message: validation.error
+                    message: message
                 };
             }
-            
+            message += `Workspace validation passed`;
             console.log(`${colors.brightGreen}[·] [ToolManager]${colors.reset} Workspace validation passed`);
 
-            // Execute commands
-            const results = await this.executeCommands(commands) || [];
+            // Execute tools
+            const results = await this.executetools(tools) || [];
             const successCount = results.filter(r => r.success !== false).length;
             const failedResults = results.filter(r => r.success === false);
 
             if (failedResults.length > 0) {
-                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON commands execution failed: ${failedResults.length} command(s) failed`);
+                message += `${failedResults.length} tools failed: ${failedResults.map(r => r.error).join(', ')}`;
+                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON tools execution failed: ${failedResults.length} command(s) failed`);
                 return {
                     success: false,
-                    message: `${failedResults.length} commands failed: ${failedResults.map(r => r.error).join(', ')}`,
+                    message: message,
                     results
                 };
             }
@@ -507,25 +516,26 @@ export class ToolManager {
                 path: r.file_path
             }));
             
-            console.log(`${colors.brightGreen}[>] [ToolManager]${colors.reset} JSON commands execution completed successfully`);
-            
+            console.log(`${colors.brightGreen}[>] [ToolManager]${colors.reset} JSON tools execution completed successfully`);
+            message += executedTools;
             return {
                 success: true,
-                message: `JSON tool used successfully: ${executedTools}`,
+                message: message,
                 results,
                 operations
             };
         } catch (error) {
-            console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON commands execution error: ${error.message}`);
+            console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON tools execution error: ${error.message}`);
+            message += `Execution error: ${error.message}`;
             return {
                 success: false,
-                message: `Execution error: ${error.message}`
+                message: message
             };
         }
     }
 
     /**
-     * Process a response and execute any JSON commands found
+     * Process a response and execute any JSON tools found
      * @param {string} response - The response text
      * @returns {Object} Processing result
      */
@@ -533,21 +543,21 @@ export class ToolManager {
         if (!this.isJSONToolResponse(response)) {
             return {
                 success: true,
-                message: 'No JSON tool commands found in response'
+                message: 'No JSON tool tools found in response'
             };
         }
 
-        console.log('Detected JSON tool commands in response');
-        const commands = this.extractJSONCommands(response);
+        console.log('Detected JSON tool tools in response');
+        const tools = this.extractJSONtools(response);
         
-        if (commands.length === 0) {
+        if (tools.length === 0) {
             return {
                 success: false,
-                message: 'Failed to extract valid JSON commands'
+                message: 'Failed to extract valid JSON tools'
             };
         }
 
-        return await this.executeJSONCommands(commands);
+        return await this.executeJSONtools(tools);
     }
 
     /**
@@ -571,12 +581,63 @@ export class ToolManager {
     }
 
     /**
+     * Check if TODOLIST.md is empty or doesn't exist
+     * @returns {boolean} True if todo list is empty or doesn't exist
+     */
+    isTodoListEmpty() {
+        if (!this.agent || !this.agent.name) {
+            return true;
+        }
+        
+        // Get the base directory from the current module path
+        const currentDir = path.dirname(new URL(import.meta.url).pathname);
+        const projectRoot = path.resolve(currentDir, '..');
+        const todoFilePath = path.join(projectRoot, 'bots', this.agent.name, 'TODOLIST.md');
+        
+        try {
+            if (!fs.existsSync(todoFilePath)) {
+                return true;
+            }
+            
+            const content = fs.readFileSync(todoFilePath, 'utf8').trim();
+            
+            // Check if file is empty or only contains basic structure without actual todos
+            if (!content) {
+                return true;
+            }
+            
+            // Check if file only contains header and no actual todo items
+            const lines = content.split('\n').filter(line => line.trim());
+            const todoLines = lines.filter(line => line.trim().startsWith('- ['));
+            
+            return todoLines.length === 0;
+        } catch (error) {
+            // If there's an error reading the file, consider it empty
+            return true;
+        }
+    }
+
+    /**
      * Generate formatted tool descriptions for prompts
      * @returns {string} Formatted tool descriptions
      */
     getFormattedToolDescriptions() {
-        const descriptions = this.getToolDescriptions();
-        return JSON.stringify(descriptions, null, 2);
+        try {
+            const toolsPromptPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'tools-prompt.md');
+            let content = fs.readFileSync(toolsPromptPath, 'utf8');
+            
+            // Check if todo list is empty and add system reminder
+            if (this.isTodoListEmpty()) {
+                content += '\n\n<system-reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a todo list please use the TodoWrite tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.</system-reminder>';
+            }
+            
+            return content;
+        } catch (error) {
+            console.error('Error reading tools-prompt.md:', error);
+            // Fallback to original method if file reading fails
+            const descriptions = this.getToolDescriptions();
+            return JSON.stringify(descriptions, null, 2);
+        }
     }
 
 }

@@ -65,34 +65,34 @@ export class ExecuteTool {
      */
     async execute(params) {
         try {
-            //console.log("=============execute file1=============");
+
             const { file_path, executable_files, description } = params;
-            //console.log("=============execute file2=============");
+
             if (!this.agent || !this.agent.bot) {
                 throw new Error('[Execute Tool] Agent with bot context is required for execution');
             }
-            //console.log("=============execute file3=============");
+
             let targetFile = file_path;
-            //console.log("=============execute file4=============");
+
             // If executable_files array is provided, find the main action-code file
             if (executable_files && Array.isArray(executable_files)) {
-                //console.log("=============execute file5=============");
+
                 if (executable_files.length === 0) {
-                    //console.log("=============execute file6=============");
+
                     return {
-                        success: true,
-                        message: 'No executable action-code files to execute',
-                        summary: 'Code validation completed but no execution needed'
+                        success: false,
+                        message: 'No executable action-code files found - code generation may have failed',
+
                     };
                 }
-                //console.log("=============execute file6=============");
+
                 // Find the main action-code file
                 targetFile = executable_files.find(f => f.includes('action-code'));
                 if (!targetFile) {
                     return {
-                        success: true,
-                        message: 'No executable action-code file found',
-                        summary: 'No action-code files to execute'
+                        success: false,
+                        message: 'No executable action-code file found in provided files',
+
                     };
                 }
             }
@@ -150,7 +150,7 @@ export class ExecuteTool {
             });
 
             // Execute IIFE format with enhanced error tracking
-            //console.log("=============execute file20=============");
+
             const content = fileContent.trim();
             const isIIFE = content.match(/^\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)$/m);
             
@@ -158,7 +158,6 @@ export class ExecuteTool {
                 throw new Error(`[Execute Tool] Unsupported code format. Only IIFE format is supported: (async (bot) => { ... })`);
             }
             
-            //console.log("=============execute file21=============");
             // Create enhanced error tracking wrapper for IIFE
             const originalLines = content.split('\n');
             const enhancedWrapper = `
@@ -195,27 +194,62 @@ export class ExecuteTool {
                 })
             `;
             
-            //console.log("=============execute file22=============");
+     
             const wrappedFunction = compartment.evaluate(enhancedWrapper);
-            const result = await wrappedFunction(this.agent.bot);
-            //console.log("=============execute file23=============");
-            //console.log("=============execute file24=============");
-            //console.log("=============execute file24=============");
+            
+            // Create timeout promise
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('Code execution timeout: exceeded 60 seconds'));
+                }, 60000);
+            });
+            
+            // Race between execution and timeout
+            const result = await Promise.race([
+                wrappedFunction(this.agent.bot),
+                timeoutPromise
+            ]);
+            
+      
             // Get execution output summary
             const code_output = this.agent.actions ? this.agent.actions.getBotOutputSummary() : 'No output summary available';
-            //console.log("=============execute file25=============");
+           
+            console.log("Bot connection status:", this.agent.bot?.entity?.position ? "Connected" : "Disconnected");
+            console.log("Action manager status:", this.agent.actions ? "Available" : "Not available");
+
             const fileName = path.basename(targetFile);
-            //console.log("=============execute file26=============");
+            const botPosition = this.agent.bot?.entity?.position;
+            
+            // Format execution results elegantly
+            const executionInfo = {
+                file: fileName,
+                description: description || 'Code execution',
+                botPosition: botPosition ? `(${botPosition.x.toFixed(1)}, ${botPosition.y}, ${botPosition.z.toFixed(1)})` : 'Unknown',
+                result: result || 'No return value',
+                output: code_output
+            };
+            
+            console.log(`Executed: ${executionInfo.file} - ${executionInfo.description}`);
+            console.log(`Bot at: ${executionInfo.botPosition}`);
+            console.log(`Output: ${executionInfo.output}`);
+            
+            const message = "## Code Execution Result ##\n" +
+                "**File:** " + executionInfo.file + "\n" +
+                "**Task:** " + executionInfo.description + "\n" +
+                "**Bot Position:** " + executionInfo.botPosition + "\n" +
+                "**Result:** " + executionInfo.result + "\n" +
+                "**Log Output: May not be genuine.** \n" + executionInfo.output;
+       
             return {
                 success: true,
-                message: `Successfully executed ${fileName}${description ? ': ' + description : ''}`,
+                message: message,
                 file_path: targetFile,
                 action: 'execute',
-                summary: `Code executed successfully from ${targetFile}\nOutput: ${code_output}`
+
             };
 
         } catch (error) {
-            //console.log("=============execute file27.1=============");
+
             
             // Convert error to string for consistent handling
             const err = error.toString();
@@ -268,8 +302,8 @@ export class ExecuteTool {
                     codeErrorInfo = '\n#### CODE EXECUTION ERROR INFO ###\n';
                     codeErrorInfo += `#ERROR 1\n`;
                     codeErrorInfo += `File: ${params.file_path}\n`;
-                    codeErrorInfo += `Message: ${errorMessage}\n`;
-                    codeErrorInfo += `Location: Line ${errorLine}, Column ${errorColumn}\n`;
+                    codeErrorInfo += `ERROR MESSAGE: ${errorMessage}\n`;
+                    codeErrorInfo += `ERROR LOCATION: Line ${errorLine}, Column ${errorColumn}\n`;
                     codeErrorInfo += `\nCode Context:\n`;
                     
                     // Display relevant code lines with enhanced formatting
@@ -288,7 +322,9 @@ export class ExecuteTool {
                         
                         // Add column indicator for error line
                         if (isErrorLine && errorColumn > 0) {
-                            const spaces = ' '.repeat(7 + Math.max(0, errorColumn - 1));
+                            // Calculate exact spacing based on actual line format
+                            const actualPrefix = `${prefix}${lineNumber.toString().padStart(3)}: `;
+                            const spaces = ' '.repeat(actualPrefix.length + errorColumn - 1);
                             codeErrorInfo += `${spaces}^\n`;
                         }
                     }
@@ -308,13 +344,25 @@ export class ExecuteTool {
             }
             
             // Extract skills/world functions from error message for intelligent suggestions
-            const skillSuggestions = await this._generateSkillSuggestions(errorLineContent);
+            const skillSuggestions = await this.agent.prompter.skill_libary.getRelevantSkillDocs(errorLineContent, 2) + '\n';
             
-            const message = 
-                '## Code Execution Error ##\n' +
-                `**Error:** ${error.message}\n` +
-                codeErrorInfo + 
-                skillSuggestions;
+            // Check if this is a timeout error
+            const isTimeoutError = error.message && error.message.includes('Code execution timeout');
+            
+            let message;
+            if (isTimeoutError) {
+                message = 
+                    '## Code Execution Timeout ##\n' +
+                    '**Error:** Code execution exceeded 60 seconds and was terminated\n' +
+                    '**Reason:** The code took too long to execute and may have been stuck in an infinite loop, waiting for a resource, or the bot may be stuck in terrain\n' +
+                    '**Suggestion:** Review the code for potential infinite loops, long-running operations, or blocking calls\n';
+            } else {
+                message = 
+                    '## Code Execution Error ##\n' +
+                    `**Error:** ${error.message}\n` +
+                    codeErrorInfo + 
+                    skillSuggestions;
+            }
                             
             return {
                 success: false,
@@ -323,51 +371,51 @@ export class ExecuteTool {
         }
     }
 
-    /**
-     * Generate intelligent skill suggestions based on error information
-     * @param {string} errorLineContent - Content of the error line
-     * @returns {Promise<string>} Formatted skill suggestions
-     */
-    async _generateSkillSuggestions(errorLineContent) {
-        try {
-            // Extract skills/world functions directly from the error line content
-            if (!errorLineContent) {
-                return '';
-            }
+    // /**
+    //  * Generate intelligent skill suggestions based on error information
+    //  * @param {string} errorLineContent - Content of the error line
+    //  * @returns {Promise<string>} Formatted skill suggestions
+    //  */
+    // async _generateSkillSuggestions(errorLineContent) {
+    //     try {
+    //         // Extract skills/world functions directly from the error line content
+    //         if (!errorLineContent) {
+    //             return '';
+    //         }
             
-            const skillMatches = errorLineContent.match(/(?:skills|world)\.(\w+)/g);
+    //         const skillMatches = errorLineContent.match(/(?:skills|world)\.(\w+)/g);
             
-            if (!skillMatches || !this.agent.prompter?.skill_libary) {
-                return '';
-            }
+    //         if (!skillMatches || !this.agent.prompter?.skill_libary) {
+    //             return '';
+    //         }
 
-            const allDocs = await this.agent.prompter.skill_libary.getAllSkillDocs();
-            const uniqueSkills = [...new Set(skillMatches)];
+    //         const allDocs = await this.agent.prompter.skill_libary.getAllSkillDocs();
+    //         const uniqueSkills = [...new Set(skillMatches)];
             
-            const suggestions = [];
-            for (const skillCall of uniqueSkills) {
-                // Find matching documentation
-                const matchingDocs = allDocs.filter(doc => 
-                    doc.toLowerCase().includes(skillCall.toLowerCase())
-                );
+    //         const suggestions = [];
+    //         for (const skillCall of uniqueSkills) {
+    //             // Find matching documentation
+    //             const matchingDocs = allDocs.filter(doc => 
+    //                 doc.toLowerCase().includes(skillCall.toLowerCase())
+    //             );
                 
-                if (matchingDocs.length > 0) {
-                    suggestions.push(`\n### ${skillCall} Documentation ###`);
-                    matchingDocs.forEach(doc => {
-                        // Extract first few lines of documentation
-                        const lines = doc.split('\n').slice(0, 5);
-                        suggestions.push(lines.join('\n'));
-                    });
-                }
-            }
+    //             if (matchingDocs.length > 0) {
+    //                 suggestions.push(`\n### ${skillCall} Documentation ###`);
+    //                 matchingDocs.forEach(doc => {
+    //                     // Extract first few lines of documentation
+    //                     const lines = doc.split('\n').slice(0, 5);
+    //                     suggestions.push(lines.join('\n'));
+    //                 });
+    //             }
+    //         }
             
-            return suggestions.length > 0 ? '\n\n## SKILL USAGE HELP ##' + suggestions.join('\n') : '';
-        } catch (suggestionError) {
-            // Ignore errors in suggestion generation
-            console.log('Skill suggestion error:', suggestionError.message);
-            return '';
-        }
-    }
+    //         return suggestions.length > 0 ? '\n\n## SKILL USAGE HELP ##' + suggestions.join('\n') : '';
+    //     } catch (suggestionError) {
+    //         // Ignore errors in suggestion generation
+    //         console.log('Skill suggestion error:', suggestionError.message);
+    //         return '';
+    //     }
+    // }
 }
 
 export default ExecuteTool;
