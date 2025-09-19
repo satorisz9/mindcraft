@@ -49,6 +49,7 @@ export class Prompter {
         this.cooldown = this.profile.cooldown ? this.profile.cooldown : 0;
         this.last_prompt_time = 0;
         this.awaiting_coding = false;
+        this.max_messages = settings.max_messages; //TODO：remove after test 
 
         // for backwards compatibility, move max_tokens to params
         let max_tokens = null;
@@ -144,7 +145,9 @@ export class Prompter {
         prompt = prompt.replaceAll('$NAME', this.agent.name);
 
         if (prompt.includes('$STATS')) {
-            let stats = await getCommand('!stats').perform(this.agent);
+            let stats = await getCommand('!stats').perform(this.agent) + '\n';
+            stats += await getCommand('!entities').perform(this.agent) + '\n';
+            stats += await getCommand('!nearbyBlocks').perform(this.agent);
             prompt = prompt.replaceAll('$STATS', stats);
         }
         if (prompt.includes('$INVENTORY')) {
@@ -304,6 +307,15 @@ export class Prompter {
         return '';
     }
 
+    // 检查并修剪消息数组长度
+    _trimMessages(messages) {
+        while (messages.length > this.max_messages) {
+            messages.shift(); // 删除最久远的消息
+            console.log(`Trimmed oldest message, current length: ${messages.length}`);
+        }
+        return messages;
+    }
+
     async promptCoding(messages) {
         if (this.awaiting_coding) {
             console.warn('Already awaiting coding response, returning no response.');
@@ -313,6 +325,9 @@ export class Prompter {
         
         try {
             await this.checkCooldown();
+            
+            // 发送前检查消息长度
+            messages = this._trimMessages(messages);
             
             // Read prompt from coding.md file if it exists, otherwise use profile.coding
             let prompt;
@@ -328,9 +343,26 @@ export class Prompter {
 
             let resp = await this.code_model.sendRequest(messages, prompt);
             await this._saveLog(prompt, messages, resp, 'coding');
+            this.max_messages+=1;
             return resp;
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
+            
+            // 检查是否是输入长度超限错误
+            if (error.message && error.message.includes('Range of input length should be')) {
+                console.log('Input length exceeded, trimming messages and adjusting max_messages');
+                
+                // 删除最久远的消息
+                if (messages.length > 1) {
+                    messages.shift();
+                    console.log(`Removed oldest message, new length: ${messages.length}`);
+                    
+                    // 调整max_messages为当前长度
+                    this.max_messages = messages.length;
+                    console.log(`Adjusted max_messages to: ${this.max_messages}`);
+                }
+            }
+            
             throw error;
         } finally {
             this.awaiting_coding = false;
