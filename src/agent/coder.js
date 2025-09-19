@@ -24,6 +24,9 @@ export class Coder {
 
             try {
                 const response = await this.agent.prompter.promptCoding(messages);
+                if(response.includes('Range of input length should be')){
+                    continue;
+                }
                 messages.push({
                     role: 'assistant',
                     content: response
@@ -33,7 +36,7 @@ export class Coder {
                 // Check if response is in JSON tool format
                 if (!this.codeToolsManager.isJSONToolResponse(response)) {
                     console.log('Response is not in JSON tool format. Please use JSON tool command format.');
-                    await sleep(10000);
+                    await sleep(1000);
                     messages.push({
                         role: 'user',
                         content: 'Response is not in JSON tool format. Please use JSON tool command format as described above.'
