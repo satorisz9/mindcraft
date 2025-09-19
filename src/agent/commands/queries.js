@@ -111,6 +111,47 @@ export const queryList = [
             let blocks = world.getNearestBlocks(bot);
             let block_details = new Set();
             
+            // Get current position and blocks
+            let position = bot.entity.position;
+            let currentBlock = bot.blockAt(position);
+            let blockBelow = bot.blockAt(position.offset(0, -1, 0));
+            
+            // Check current position status
+            res += '\n\nCURRENT POSITION STATUS:';
+            // Block at current position (where bot's body is)
+            if (currentBlock) {
+                let currentDetails = currentBlock.name;
+                if (currentBlock.name === 'lava') {
+                    currentDetails += currentBlock.metadata === 0 ? ' (source)' : ' (flowing)';
+                    res += `\n- In ${currentDetails} - YOU ARE TAKING DAMAGE, YOU'RE ABOUT TO DIE!`;
+                } else if (currentBlock.name === 'water') {
+                    currentDetails += currentBlock.metadata === 0 ? ' (source)' : ' (flowing)';
+                    res += `\n- In ${currentDetails}`;
+                } else if (currentBlock.name === 'air') {
+                    res += '\n- In air';
+                } else {
+                    res += `\n- Inside ${currentDetails}`;
+                }
+            }
+            if (blockBelow) {
+                let belowDetails = blockBelow.name;
+                if (blockBelow.name === 'water' || blockBelow.name === 'lava') {
+                    belowDetails += blockBelow.metadata === 0 ? ' (source)' : ' (flowing)';
+                }
+                res += `\n- Standing on: ${belowDetails}`;
+            }
+            // Check if bot is in liquid
+            let inWater = bot.isInWater;
+            let inLava = bot.isInLava;
+            if (inWater) {
+                res += '\n- Status: Swimming in water';
+            } else if (inLava) {
+                res += '\n- Status: In lava (taking damage!)';
+            } else {
+                res += '\n- Status: On solid ground';
+            }
+            
+            res += '\n\nNEARBY BLOCKS:';
             for (let block of blocks) {
                 let details = block.name;
                 if (block.name === 'water' || block.name === 'lava') {
