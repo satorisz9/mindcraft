@@ -1,6 +1,7 @@
 import { cosineSimilarity } from '../../utils/math.js';
 import { getSkillDocs } from './index.js';
 import { wordOverlapScore } from '../../utils/text.js';
+import { LearnedSkillsManager } from './learnedSkillsManager.js';
 
 export class SkillLibrary {
     constructor(agent,embedding_model) {
@@ -8,7 +9,8 @@ export class SkillLibrary {
         this.embedding_model = embedding_model;
         this.skill_docs_embeddings = {};
         this.skill_docs = null;
-        this.always_show_skills = ['skills.placeBlock', 'skills.wait', 'skills.breakBlockAt']
+        this.always_show_skills = [];//TODO:for test
+        this.learnedSkillsManager = new LearnedSkillsManager();
     }
     async initSkillLibrary() {
         const skillDocs = getSkillDocs();
@@ -34,12 +36,38 @@ export class SkillLibrary {
     }
 
     async getAllSkillDocs() {
-        return this.skill_docs;
+        // Get core skill docs
+        const coreSkillDocs = this.skill_docs || [];
+        
+        // Get learned skills docs if agent is available
+        let learnedSkillDocs = [];
+        if (this.agent && this.agent.name) {
+            learnedSkillDocs = await this.learnedSkillsManager.getSkillDocs(this.agent.name);
+        }
+        
+        // Combine both types of docs
+        return [...coreSkillDocs, ...learnedSkillDocs];
     }
 
     async getRelevantSkillDocs(message, select_num) {
         if(!message) // use filler message if none is provided
             message = '(no message)';
+        
+        // Get all skill docs including learned skills
+        const allSkillDocs = await this.getAllSkillDocs();
+        
+        // Build embeddings for all docs if not already done
+        for (const doc of allSkillDocs) {
+            if (!this.skill_docs_embeddings[doc] && this.embedding_model) {
+                try {
+                    let func_name_desc = doc.split('\n').slice(0, 2).join('');
+                    this.skill_docs_embeddings[doc] = await this.embedding_model.embed(func_name_desc);
+                } catch (error) {
+                    console.warn('Failed to embed skill doc:', error.message);
+                }
+            }
+        }
+        
         let skill_doc_similarities = [];
 
         if (select_num === -1) {
@@ -82,7 +110,7 @@ export class SkillLibrary {
         });
         
         let relevant_skill_docs = '#### RELEVANT CODE DOCS ###\nThe following functions are available to use:\n';
-        relevant_skill_docs += Array.from(selected_docs).join('\n### ');
+        relevant_skill_docs += '### ' + Array.from(selected_docs).join('\n### ');
 
         console.log('Selected skill docs:', Array.from(selected_docs).map(doc => {
             const first_line_break = doc.indexOf('\n');
