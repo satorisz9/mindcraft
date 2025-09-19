@@ -618,6 +618,45 @@ export class ToolManager {
     }
 
     /**
+     * Check if learned-skills folder needs attention
+     * @returns {boolean} True if reminder should be shown
+     */
+    shouldShowLearnedSkillsReminder() {
+        try {
+            if (!this.agent || !this.agent.name) return false;
+            
+            const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+            const learnedSkillsPath = path.join(projectRoot, 'bots', this.agent.name, 'learned-skills');
+            
+            // Check if folder exists
+            if (!fs.existsSync(learnedSkillsPath)) {
+                return true; // No folder exists
+            }
+            
+            // Check files in the folder
+            const files = fs.readdirSync(learnedSkillsPath).filter(file => file.endsWith('.js'));
+            if (files.length === 0) {
+                return true; // No skill files exist
+            }
+            
+            // Check if any file was modified in the last minute
+            const oneMinuteAgo = Date.now() - 60000;
+            for (const file of files) {
+                const filePath = path.join(learnedSkillsPath, file);
+                const stats = fs.statSync(filePath);
+                if (stats.mtime.getTime() > oneMinuteAgo) {
+                    return false; // Recent activity found
+                }
+            }
+            
+            return true; // No recent activity
+        } catch (error) {
+            console.warn('Error checking learned-skills folder:', error.message);
+            return false;
+        }
+    }
+
+    /**
      * Generate formatted tool descriptions for prompts
      * @returns {string} Formatted tool descriptions
      */
@@ -629,6 +668,11 @@ export class ToolManager {
             // Check if todo list is empty and add system reminder
             if (this.isTodoListEmpty()) {
                 content += '\n\n<system-reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a todo list please use the TodoWrite tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.</system-reminder>';
+            }
+            
+            // Check if learned-skills folder needs attention
+            if (this.shouldShowLearnedSkillsReminder()) {
+                content += '\n\n<system-reminder>You haven\'t learned any new skills in the past minute. If you have developed useful code patterns or solutions, consider saving them as reusable skills in the learned-skills folder using the Write tool. If you haven\'t learned anything new, feel free to ignore this message. DO NOT mention this reminder to the user.</system-reminder>';
             }
             
             return content;

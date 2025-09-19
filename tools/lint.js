@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 import { ESLint } from "eslint";
 import path from 'path';
+import { LearnedSkillsManager } from '../src/agent/library/learnedSkillsManager.js';
 
 /**
  * Lint Tool - Validates JavaScript code files for syntax and skill usage
@@ -8,8 +9,9 @@ import path from 'path';
 export class LintTool {
     constructor(agent = null) {
         this.name = 'Lint';
-        this.description = "Validates JavaScript code files for syntax errors and skill usage.\n\nUsage:\n- The file_path parameter must be an absolute path to a .js file\n- Validates code syntax using ESLint\n- Checks for missing skill functions\n- Returns validation results with errors and executable files\n- Can validate single files or arrays of files";
+        this.description = "Validates JavaScript code files for syntax errors and skill usage.\n\nUsage:\n- The file_path parameter must be an absolute path to a .js file\n- Validates code syntax using ESLint\n- Checks for missing skill functions including learned skills\n- Returns validation results with errors and executable files\n- Can validate single files or arrays of files";
         this.agent = agent;
+        this.learnedSkillsManager = new LearnedSkillsManager();
         this.input_schema = {
             "type": "object",
             "properties": {
@@ -163,15 +165,24 @@ export class LintTool {
             // Support native ES6 modules
             const originalCode = code.trim();
             
-            // Extract skills and world function calls for validation
+            // Extract skills, world, and learnedSkills function calls for validation
             const skillRegex = /(?:skills|world)\.(.*?)\(/g;
+            const learnedSkillRegex = /learnedSkills\.(.*?)\(/g;
             const skills = [];
+            const learnedSkillCalls = [];
             let match;
+            
+            // Extract skills.* and world.* calls
             while ((match = skillRegex.exec(originalCode)) !== null) {
                 skills.push(match[1]);
             }
             
-            // Check if skills exist
+            // Extract learnedSkills.* calls
+            while ((match = learnedSkillRegex.exec(originalCode)) !== null) {
+                learnedSkillCalls.push(match[1]);
+            }
+            
+            // Check if core skills exist
             const allDocs = await this.agent.prompter.skill_libary.getAllSkillDocs();
             
             // allDocs is an array of documentation strings, each starting with 'skills.functionName' or 'world.functionName'
@@ -182,12 +193,42 @@ export class LintTool {
             }).filter(Boolean);
             
             let missingSkills = skills.filter(skill => !availableSkills.includes(skill));
-            if (missingSkills.length > 0) {
+            
+            // Check if learned skills exist
+            const missingLearnedSkills = [];
+            if (learnedSkillCalls.length > 0 && this.agent && this.agent.name) {
+                for (const skillName of learnedSkillCalls) {
+                    const exists = await this.learnedSkillsManager.hasSkill(this.agent.name, skillName);
+                    if (!exists) {
+                        missingLearnedSkills.push(`learnedSkills.${skillName}`);
+                    }
+                }
+            }
+            
+            // Combine all missing skills
+            const allMissingSkills = [...missingSkills, ...missingLearnedSkills];
+            if (allMissingSkills.length > 0) {
                 result += '## Missing Functions ##\n';
                 result += 'The following functions do not exist:\n';
-                result += missingSkills.map(skill => `- ${skill}`).join('\n');
-                result += '\n##Relevant skills:\n' + await this.agent.prompter.skill_libary.getRelevantSkillDocs(missingSkills.map(skill => `- ${skill}`).join('\n'), 2) + '\n';
-                // console.log(result);
+                result += allMissingSkills.map(skill => `- ${skill}`).join('\n');
+                
+                // Only show relevant skills for core skills (not learned skills)
+                if (missingSkills.length > 0) {
+                    result += '\n##Relevant skills:\n' + await this.agent.prompter.skill_libary.getRelevantSkillDocs(missingSkills.map(skill => `- ${skill}`).join('\n'), 2) + '\n';
+                }
+                
+                // Show available learned skills if there are missing learned skills
+                if (missingLearnedSkills.length > 0) {
+                    const availableLearnedSkills = await this.learnedSkillsManager.getLearnedSkillsForBot(this.agent.name);
+                    const skillNames = Object.keys(availableLearnedSkills);
+                    if (skillNames.length > 0) {
+                        result += '\n##Available learned skills:\n';
+                        result += skillNames.map(name => `- learnedSkills.${name}`).join('\n') + '\n';
+                    } else {
+                        result += '\n##No learned skills available. Create skills in learned-skills folder first.\n';
+                    }
+                }
+                
                 return result;
             }
 
@@ -210,7 +251,8 @@ export class LintTool {
                                 skills: 'readonly',
                                 world: 'readonly',
                                 Vec3: 'readonly',
-                                log: 'readonly'
+                                log: 'readonly',
+                                learnedSkills: 'readonly'
                             }
                         },
                         rules: {
