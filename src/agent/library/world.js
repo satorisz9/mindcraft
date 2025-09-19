@@ -67,9 +67,9 @@ export function getSurroundingBlocks(bot) {
      **/
     // Create a list of block position results that can be unpacked.
     let res = [];
-    res.push(`Block Below: ${getBlockAtPosition(bot, 0, -1, 0).name}`);
-    res.push(`Block at Legs: ${getBlockAtPosition(bot, 0, 0, 0).name}`);
-    res.push(`Block at Head: ${getBlockAtPosition(bot, 0, 1, 0).name}`);
+    res.push(`***Block Below***: ${getBlockAtPosition(bot, 0, -1, 0).name}`);
+    res.push(`***Block at Legs***: ${getBlockAtPosition(bot, 0, 0, 0).name}`);
+    res.push(`***Block at Head***: ${getBlockAtPosition(bot, 0, 1, 0).name}`);
 
     return res;
 }
