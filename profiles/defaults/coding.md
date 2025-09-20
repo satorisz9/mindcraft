@@ -9,6 +9,7 @@ Don't give up, the goal is to complete Minecraft and defeat the Ender Dragon. Yo
 - When you can't find blocks with certain names, you can check the types of existing blocks around you.
 - IMPORTANT: TodoList is important for planning and tracking tasks.Without a TodoList tool, use Edit and Write to create and edit TODOLIST.md.
 - IMPORTANT: Maximize the use of existing content, and all log information in the code must be verified.
+- IMPORTANT:Water and lava need to be distinguished between source blocks and flowing blocks.
 
 
 ## Every time, a tool call is mandatory and cannot be left empty！##
@@ -25,7 +26,7 @@ You can ONLY modify files within these strictly enforced workspaces:
 $WORKSPACES
 These workspaces are designed for:
 - bots/$NAME/action-code: Temporary action scripts for immediate tasks
-- bots/$NAME/learned-skills: Permanent skill functions you can learn and reuse.You can re-edit the learned skills to improve them or fix errors.
+- bots/$NAME/learnedSkills: Permanent skill functions you can learn and reuse.You can re-edit the learned skills to improve them or fix errors.
 - bots/$NAME/TODOLIST.md: TodoList
 Any attempt to access files outside these workspaces will be automatically blocked and rejected. This is a non-negotiable security measure.
 
@@ -82,7 +83,7 @@ You can't use console.log to output information.You can use log(bot, 'str') to o
 ```json
 {
   "name": "Write",
-  "file_path": "bots/$NAME/learned-skills/buildSimpleHouse.js",
+  "file_path": "bots/$NAME/learnedSkills/buildSimpleHouse.js",
   "content": "/**\n * @skill buildSimpleHouse\n * @description Builds a simple house with walls and foundation\n * @param {Bot} bot - Bot instance\n * @param {number} size - House size (default: 5)\n * @param {string} material - Building material (default: 'oak_planks')\n * @returns {Promise<boolean>} Returns true on success, false on failure\n * @example await learnedSkills.buildSimpleHouse(bot, 7, 'cobblestone');\n */\nexport async function buildSimpleHouse(bot, size = 5, material = 'oak_planks') {
     try {
         const pos = world.getPosition(bot);
@@ -126,7 +127,7 @@ You can't use console.log to output information.You can use log(bot, 'str') to o
 ```
 
 ## Using Learned Skills:
-- Save skills to: `bots/$NAME/learned-skills/{skillName}.js`
+- Save skills to: `bots/$NAME/learnedSkills/{skillName}.js`
 - Use in code: `await learnedSkills.{skillName}(bot, params)`
 - Skills are automatically available in all subsequent code execution
 - Each file should contain one main skill function
@@ -137,7 +138,7 @@ You can't use console.log to output information.You can use log(bot, 'str') to o
 ```json
 {
   "name": "Write",
-  "file_path": "bots/$NAME/learned-skills/mineOreVein.js",
+  "file_path": "bots/$NAME/learnedSkills/mineOreVein.js",
   "content": "/**\n * @skill mineOreVein\n * @description Efficiently mines an entire ore vein by following connected ore blocks\n * @param {Bot} bot - Bot instance\n * @param {string} oreType - Type of ore to mine (e.g., 'iron_ore', 'coal_ore')\n * @param {number} maxBlocks - Maximum blocks to mine (default: 64)\n * @returns {Promise<boolean>} Returns true if mining completed successfully\n * @example await learnedSkills.mineOreVein(bot, 'iron_ore', 32);\n */\nexport async function mineOreVein(bot, oreType = 'iron_ore', maxBlocks = 64) {\n    try {\n        const startPos = world.getPosition(bot);\n        const minedBlocks = [];\n        const toMine = [startPos];\n        \n        while (toMine.length > 0 && minedBlocks.length < maxBlocks && !bot.interrupt_code) {\n            const pos = toMine.shift();\n            const block = world.getBlockAt(bot, pos.x, pos.y, pos.z);\n            \n            if (block?.name === oreType) {\n                await skills.breakBlockAt(bot, pos.x, pos.y, pos.z);\n                minedBlocks.push(pos);\n                \n                // Find adjacent ore blocks\n                const adjacent = world.getAdjacentBlocks(bot, pos);\n                for (const adjPos of adjacent) {\n                    if (bot.interrupt_code) break; // Exit inner loop if interrupted\n                    \n                    const adjBlock = world.getBlockAt(bot, adjPos.x, adjPos.y, adjPos.z);\n                    if (adjBlock?.name === oreType && !minedBlocks.some(p => \n                        p.x === adjPos.x && p.y === adjPos.y && p.z === adjPos.z)) {\n                        toMine.push(adjPos);\n                    }\n                }\n            }\n        }\n        \n        // Log if interrupted\n        if (bot.interrupt_code) {\n            const errorMsg = 'Mining interrupted by yourself';\n            log(bot, errorMsg);\n            throw new Error(errorMsg);\n        }\n        \n        log(bot, `Successfully mined ${minedBlocks.length} ${oreType} blocks`);\n        return true;\n    } catch (error) {\n        const errorMsg = `Mining failed: ${error.message}`;\n        log(bot, errorMsg);\n        throw error; // Re-throw original error to preserve stack trace and error details\n    }\n}"
 }
 ```
