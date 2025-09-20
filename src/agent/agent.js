@@ -160,9 +160,8 @@ export class Agent {
         };
 
         if (save_data?.self_prompt) {
-            if (init_message) {
-                this.history.add('system', init_message);
-            }
+            // When self-prompting is active, don't add init_message to avoid conflicts
+            // The self-prompter will handle the messaging
             await this.self_prompter.handleLoad(save_data.self_prompt, save_data.self_prompting_state);
         }
         if (save_data?.last_sender) {
