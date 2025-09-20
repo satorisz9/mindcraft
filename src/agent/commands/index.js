@@ -224,7 +224,10 @@ export async function executeCommand(agent, message) {
             return `Command ${command.name} was given ${numArgs} args, but requires ${numParams(command)} args.`;
         else {
             const result = await command.perform(agent, ...parsed.args);
-            return result;
+            if(!result) 
+                return `${command.name} failed and got undefined.`;
+            else
+                return result;
         }
     }
 }

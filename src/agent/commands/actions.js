@@ -28,9 +28,9 @@ function runAsAction (actionFn, resume = false, timeout = -1) {
 export const actionsList = [
     {
         name: '!newAction',
-        description: 'Perform new and unknown custom behaviors that are not available as a command.', 
+        description: 'Perform new and unknown custom behaviors that are not available as a command. Enter coding mode to write JavaScript code for complex tasks. AI will use tools to create, edit, and execute code files to accomplish the given goal. ', 
         params: {
-            'prompt': { type: 'string', description: 'A natural language prompt to guide code generation. Make a detailed step-by-step plan.' }
+            'prompt': { type: 'string', description: 'Perform new and unknown custom behaviors that are not available as a command. Enter coding mode to write JavaScript code for complex tasks. AI will use tools to create, edit, and execute code files to accomplish the given goal. ' }
         },
         perform: async function(agent, prompt) {
             // just ignore prompt - it is now in context in chat history
@@ -41,7 +41,7 @@ export const actionsList = [
             let result = "";
             const actionFn = async () => {
                 try {
-                    result = await agent.coder.generateCode(agent.history);
+                    result = await agent.coder.generateCode(agent.history,prompt);
                 } catch (e) {
                     result = 'Error generating code: ' + e.toString();
                 }
@@ -282,12 +282,7 @@ export const actionsList = [
             'num': { type: 'int', description: 'The number of times to smelt the item.', domain: [1, Number.MAX_SAFE_INTEGER] }
         },
         perform: runAsAction(async (agent, item_name, num) => {
-            let success = await skills.smeltItem(agent.bot, item_name, num);
-            if (success) {
-                setTimeout(() => {
-                    agent.cleanKill('Safely restarting to update inventory.');
-                }, 500);
-            }
+            await skills.smeltItem(agent.bot, item_name, num);
         })
     },
     {

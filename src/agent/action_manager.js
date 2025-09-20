@@ -58,8 +58,7 @@ export class ActionManager {
         }
     }
 
-    async _executeAction(actionLabel, actionFn, timeout = 10) {
-        let TIMEOUT;
+    async _executeAction(actionLabel, actionFn, timeout = 20) {
         try {
             if (this.last_action_time > 0) {
                 let time_diff = Date.now() - this.last_action_time;
@@ -82,10 +81,12 @@ export class ActionManager {
             this.last_action_time = Date.now();
             console.log('executing code...\n');
 
-            // await current action to finish (executing=false), with 10 seconds timeout
+            // await current action to finish (executing=false), with 20 seconds timeout
             // also tell agent.bot to stop various actions
             if (this.executing) {
                 console.log(`action "${actionLabel}" trying to interrupt current action "${this.currentActionLabel}"`);
+                this.agent.bot.interrupt_code = true;
+                this.agent.bot.pathfinder.stop();
             }
             await this.stop();
 
@@ -96,49 +97,72 @@ export class ActionManager {
             this.currentActionLabel = actionLabel;
             this.currentActionFn = actionFn;
 
-            // timeout in minutes
-            if (timeout > 0) {
-                TIMEOUT = this._startTimeout(timeout);
-            }
-
-            // start the action
-            await actionFn();
+            // start the action with interrupt and timeout check
+            const result = await Promise.race([
+                actionFn().then(() => ({ completed: true })),
+                new Promise((resolve) => {
+                    // Set default timeout if not specified
+                    const timeoutMs = (timeout > 0 ? timeout : 10) * 60 * 1000; // default 10 minutes
+                    
+                    const timeoutId = setTimeout(() => {
+                        this.timedout = true;
+                        resolve({ timedout: true });
+                    }, timeoutMs);
+                    
+                    const check = () => {
+                        if (this.agent.bot.interrupt_code) {
+                            clearTimeout(timeoutId);
+                            this.agent.bot.pathfinder.stop();
+                            resolve({ interrupted: true });
+                        } else {
+                            setTimeout(check, 100);
+                        }
+                    };
+                    check();
+                })
+            ]);
 
             // mark action as finished + cleanup
             this.executing = false;
             this.currentActionLabel = '';
             this.currentActionFn = null;
-            clearTimeout(TIMEOUT);
 
             // get bot activity summary
             let output = this.getBotOutputSummary();
-            let interrupted = this.agent.bot.interrupt_code;
-            let timedout = this.timedout;
-            this.agent.clearBotLogs();
+            let interrupted = result.interrupted || this.agent.bot.interrupt_code;
+            let timedout = result.timedout || this.timedout;
 
-            // if not interrupted and not generating, emit idle event
-            if (!interrupted) {
+            // add appropriate message based on result
+            if (result.interrupted) {
+                output += `Action "${actionLabel}" was interrupted.\n`;
+            } else if (result.timedout) {
+                output += `Action "${actionLabel}" timed out after ${timeout} minutes.\n`;
+            }
+            this.agent.clearBotLogs();
+            // if not interrupted and not timed out, emit idle event
+            if (!interrupted && !timedout) {
                 this.agent.bot.emit('idle');
             }
-
             // return action status report
-            return { success: true, message: output, interrupted, timedout };
+            return {    success: !interrupted && !timedout, 
+                        message: output, 
+                        interrupted, 
+                        timedout };
         } catch (err) {
             this.executing = false;
             this.currentActionLabel = '';
             this.currentActionFn = null;
-            clearTimeout(TIMEOUT);
             this.cancelResume();
             console.error("Code execution triggered catch:", err);
             // Log the full stack trace
             console.error(err.stack);
             await this.stop();
-            err = err.toString();
+            const errorMessage = err.toString();
 
             let message = this.getBotOutputSummary() +
-                '!!Code threw exception!!\n' +
-                'Error: ' + err + '\n' +
-                'Stack trace:\n' + err.stack+'\n';
+                '## Action threw exception\n' +
+                '# Error: ' + errorMessage + '\n' +
+                '# Stack trace:\n' + (err.stack || 'No stack trace available') + '\n';
 
             let interrupted = this.agent.bot.interrupt_code;
             this.agent.clearBotLogs();

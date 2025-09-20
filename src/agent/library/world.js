@@ -19,10 +19,10 @@ export function getNearestFreeSpace(bot, size=1, distance=8) {
         maxDistance: distance,
         count: 1000
     });
-    for (let i = 0; i < empty_pos.length; i++) {
+    for (let i = 0; i < empty_pos.length && !bot.interrupt_code; i++) {
         let empty = true;
-        for (let x = 0; x < size; x++) {
-            for (let z = 0; z < size; z++) {
+        for (let x = 0; x < size && !bot.interrupt_code; x++) {
+            for (let z = 0; z < size && !bot.interrupt_code; z++) {
                 let top = bot.blockAt(empty_pos[i].offset(x, 0, z));
                 let bottom = bot.blockAt(empty_pos[i].offset(x, -1, z));
                 if (!top || !top.name == 'air' || !bottom || bottom.drops.length == 0 || !bottom.diggable) {
@@ -36,6 +36,7 @@ export function getNearestFreeSpace(bot, size=1, distance=8) {
             return empty_pos[i];
         }
     }
+    return null; // No free space found
 }
 
 
@@ -92,13 +93,14 @@ export function getFirstBlockAboveHead(bot, ignore_types=null, distance=32) {
         if (!Array.isArray(ignore_types))
             ignore_types = [ignore_types];
         for(let ignore_type of ignore_types) {
+            if(bot.interrupt_code) return 'none';
             if (mc.getBlockId(ignore_type)) ignore_blocks.push(ignore_type);
         }
     }
     // The block above, stops when it finds a solid block .
     let block_above = {name: 'air'};
-    let height = 0
-    for (let i = 0; i < distance; i++) {
+    let height = 0;
+    for (let i = 0; i < distance && !bot.interrupt_code; i++) {
         let block = bot.blockAt(bot.entity.position.offset(0, i+2, 0));
         if (!block) block = {name: 'air'};
         // Ignore and continue
@@ -135,6 +137,7 @@ export function getNearestBlocks(bot, block_types=null, distance=8, count=10000)
         if (!Array.isArray(block_types))
             block_types = [block_types];
         for(let block_type of block_types) {
+            if(bot.interrupt_code) break;
             block_ids.push(mc.getBlockId(block_type));
         }
     }
@@ -179,6 +182,7 @@ export function getNearestBlock(bot, block_type, distance=16) {
 export function getNearbyEntities(bot, maxDistance=16) {
     let entities = [];
     for (const entity of Object.values(bot.entities)) {
+        if(bot.interrupt_code) break;
         const distance = entity.position.distanceTo(bot.entity.position);
         if (distance > maxDistance) continue;
         entities.push({ entity: entity, distance: distance });
@@ -186,6 +190,7 @@ export function getNearbyEntities(bot, maxDistance=16) {
     entities.sort((a, b) => a.distance - b.distance);
     let res = [];
     for (let i = 0; i < entities.length; i++) {
+        if(bot.interrupt_code) break;
         res.push(entities[i].entity);
     }
     return res;
@@ -200,6 +205,7 @@ export function getNearbyPlayers(bot, maxDistance) {
     if (maxDistance == null) maxDistance = 16;
     let players = [];
     for (const entity of Object.values(bot.entities)) {
+        if(bot.interrupt_code) break;
         const distance = entity.position.distanceTo(bot.entity.position);
         if (distance > maxDistance) continue;
         if (entity.type == 'player' && entity.username != bot.username) {
@@ -209,6 +215,7 @@ export function getNearbyPlayers(bot, maxDistance) {
     players.sort((a, b) => a.distance - b.distance);
     let res = [];
     for (let i = 0; i < players.length; i++) {
+        if(bot.interrupt_code) break;
         res.push(players[i].entity);
     }
     return res;
@@ -262,6 +269,7 @@ export function getVillagerProfession(entity) {
 export function getInventoryStacks(bot) {
     let inventory = [];
     for (const item of bot.inventory.items()) {
+        if(bot.interrupt_code) break;
         if (item != null) {
             inventory.push(item);
         }
@@ -282,6 +290,7 @@ export function getInventoryCounts(bot) {
      **/
     let inventory = {};
     for (const item of bot.inventory.items()) {
+        if(bot.interrupt_code) break;
         if (item != null) {
             if (inventory[item.name] == null) {
                 inventory[item.name] = 0;
@@ -304,6 +313,7 @@ export function getCraftableItems(bot) {
     let table = getNearestBlock(bot, 'crafting_table');
     if (!table) {
         for (const item of bot.inventory.items()) {
+            if(bot.interrupt_code) break;
             if (item != null && item.name === 'crafting_table') {
                 table = item;
                 break;
@@ -312,6 +322,7 @@ export function getCraftableItems(bot) {
     }
     let res = [];
     for (const item of mc.getAllItems()) {
+        if(bot.interrupt_code) break;
         let recipes = bot.recipesFor(item.id, null, 1, table);
         if (recipes.length > 0)
             res.push(item.name);
@@ -344,6 +355,7 @@ export function getNearbyEntityTypes(bot) {
     let mobs = getNearbyEntities(bot, 16);
     let found = [];
     for (let i = 0; i < mobs.length; i++) {
+        if(bot.interrupt_code) break;
         if (!found.includes(mobs[i].name)) {
             found.push(mobs[i].name);
         }
@@ -371,6 +383,7 @@ export function getNearbyPlayerNames(bot) {
     let players = getNearbyPlayers(bot, 64);
     let found = [];
     for (let i = 0; i < players.length; i++) {
+        if(bot.interrupt_code) break;
         if (!found.includes(players[i].username) && players[i].username != bot.username) {
             found.push(players[i].username);
         }
@@ -391,6 +404,7 @@ export function getNearbyBlockTypes(bot, distance=16) {
     let blocks = getNearestBlocks(bot, null, distance);
     let found = [];
     for (let i = 0; i < blocks.length; i++) {
+        if(bot.interrupt_code) break;
         if (!found.includes(blocks[i].name)) {
             found.push(blocks[i].name);
         }
@@ -405,7 +419,7 @@ export async function isClearPath(bot, target) {
      * @param {Entity} target - The target to path to.
      * @returns {boolean} - True if there is a clear path, false otherwise.
      */
-    let movements = new pf.Movements(bot)
+    let movements = new pf.Movements(bot);
     movements.canDig = false;
     movements.canPlaceOn = false;
     movements.canOpenDoors = false;

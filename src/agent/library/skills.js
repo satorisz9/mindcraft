@@ -43,7 +43,7 @@ export async function craftRecipe(bot, itemName, num=1) {
      * await skills.craftRecipe(bot, "stick");
      **/
     let placedTable = false;
-
+    
     if (mc.getItemCraftingRecipes(itemName).length == 0) {
         log(bot, `${itemName} is either not an item, or it does not have a crafting recipe!`);
         return false;
@@ -65,6 +65,10 @@ export async function craftRecipe(bot, itemName, num=1) {
             let hasTable = world.getInventoryCounts(bot)['crafting_table'] > 0;
             if (hasTable) {
                 let pos = world.getNearestFreeSpace(bot, 1, 6);
+                if(pos == null) {
+                    log(bot, `Could not find a free space to place crafting table.`);
+                    return false;
+                }
                 await placeBlock(bot, 'crafting_table', pos.x, pos.y, pos.z);
                 craftingTable = world.getNearestBlock(bot, 'crafting_table', craftingTableRange);
                 if (craftingTable) {
@@ -165,6 +169,10 @@ export async function smeltItem(bot, itemName, num=1) {
         let hasFurnace = world.getInventoryCounts(bot)['furnace'] > 0;
         if (hasFurnace) {
             let pos = world.getNearestFreeSpace(bot, 1, furnaceRange);
+            if(pos == null) {
+                log(bot, `Could not find a free space to place furnace.`);
+                return false;
+            }
             await placeBlock(bot, 'furnace', pos.x, pos.y, pos.z);
             furnaceBlock = world.getNearestBlock(bot, 'furnace', furnaceRange);
             placedFurnace = true;
@@ -450,6 +458,10 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
     const unsafeBlocks = ['obsidian'];
 
     for (let i=0; i<num; i++) {
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while collecting block.');
+            return false;
+        }
         let blocks = world.getNearestBlocksWhere(bot, block => {
             if (!blocktypes.includes(block.name)) {
                 return false;
@@ -457,6 +469,10 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             if (exclude) {
                 for (let position of exclude) {
                     if (block.position.x === position.x && block.position.y === position.y && block.position.z === position.z) {
+                        return false;
+                    }
+                    if (bot.interrupt_code) {
+                        log(bot, 'Interrupted while collecting block.');
                         return false;
                     }
                 }
@@ -540,7 +556,7 @@ export async function pickupNearbyItems(bot) {
     const getNearestItem = bot => bot.nearestEntity(entity => entity.name === 'item' && bot.entity.position.distanceTo(entity.position) < distance);
     let nearestItem = getNearestItem(bot);
     let pickedUp = 0;
-    while (nearestItem) {
+    while (nearestItem && !bot.interrupt_code) {
         let movements = new pf.Movements(bot);
         movements.canDig = false;
         bot.pathfinder.setMovements(movements);
@@ -738,6 +754,10 @@ export async function placeBlock(bot, blockType, x, y, z, placeOn='bottom', dont
     dirs.push(...Object.values(dir_map).filter(d => !dirs.includes(d)));
 
     for (let d of dirs) {
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while placing block.');
+            return false;
+        }
         const block = bot.blockAt(target_dest.plus(d));
         if (!empty_blocks.includes(block.name)) {
             buildOffBlock = block;
@@ -928,7 +948,10 @@ export async function takeFromChest(bot, itemName, num=-1) {
     // Take items from each slot until we've taken enough or run out
     for (const item of matchingItems) {
         if (remaining <= 0) break;
-        
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while taking from chest.');
+            return false;
+        }
         let toTakeFromSlot = Math.min(remaining, item.count);
         await chestContainer.withdraw(item.type, null, toTakeFromSlot);
         
@@ -1077,6 +1100,10 @@ export async function goToGoal(bot, goal) {
     const nonDestructiveMovements = new pf.Movements(bot);
     const dontBreakBlocks = ['glass', 'glass_pane'];
     for (let block of dontBreakBlocks) {
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while pathfinding.');
+            return false;
+        }
         nonDestructiveMovements.blocksCantBreak.add(mc.getBlockId(block));
     }
     nonDestructiveMovements.placeCost = 2;
@@ -1128,6 +1155,12 @@ function startDoorInterval(bot) {
 
 
     const doorCheckInterval = setInterval(() => {
+        // Check for interrupt signal and clear interval if interrupted
+        if (bot.interrupt_code) {
+            clearInterval(doorCheckInterval);
+            return;
+        }
+        
         const now = Date.now();
         if (bot.entity.position.distanceTo(prev_pos) >= 0.1) {
             stuck_time = 0;
@@ -1158,6 +1191,10 @@ function startDoorInterval(bot) {
             }
             
             for (let position of positions) {
+                if (bot.interrupt_code) {
+                    log(bot, 'Interrupted while opening door.');
+                    break;
+                }
                 let block = bot.blockAt(position);
                 if (block && block.name &&
                     !block.name.includes('iron') &&
@@ -1201,7 +1238,14 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         return true;
     }
     
+    let progressInterval;
     const checkDigProgress = () => {
+        // Check for interrupt signal and clear interval if interrupted
+        if (bot.interrupt_code) {
+            clearInterval(progressInterval);
+            return;
+        }
+        // Check if bot is trying to dig a block it cannot harvest
         if (bot.targetDigBlock) {
             const targetBlock = bot.targetDigBlock;
             const itemId = bot.heldItem ? bot.heldItem.type : null;
@@ -1213,7 +1257,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         }
     };
     
-    const progressInterval = setInterval(checkDigProgress, 1000);
+    progressInterval = setInterval(checkDigProgress, 1000);
     
     try {
         await goToGoal(bot, new pf.goals.GoalNear(x, y, z, min_distance));
@@ -1511,6 +1555,10 @@ export async function useDoor(bot, door_pos=null) {
                                'mangrove_door', 'cherry_door', 'bamboo_door', 'crimson_door', 'warped_door']) {
             door_pos = world.getNearestBlock(bot, door_type, 16).position;
             if (door_pos) break;
+            if (bot.interrupt_code) {
+                log(bot, 'Interrupted while finding door.');
+                return false;
+            }
         }
     } else {
         door_pos = Vec3(door_pos.x, door_pos.y, door_pos.z);
@@ -1592,6 +1640,10 @@ export async function tillAndSow(bot, x, y, z, seedType=null) {
     if (bot.modes.isOn('cheat')) {
         let to_remove = ['_seed', '_seeds'];
         for (let remove of to_remove) {
+            if (bot.interrupt_code) {
+                log(bot, 'Interrupted while tillAndSow.');
+                return false;
+            }
             if (seedType.endsWith(remove)) {
                 seedType = seedType.replace(remove, '');
             }
@@ -1688,6 +1740,10 @@ async function findAndGoToVillager(bot, id) {
         let entities = world.getNearbyEntities(bot, 16);
         let villager_list = "Available villagers:\n";
         for (let entity of entities) {
+            if (bot.interrupt_code) {
+                log(bot, 'Interrupted while findAndGoToVillager.');
+                return false;
+            }
             if (entity.name === 'villager') {
                 if (entity.metadata && entity.metadata[16] === 1) {
                     villager_list += `${entity.id}: baby villager\n`;
@@ -1915,6 +1971,10 @@ export async function digDown(bot, distance = 10) {
 
     let start_block_pos = bot.blockAt(bot.entity.position).position;
     for (let i = 1; i <= distance; i++) {
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while digDown.');
+            return false;
+        }
         const targetBlock = bot.blockAt(start_block_pos.offset(0, -i, 0));
         let belowBlock = bot.blockAt(start_block_pos.offset(0, -i-1, 0));
 
@@ -1933,6 +1993,10 @@ export async function digDown(bot, distance = 10) {
         const MAX_FALL_BLOCKS = 2;
         let num_fall_blocks = 0;
         for (let j = 0; j <= MAX_FALL_BLOCKS; j++) {
+            if (bot.interrupt_code) {
+                log(bot, 'Interrupted while digDown.');
+                return false;
+            }
             if (!belowBlock || (belowBlock.name !== 'air' && belowBlock.name !== 'cave_air')) {
                 break;
             }
