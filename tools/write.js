@@ -28,18 +28,10 @@ export class WriteTool {
         this.readFiles = new Set(); // Track files that have been read
     }
 
-    /**
-     * Get tool description
-     * @returns {string} Tool description
-     */
     getDescription() {
         return this.description;
     }
 
-    /**
-     * Get input schema
-     * @returns {Object} Input schema
-     */
     getInputSchema() {
         return this.input_schema;
     }
@@ -51,40 +43,29 @@ export class WriteTool {
      * @param {string} params.content - Content to write to the file
      * @returns {Object} Result object
      */
-    async execute(params) {
+    execute(params) {
         try {
-            //console.log('=============Writing file=============');
-            console.log(params);
             const { file_path, content } = params;
-            //console.log("=============Writing file2=============");
             
             // Validate required parameters
             if (!file_path || content === undefined) {
                 throw new Error('[Write Tool] Missing required parameters: file_path, content');
             }
-            //console.log("=============Writing file2=============");
             // Check if this is an existing file
             const fileExists = fs.existsSync(file_path);
-            //console.log("=============Writing file3=============");
             
             // File read check removed - allow direct overwriting
-            //console.log("=============Writing file4=============");
 
             // Ensure directory exists
             const dir = path.dirname(file_path);
-            //console.log("=============Writing file5=============");
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
             }
-            //console.log("=============Writing file6=============");
 
             // Write content to file
             fs.writeFileSync(file_path, content, 'utf8');
-            //console.log("=============Writing file7=============");
             const stats = fs.statSync(file_path);
-            //console.log("=============Writing file8=============");
             const action = fileExists ? 'overwritten' : 'created';
-            //console.log("=============Writing file9=============");
 
             return {
                 success: true,
@@ -95,7 +76,6 @@ export class WriteTool {
             };
 
         } catch (error) {
-            //console.log("=============Writing file10=============");
             return {
                 success: false,
                 message: `## Write Tool Error ##\n**Error:** ${error.message}`

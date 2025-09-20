@@ -105,8 +105,6 @@ export class ReadTool {
                 })
                 .join('\n');
 
-            // Mark file as read for other tools
-            this.markFileAsReadInOtherTools(file_path);
 
             const truncated = offset !== undefined || limit !== undefined;
             const fullLength = lines.length;
@@ -136,32 +134,6 @@ export class ReadTool {
                 success: false,
                 message: `## Read Tool Error ##\n**Error:** ${error.message}`
             };
-        }
-    }
-
-    /**
-     * Mark file as read in other tools that need this information
-     * @param {string} filePath - Path to the file that was read
-     */
-    markFileAsReadInOtherTools(filePath) {
-        if (this.toolRegistry) {
-            // Mark in Edit tool
-            const editTool = this.toolRegistry.get('Edit');
-            if (editTool) {
-                editTool.markFileAsRead(filePath);
-            }
-
-            // Mark in MultiEdit tool
-            const multiEditTool = this.toolRegistry.get('MultiEdit');
-            if (multiEditTool) {
-                multiEditTool.markFileAsRead(filePath);
-            }
-
-            // Mark in Write tool
-            const writeTool = this.toolRegistry.get('Write');
-            if (writeTool) {
-                writeTool.markFileAsRead(filePath);
-            }
         }
     }
 

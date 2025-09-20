@@ -8,6 +8,23 @@ import { Vec3 } from 'vec3';
 import { LintTool } from './lint.js';
 import { LearnedSkillsManager } from '../src/agent/library/learnedSkillsManager.js';
 
+// Regex patterns for stack trace parsing
+const StackTracePatterns = {
+    iife: /^\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)$/m,
+    anonymous: /<anonymous>:(\d+):(\d+)/,
+    filePath: /at.*?\(([^)]+\.(js|ts)):(\d+):(\d+)\)/,
+    filePathAlt: /at.*?([^\s]+\.(js|ts)):(\d+):(\d+)/,
+    throwStatements: [
+        /^\s*throw\s+error\s*;?\s*$/i,
+        /^\s*throw\s+new\s+Error\s*\(/i,
+        /^\s*throw\s+\w+\s*;?\s*$/i,
+        /^\s*throw\s+.*\.message\s*;?\s*$/i,
+        /^\s*throw\s+.*Error\s*\(/i,
+        /^\s*throw\s+.*error.*\s*;?\s*$/i
+    ]
+};
+
+
 /**
  * Execute Tool - Executes JavaScript code files in Minecraft bot context
  */
@@ -16,7 +33,12 @@ export class ExecuteTool {
         this.name = 'Execute';
         this.description = "Executes a JavaScript file containing bot actions in Minecraft.\n\nUsage:\n- The file_path parameter must be an absolute path to a .js file\n- The file should contain an async function that accepts a bot parameter\n- The function will be executed in the Minecraft bot context with access to skills, world APIs, and learned skills\n- Only files within allowed workspaces can be executed for security\n- The file must exist and be readable before execution";
         this.agent = agent;
+        
         this.learnedSkillsManager = new LearnedSkillsManager();
+        this.fileCache = new FileContentCache();
+        this.errorAnalyzer = new ErrorAnalyzer(this.fileCache);
+        this.sandboxManager = new SandboxManager(this.learnedSkillsManager);
+        
         this.input_schema = {
             "type": "object",
             "properties": {
@@ -41,22 +63,14 @@ export class ExecuteTool {
         };
     }
 
-    /**
-     * Get tool description
-     * @returns {string} Tool description
-     */
     getDescription() {
         return this.description;
     }
 
-    /**
-     * Get input schema
-     * @returns {Object} Input schema
-     */
     getInputSchema() {
         return this.input_schema;
     }
-
+    
     /**
      * Execute JavaScript files - can handle single file or array of files
      * @param {Object} params - The execution parameters
@@ -69,38 +83,25 @@ export class ExecuteTool {
         let originalChat = null;
         
         try {
-            // Step 1: Validate and extract target file
             const targetFile = this._validateAndExtractTargetFile(params);
+            const fileData = await this.fileCache.getFileContent(targetFile);
             
-            // Validate and prepare file for execution
-            const fileContent = await this._validateAndPrepareFile(targetFile);
+            await this._validateFile(targetFile, fileData);
             
-            // Setup execution environment
             originalChat = this._setupChatCapture();
-            const compartment = await this._createSecureCompartment();
+            const compartment = await this.sandboxManager.createCompartment(this.agent);
             
-            // Execute the code with timeout and error handling
-            const result = await this._executeCodeWithTimeout(compartment, fileContent, targetFile);
+            const result = await this._executeWithTimeout(compartment, fileData.content, targetFile);
             
-            // Format and return success result
             return this._formatSuccessResult(result, targetFile, params.description);
             
         } catch (error) {
-            // Handle execution errors with detailed reporting
             return await this._handleExecutionError(error, params, originalChat);
         } finally {
-            // Always restore original chat function
-            if (originalChat && this.agent.bot) {
-                this.agent.bot.chat = originalChat;
-            }
+            this._restoreChat(originalChat);
         }
     }
 
-    /**
-     * Validate agent and extract target file path
-     * @param {Object} params - Execution parameters
-     * @returns {string} Target file path
-     */
     _validateAndExtractTargetFile(params) {
         const { file_path, executable_files } = params;
 
@@ -110,20 +111,17 @@ export class ExecuteTool {
 
         let targetFile = file_path;
 
-        // If executable_files array is provided, find the main action-code file
         if (executable_files && Array.isArray(executable_files)) {
             if (executable_files.length === 0) {
                 throw new Error('No executable action-code files found - code generation may have failed');
             }
 
-            // Find the main action-code file
             targetFile = executable_files.find(f => f.includes('action-code'));
             if (!targetFile) {
                 throw new Error('No executable action-code file found in provided files');
             }
         }
 
-        // Validate required parameters
         if (!targetFile) {
             throw new Error('[Execute Tool] Missing required parameter: file_path or executable_files');
         }
@@ -131,59 +129,38 @@ export class ExecuteTool {
         return targetFile;
     }
 
-    /**
-     * Validate and prepare file for execution
-     * @param {string} targetFile - Target file path
-     * @returns {string} File content
-     */
-    async _validateAndPrepareFile(targetFile) {
-        // Validate file path is absolute
+    async _validateFile(targetFile, fileData) {
         if (!path.isAbsolute(targetFile)) {
             throw new Error('[Execute Tool] file_path must be an absolute path');
         }
 
-        // Check if file exists
-        if (!fs.existsSync(targetFile)) {
-            throw new Error(`[Execute Tool] File does not exist: ${targetFile}`);
-        }
-
-        // Validate file extension
         if (!targetFile.endsWith('.js')) {
             throw new Error('[Execute Tool] Only JavaScript (.js) files can be executed');
         }
 
-        // Read file content
-        const fileContent = await readFile(targetFile, 'utf8');
-        
-        // Basic validation - check if it looks like executable code
-        if (!fileContent.trim()) {
+        if (!fs.existsSync(targetFile)) {
+            throw new Error(`[Execute Tool] File does not exist: ${targetFile}`);
+        }
+
+        if (!fileData.content.trim()) {
             throw new Error('[Execute Tool] File is empty or contains no executable code');
         }
 
-        // Lint the code before execution using registered tool
         const lintTool = this.agent.coder.codeToolsManager.tools.get('Lint');
         const lintResult = await lintTool.execute({ file_path: targetFile });
 
         if (!lintResult.success) {
             throw new Error(lintResult.message);
         }
-
-        return fileContent;
     }
 
-    /**
-     * Setup chat message capture
-     * @returns {Function} Original chat function
-     */
     _setupChatCapture() {
         let originalChat = null;
         
-        // Store original chat function
         if (this.agent.bot && this.agent.bot.chat) {
             originalChat = this.agent.bot.chat;
         }
         
-        // Wrap bot.chat to capture messages
         this.agent.bot.chat = (message) => {
             this.agent.bot.output += `[CHAT] ${message}\n`;
             return originalChat.call(this.agent.bot, message);
@@ -192,170 +169,41 @@ export class ExecuteTool {
         return originalChat;
     }
 
-    /**
-     * Create secure compartment for code execution
-     * @returns {Object} Compartment object
-     */
-    async _createSecureCompartment() {
-        // Create secure compartment for IIFE execution
-        const compartment = makeCompartment({
-            // Core JavaScript globals (CRITICAL - these were missing!)
-            Promise,
-            console,
-            setTimeout,
-            setInterval,
-            clearTimeout,
-            clearInterval,
-            
-            // Spread world functions into global scope
-            ...world,
-            
-            // Core skills access - spread all skills functions into global scope
-            ...skills,
-            
-            // Make Vec3 globally available
-            Vec3,
-            
-            // Make log globally available
-            log: skills.log,
-            
-            // Also provide object references for backward compatibility
-            world: world,
-            skills: skills
-        });
-        
-        // Load learned skills and execute them in the same compartment context
-        const learnedSkills = await this._loadLearnedSkillsInCompartment(compartment);
-        
-        // Add learned skills to compartment
-        compartment.globalThis.learnedSkills = learnedSkills;
-        
-        return compartment;
-    }
-
-    /**
-     * Load learned skills as file-level modules in compartment
-     * @param {Object} compartment - The secure compartment
-     * @returns {Object} Learned skills object
-     */
-    async _loadLearnedSkillsInCompartment(compartment) {
-        const learnedSkills = {};
-        
-        try {
-            const skillModules = await this.learnedSkillsManager.getLearnedSkillsForBot(this.agent.name);
-            
-            for (const module of skillModules) {
-                try {
-                    // Transform ES module export to function declaration and wrap in IIFE
-                    const transformedContent = module.content.replace(/export\s+async\s+function\s+(\w+)/g, 'async function $1');
-                    
-                    // Execute the transformed content with inline source mapping
-                    // Use inline sourceURL comment for proper error stack traces
-                    const codeWithSourceMap = `${transformedContent}
-// Make function available globally
-globalThis.${module.functionName} = ${module.functionName};
-//# sourceURL=${module.filePath}`;
-                    
-                    // console.log(`Loading skill with sourceURL: ${module.filePath}`);
-                    compartment.evaluate(codeWithSourceMap);
-                    
-                    // Get the function from the compartment's global scope
-                    const moduleFunction = compartment.globalThis[module.functionName];
-                    
-                    if (typeof moduleFunction === 'function') {
-                        learnedSkills[module.functionName] = moduleFunction;
-                        // console.log(`Successfully loaded skill: ${module.functionName}`);
-                    } else {
-                        console.warn(`Function ${module.functionName} not found in module ${module.filePath}`);
-                        console.warn(`Available functions in compartment:`, Object.keys(compartment.globalThis).filter(key => typeof compartment.globalThis[key] === 'function'));
-                    }
-                    
-                } catch (error) {
-                    console.warn(`Failed to load skill module ${module.functionName}: ${error.message}`);
-                }
-            }
-        } catch (error) {
-            console.log(`Failed to load learned skills: ${error.message}`);
+    _restoreChat(originalChat) {
+        if (originalChat && this.agent.bot) {
+            this.agent.bot.chat = originalChat;
         }
-        
-        return learnedSkills;
     }
 
-    /**
-     * Execute code with timeout and error handling
-     * @param {Object} compartment - Secure compartment for execution
-     * @param {string} fileContent - File content to execute
-     * @param {string} targetFile - Target file path for error mapping
-     * @returns {*} Execution result
-     */
-    async _executeCodeWithTimeout(compartment, fileContent, targetFile) {
-        // Validate IIFE format
+    async _executeWithTimeout(compartment, fileContent, targetFile) {
         const content = fileContent.trim();
-        const isIIFE = content.match(/^\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)$/m);
+        const isIIFE = StackTracePatterns.iife.test(content);
         
         if (!isIIFE) {
             throw new Error(`[Execute Tool] Unsupported code format. Only IIFE format is supported: (async (bot) => { ... })`);
         }
         
-        // Create enhanced error tracking wrapper for IIFE
-        const enhancedWrapper = `
-            (async function(bot) {
-                try {
-                    const iifeFunction = ${content};
-                    return await iifeFunction(bot);
-                } catch (error) {
-                    // Preserve original error with enhanced source mapping
-                    error.sourceFile = '${targetFile}';
-                    
-                    // Map error line numbers to original file while preserving stack
-                    if (error.stack) {
-                        const stackLines = error.stack.split('\\n');
-                        const mappedStack = stackLines.map(line => {
-                            const lineMatch = line.match(/<anonymous>:(\\d+):(\\d+)/);
-                            if (lineMatch) {
-                                const errorLine = parseInt(lineMatch[1]);
-                                const errorColumn = parseInt(lineMatch[2]);
-                                // Map to original file line (accounting for wrapper offset)
-                                const originalLine = Math.max(1, errorLine - 3);
-                                return line.replace(/<anonymous>:(\\d+)/, \`\${error.sourceFile}:\${originalLine}\`);
-                            }
-                            return line;
-                        });
-                        error.stack = mappedStack.join('\\n');
-                    }
-                    
-                    // Re-throw original error with enhanced stack info
-                    throw error;
-                }
-            })
-        `;
-        
+        const enhancedWrapper = this._createEnhancedWrapper(content, targetFile);
         const wrappedFunction = compartment.evaluate(enhancedWrapper);
         
-        // Create AbortController for cancellation
         const abortController = new AbortController();
         let timeoutId;
         
-        // Create timeout promise that aborts execution
         const timeoutPromise = new Promise((_, reject) => {
             timeoutId = setTimeout(() => {
                 abortController.abort();
                 reject(new Error('Code execution timeout: exceeded 60 seconds'));
-            }, 60000);
+            }, 60000); // 60 seconds timeout
         });
         
-        let result;
         try {
-            // Race between execution and timeout
-            result = await Promise.race([
+            const result = await Promise.race([
                 wrappedFunction(this.agent.bot),
                 timeoutPromise
             ]);
             
-            // Clear timeout if execution completes first
             clearTimeout(timeoutId);
             
-            // Reset interrupt flag after successful execution
             if (this.agent.bot) {
                 this.agent.bot.interrupt_code = false;
             }
@@ -363,10 +211,8 @@ globalThis.${module.functionName} = ${module.functionName};
             return result;
             
         } catch (error) {
-            // Clear timeout on any error
             clearTimeout(timeoutId);
             
-            // If execution was aborted, try to stop bot actions
             if (abortController.signal.aborted) {
                 this._stopBotActions();
             }
@@ -375,36 +221,59 @@ globalThis.${module.functionName} = ${module.functionName};
         }
     }
 
-    /**
-     * Stop all bot actions when execution is aborted
-     */
+    _createEnhancedWrapper(content, targetFile) {
+        const WRAPPER_LINE_OFFSET = 3; // Lines added by wrapper function
+        
+        return `
+            (async function(bot) {
+                try {
+                    const iifeFunction = ${content};
+                    return await iifeFunction(bot);
+                } catch (error) {
+                    error.sourceFile = '${targetFile}';
+                    
+                    if (error.stack) {
+                        const stackLines = error.stack.split('\\n');
+                        const mappedStack = stackLines.map(line => {
+                            const lineMatch = line.match(/<anonymous>:(\\d+):(\\d+)/);
+                            if (lineMatch) {
+                                const errorLine = parseInt(lineMatch[1]);
+                                const errorColumn = parseInt(lineMatch[2]);
+                                const originalLine = Math.max(1, errorLine - ${WRAPPER_LINE_OFFSET});
+                                return line.replace(/<anonymous>:(\\d+)/, \`\${error.sourceFile}:\${originalLine}\`);
+                            }
+                            return line;
+                        });
+                        error.stack = mappedStack.join('\\n');
+                    }
+                    
+                    throw error;
+                }
+            })
+        `;
+    }
+
     _stopBotActions() {
         console.log('Code execution was aborted due to timeout, attempting to stop bot actions...');
         
         if (this.agent.bot) {
             try {
-                // Stop all movement and control states
                 this.agent.bot.clearControlStates();
                 
-                // Stop pathfinding
                 if (this.agent.bot.pathfinder) {
                     this.agent.bot.pathfinder.stop();
                 }
                 
-                // Stop digging
                 this.agent.bot.stopDigging();
                 
-                // Stop PvP actions
                 if (this.agent.bot.pvp) {
                     this.agent.bot.pvp.stop();
                 }
                 
-                // Cancel collect block tasks
                 if (this.agent.bot.collectBlock) {
                     this.agent.bot.collectBlock.cancelTask();
                 }
                 
-                // Set interrupt flag
                 this.agent.bot.interrupt_code = true;
                 
                 console.log('Successfully stopped all bot actions');
@@ -414,15 +283,7 @@ globalThis.${module.functionName} = ${module.functionName};
         }
     }
 
-    /**
-     * Format successful execution result
-     * @param {*} result - Execution result
-     * @param {string} targetFile - Target file path
-     * @param {string} description - Execution description
-     * @returns {Object} Formatted result object
-     */
     _formatSuccessResult(result, targetFile, description) {
-        // Capture all execution output including log and chat
         const executionOutput = this._captureExecutionOutput();
         
         console.log("Bot connection status:", this.agent.bot?.entity?.position ? "Connected" : "Disconnected");
@@ -431,7 +292,6 @@ globalThis.${module.functionName} = ${module.functionName};
         const fileName = path.basename(targetFile);
         const botPosition = this.agent.bot?.entity?.position;
         
-        // Format execution results elegantly
         const executionInfo = {
             file: fileName,
             description: description || 'Code execution',
@@ -459,10 +319,6 @@ globalThis.${module.functionName} = ${module.functionName};
         };
     }
 
-    /**
-     * Capture execution output from bot.output (includes both log and chat)
-     * @returns {string} Formatted execution output
-     */
     _captureExecutionOutput() {
         let executionOutput = 'No output captured during execution';
         
@@ -470,7 +326,6 @@ globalThis.${module.functionName} = ${module.functionName};
             const output = this.agent.bot.output.trim();
             if (output) {
                 executionOutput = output;
-                // Clear the output after capturing it
                 this.agent.bot.output = '';
             }
         }
@@ -478,26 +333,12 @@ globalThis.${module.functionName} = ${module.functionName};
         return executionOutput;
     }
 
-    /**
-     * Handle execution errors with detailed reporting
-     * @param {Error} error - The error that occurred
-     * @param {Object} params - Original execution parameters
-     * @param {Function} originalChat - Original chat function to restore
-     * @returns {Object} Error result object
-     */
     async _handleExecutionError(error, params, originalChat) {
-        // Restore original bot.chat function in case of error during setup
-        if (this.agent.bot && this.agent.bot.chat && typeof originalChat === 'function') {
-            this.agent.bot.chat = originalChat;
-        }
+        this._restoreChat(originalChat);
         
-        // Capture execution output even when there's an error
         const executionOutput = this._captureExecutionOutput();
+        const codeErrorInfo = await this.errorAnalyzer.analyzeError(error, { ...params, agent: this.agent });
         
-        // Extract detailed error information
-        const codeErrorInfo = await this._extractCodeErrorInfo(error, params);
-        
-        // Check if this is a timeout error
         const isTimeoutError = error.message && error.message.includes('Code execution timeout');
         
         let message;
@@ -522,302 +363,412 @@ globalThis.${module.functionName} = ${module.functionName};
             message: message
         };
     }
+}
 
-    /**
-     * Extract detailed code error information with enhanced stack processing
-     * @param {Error} error - The error that occurred
-     * @param {Object} params - Original execution parameters
-     * @returns {Object} Error information object
-     */
-    async _extractCodeErrorInfo(error, params) {
-        let codeErrorInfo = '';
-        let errorLineContent = '';
+
+/**
+ * String builder for efficient string concatenation
+ */
+class StringBuilder {
+    constructor() {
+        this.parts = [];
+    }
+    
+    append(text) {
+        this.parts.push(text);
+        return this;
+    }
+    
+    appendLine(text = '') {
+        this.parts.push(text + '\n');
+        return this;
+    }
+    
+    clear() {
+        this.parts.length = 0;
+        return this;
+    }
+    
+    toString() {
+        return this.parts.join('');
+    }
+}
+
+/**
+ * File content cache with TTL and LRU eviction
+ */
+class FileContentCache {
+    constructor(maxSize = 100, ttlMs = 300000) { // 5 minutes TTL
+        this.cache = new Map();
+        this.maxSize = maxSize;
+        this.ttlMs = ttlMs;
+    }
+    
+    async getFileContent(filePath) {
+        const cached = this.cache.get(filePath);
+        const now = Date.now();
+        
+        if (cached && (now - cached.timestamp) < this.ttlMs) {
+            return cached.data;
+        }
         
         try {
-            // Read the executed file content
-            const fs = await import('fs');
-            const originalFileContent = await fs.promises.readFile(params.file_path, 'utf8');
-            const originalLines = originalFileContent.split('\n');
+            const stats = await fs.promises.stat(filePath);
+            const content = await fs.promises.readFile(filePath, 'utf8');
+            const lines = content.split('\n');
             
-            // Enhanced error stack processing with comprehensive filtering
-            const errorMessage = error.message;
-            const userCodePaths = ['action-code', 'learned-skills'];
-            let allUserErrors = [];
+            const fileData = {
+                content,
+                lines,
+                size: stats.size,
+                mtime: stats.mtime.getTime()
+            };
             
-            if (error.stack) {
-                const stackLines = error.stack.split('\n');
-                
-                // Process stack frames from bottom to top to find the root cause
-                const stackFrames = [];
-                
-                // First pass: collect all stack frames with user code
-                for (let i = 0; i < stackLines.length; i++) {
-                    const line = stackLines[i];
-                    
-                    // Skip error message line and empty lines
-                    if (i === 0 || !line.trim()) continue;
-                    
-                    // Check for user code paths (action-code or learned-skills)
-                    const isUserCodePath = userCodePaths.some(path => line.includes(path));
-                    
-                    // Also check for source file mapping from our wrapper
-                    const hasSourceFile = error.sourceFile && line.includes(error.sourceFile);
-                    
-                    if (isUserCodePath || hasSourceFile) {
-                        // Extract line and column information
-                        let errorLine = null;
-                        let errorColumn = null;
-                        let filePath = params.file_path;
-                        
-                        if (hasSourceFile) {
-                            // Use enhanced source mapping
-                            const sourceMatch = line.match(new RegExp(`${error.sourceFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+):(\\d+)`));
-                            if (sourceMatch) {
-                                errorLine = parseInt(sourceMatch[1]);
-                                errorColumn = parseInt(sourceMatch[2]);
-                            }
-                        } else {
-                            // Extract from file path in stack trace - handle both regular paths and sourceURL paths
-                            let pathMatch = line.match(/at.*?\(([^)]+\.(js|ts)):(\d+):(\d+)\)/);
-                            if (!pathMatch) {
-                                pathMatch = line.match(/at.*?([^\s]+\.(js|ts)):(\d+):(\d+)/);
-                            }
-                            if (pathMatch) {
-                                filePath = pathMatch[1];
-                                errorLine = parseInt(pathMatch[3]);
-                                errorColumn = parseInt(pathMatch[4]);
-                                
-                                // Debug: log the extracted file path
-                                console.log(`Extracted file path from stack: ${filePath}`);
-                            }
-                        }
-                        
-                        if (errorLine && filePath) {
-                            try {
-                                const fileContent = await fs.promises.readFile(filePath, 'utf8');
-                                const fileLines = fileContent.split('\n');
-                                const errorLineContent = fileLines[errorLine - 1];
-                                
-                                stackFrames.push({
-                                    filePath,
-                                    errorLine,
-                                    errorColumn,
-                                    stackFrame: line.trim(),
-                                    lineContent: errorLineContent,
-                                    isActionCode: filePath.includes('action-code'),
-                                    isLearnedSkill: filePath.includes('learned-skills'),
-                                    isThrowStatement: this._isThrowStatement(errorLineContent),
-                                    stackIndex: i
-                                });
-                            } catch (readError) {
-                                stackFrames.push({
-                                    filePath,
-                                    errorLine,
-                                    errorColumn,
-                                    stackFrame: line.trim(),
-                                    lineContent: '',
-                                    isActionCode: filePath.includes('action-code'),
-                                    isLearnedSkill: filePath.includes('learned-skills'),
-                                    isThrowStatement: false,
-                                    stackIndex: i
-                                });
-                            }
-                        }
-                    }
-                }
-                
-                // Second pass: analyze stack frames from deepest to shallowest to find root cause
-                const rootCauseFrames = [];
-                const throwFrames = [];
-                
-                // Separate throw statements from actual error locations
-                for (const frame of stackFrames) {
-                    if (frame.isThrowStatement) {
-                        throwFrames.push(frame);
-                    } else {
-                        rootCauseFrames.push(frame);
-                    }
-                }
-                
-                // Prioritize root cause frames, but include throw frames if no root cause found
-                if (rootCauseFrames.length > 0) {
-                    // Sort root cause frames by stack depth (deeper first) to show the original error
-                    rootCauseFrames.sort((a, b) => b.stackIndex - a.stackIndex);
-                    allUserErrors = rootCauseFrames;
-                } else if (throwFrames.length > 0) {
-                    // If only throw statements found, show them but mark as secondary
-                    throwFrames.sort((a, b) => b.stackIndex - a.stackIndex);
-                    allUserErrors = throwFrames;
-                }
-                
-                // Final sort by file type priority if multiple errors at same level
-                allUserErrors.sort((a, b) => {
-                    // First by stack depth (deeper errors first)
-                    if (a.stackIndex !== b.stackIndex) {
-                        return b.stackIndex - a.stackIndex;
-                    }
-                    // Then by file type priority
-                    if (a.isActionCode && !b.isActionCode) return -1;
-                    if (!a.isActionCode && b.isActionCode) return 1;
-                    if (a.isLearnedSkill && !b.isLearnedSkill) return -1;
-                    if (!a.isLearnedSkill && b.isLearnedSkill) return 1;
-                    return a.errorLine - b.errorLine;
+            this._setCache(filePath, fileData, now);
+            return fileData;
+        } catch (error) {
+            throw new Error(`Failed to read file ${filePath}: ${error.message}`);
+        }
+    }
+    
+    _setCache(filePath, data, timestamp) {
+        if (this.cache.size >= this.maxSize) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+        this.cache.set(filePath, { data, timestamp });
+    }
+}
+
+/**
+ * Error analyzer for intelligent stack trace processing
+ */
+class ErrorAnalyzer {
+    constructor(fileCache) {
+        this.fileCache = fileCache;
+        this.stringBuilder = new StringBuilder();
+    }
+    
+    async analyzeError(error, params) {
+        const stackFrames = await this._parseStackFrames(error, params);
+        const prioritizedFrames = this._prioritizeFrames(stackFrames);
+        const meaningfulFrames = this._filterMeaningfulFrames(prioritizedFrames);
+        
+        return {
+            errorReport: this._buildErrorReport(meaningfulFrames, error),
+            skillSuggestions: await this._getSkillSuggestions(meaningfulFrames, params)
+        };
+    }
+    
+    async _parseStackFrames(error, params) {
+        if (!error.stack) return [];
+        
+        const stackLines = error.stack.split('\n');
+        const frames = [];
+        
+        for (let i = 1; i < stackLines.length; i++) {
+            const line = stackLines[i].trim();
+            if (!line) continue;
+            
+            const frameInfo = await this._parseStackLine(line, error, params, i);
+            if (frameInfo) {
+                frames.push(frameInfo);
+            }
+        }
+        
+        return frames;
+    }
+    
+    async _parseStackLine(line, error, params, stackIndex) {
+        const isUserCode = this._isUserCodePath(line) || this._hasSourceFile(line, error);
+        if (!isUserCode) return null;
+        
+        const location = this._extractLocation(line, error, params);
+        if (!location) return null;
+        
+        const codeInfo = await this._getCodeContext(location.filePath, location.line);
+        
+        return {
+            ...location,
+            stackFrame: line,
+            lineContent: codeInfo.lineContent,
+            contextLines: codeInfo.contextLines,
+            isActionCode: location.filePath.includes('action-code'),
+            isLearnedSkill: location.filePath.includes('learnedSkills'),
+            isThrowStatement: this._isThrowStatement(codeInfo.lineContent),
+            stackIndex
+        };
+    }
+    
+    _isUserCodePath(line) {
+        const userCodePaths = ['action-code', 'learnedSkills'];
+        return userCodePaths.some(path => line.includes(path));
+    }
+    
+    _hasSourceFile(line, error) {
+        return error.sourceFile && line.includes(error.sourceFile);
+    }
+    
+    _extractLocation(line, error, params) {
+        let errorLine = null;
+        let errorColumn = null;
+        let filePath = params.file_path;
+        
+        if (this._hasSourceFile(line, error)) {
+            const sourceMatch = line.match(new RegExp(`${error.sourceFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+):(\\d+)`));
+            if (sourceMatch) {
+                errorLine = parseInt(sourceMatch[1]);
+                errorColumn = parseInt(sourceMatch[2]);
+            }
+        } else {
+            let pathMatch = line.match(StackTracePatterns.filePath);
+            if (!pathMatch) {
+                pathMatch = line.match(StackTracePatterns.filePathAlt);
+            }
+            if (pathMatch) {
+                filePath = pathMatch[1];
+                errorLine = parseInt(pathMatch[3]);
+                errorColumn = parseInt(pathMatch[4]);
+            }
+        }
+        
+        return errorLine && filePath ? { filePath, line: errorLine, column: errorColumn } : null;
+    }
+    
+    async _getCodeContext(filePath, lineNumber) {
+        try {
+            const fileData = await this.fileCache.getFileContent(filePath);
+            const lines = fileData.lines;
+            const lineContent = lines[lineNumber - 1] || '';
+            
+            const maxContextLines = 4; // Show 2 lines before and after error
+            const contextRadius = Math.floor(maxContextLines / 2);
+            const startLine = Math.max(0, lineNumber - contextRadius - 1);
+            const endLine = Math.min(lines.length - 1, lineNumber + contextRadius);
+            const contextLines = [];
+            
+            for (let i = startLine; i <= endLine; i++) {
+                contextLines.push({
+                    number: i + 1,
+                    content: lines[i] || '',
+                    isError: (i + 1) === lineNumber
                 });
             }
             
-            // Filter out errors without meaningful content (like empty stack frames)
-            const meaningfulErrors = allUserErrors.filter(error => 
-                error.lineContent && error.lineContent.trim().length > 0
-            );
-            
-            // Generate comprehensive error information
-            if (meaningfulErrors.length > 0) {
-                codeErrorInfo = '\n#### ERROR CALL CHAIN ###\n';
-                
-                for (let i = 0; i < meaningfulErrors.length; i++) {
-                    const userError = meaningfulErrors[i];
-                    const depth = '  '.repeat(i); // Indentation to show call depth
-                    const arrow = i > 0 ? '↳ ' : '';
-                    
-                    codeErrorInfo += `${depth}${arrow}**${errorMessage}**\n`;
-                    codeErrorInfo += `${depth}  File: ${userError.filePath}\n`;
-                    codeErrorInfo += `${depth}  Location: Line ${userError.errorLine}, Column ${userError.errorColumn}\n`;
-                    
-                    // Store the deepest error line content for skill extraction (last meaningful error)
-                    errorLineContent = userError.lineContent;
-                    
-                    // Add code context if we have the line content
-                    if (userError.lineContent) {
-                        try {
-                            const fileContent = await fs.promises.readFile(userError.filePath, 'utf8');
-                            const fileLines = fileContent.split('\n');
-                            
-                            codeErrorInfo += `${depth}  Code Context:\n`;
-                            const startLine = Math.max(0, userError.errorLine - 2);
-                            const endLine = Math.min(fileLines.length - 1, userError.errorLine + 1);
-                            
-                            for (let j = startLine; j <= endLine; j++) {
-                                const lineNumber = j + 1;
-                                const isErrorLine = lineNumber === userError.errorLine;
-                                const prefix = isErrorLine ? '>>> ' : '    ';
-                                const line = fileLines[j] || '';
-                                
-                                codeErrorInfo += `${depth}  ${prefix}${lineNumber.toString().padStart(3)}: ${line}\n`;
-                                
-                                // Add column indicator for error line
-                                if (isErrorLine && userError.errorColumn > 0) {
-                                    const actualPrefix = `${depth}  ${prefix}${lineNumber.toString().padStart(3)}: `;
-                                    const spaces = ' '.repeat(actualPrefix.length + userError.errorColumn - 1);
-                                    codeErrorInfo += `${spaces}^\n`;
-                                }
-                            }
-                        } catch (readError) {
-                            codeErrorInfo += `${depth}  Unable to read code context: ${readError.message}\n`;
-                        }
-                    }
-                    
-                    if (i < meaningfulErrors.length - 1) {
-                        codeErrorInfo += '\n';
-                    }
-                }
-                
-                // Add error type information
-                if (error.name && error.name !== 'Error') {
-                    codeErrorInfo += `\nError Type: ${error.name}\n`;
-                }
-            } else {
-                // Fallback to basic error processing if no user code errors found
-                let errorLine = null;
-                let errorColumn = null;
-                
-                // Try to extract basic location info
-                if (error.sourceFile && error.stack) {
-                    const sourceMatch = error.stack.match(new RegExp(`${error.sourceFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(\\d+):(\\d+)`));
-                    if (sourceMatch) {
-                        errorLine = parseInt(sourceMatch[1]);
-                        errorColumn = parseInt(sourceMatch[2]);
-                    }
-                } else {
-                    const lineMatch = error.stack?.match(/<anonymous>:(\\d+):(\\d+)/);
-                    if (lineMatch) {
-                        const wrapperLine = parseInt(lineMatch[1]);
-                        errorLine = Math.max(1, wrapperLine - 3);
-                        errorColumn = parseInt(lineMatch[2]);
-                    }
-                }
-                
-                if (errorLine && errorColumn) {
-                    const startLine = Math.max(0, errorLine - 2);
-                    const endLine = Math.min(originalLines.length - 1, errorLine + 1);
-                    
-                    codeErrorInfo = '\n#### CODE EXECUTION ERROR INFO ###\n';
-                    codeErrorInfo += `#ERROR 1\n`;
-                    codeErrorInfo += `File: ${params.file_path}\n`;
-                    codeErrorInfo += `ERROR MESSAGE: ${errorMessage}\n`;
-                    codeErrorInfo += `ERROR LOCATION: Line ${errorLine}, Column ${errorColumn}\n`;
-                    codeErrorInfo += `\nCode Context:\n`;
-                    
-                    for (let i = startLine; i <= endLine; i++) {
-                        const lineNumber = i + 1;
-                        const isErrorLine = lineNumber === errorLine;
-                        const prefix = isErrorLine ? '>>> ' : '    ';
-                        const line = originalLines[i] || '';
-                        
-                        if (isErrorLine) {
-                            errorLineContent = line;
-                        }
-                        
-                        codeErrorInfo += `${prefix}${lineNumber.toString().padStart(3)}: ${line}\n`;
-                        
-                        if (isErrorLine && errorColumn > 0) {
-                            const actualPrefix = `${prefix}${lineNumber.toString().padStart(3)}: `;
-                            const spaces = ' '.repeat(actualPrefix.length + errorColumn - 1);
-                            codeErrorInfo += `${spaces}^\n`;
-                        }
-                    }
-                    
-                    if (error.name && error.name !== 'Error') {
-                        codeErrorInfo += `\nError Type: ${error.name}\n`;
-                    }
-                } else {
-                    codeErrorInfo = `\n#### CODE EXECUTION ERROR INFO ###\nError: ${errorMessage}\nUnable to map error to source location\n`;
-                    errorLineContent = '';
-                }
-            }
-        } catch (readError) {
-            // If unable to read file, use basic error info
-            codeErrorInfo = `\n#### CODE EXECUTION ERROR INFO ###\nUnable to extract code context: ${readError.message}`;
-            errorLineContent = '';
+            return { lineContent, contextLines };
+        } catch (error) {
+            return { lineContent: '', contextLines: [] };
         }
-        
-        // Extract skills/world functions from error message for intelligent suggestions
-        const skillSuggestions = await this.agent.prompter.skill_libary.getRelevantSkillDocs(errorLineContent, 2) + '\n';
-        
-        return {
-            errorReport: codeErrorInfo,
-            skillSuggestions: skillSuggestions
-        };
     }
-
-    /**
-     * Check if a line contains a throw statement that should be filtered out
-     * @param {string} lineContent - The line content to check
-     * @returns {boolean} True if this is a throw statement to filter
-     */
+    
     _isThrowStatement(lineContent) {
         const trimmed = lineContent.trim();
+        return StackTracePatterns.throwStatements.some(pattern => pattern.test(trimmed));
+    }
+    
+    _prioritizeFrames(frames) {
+        const rootCause = frames.filter(f => !f.isThrowStatement);
+        const throwStatements = frames.filter(f => f.isThrowStatement);
         
-        // Enhanced throw statement patterns
-        const throwPatterns = [
-            /^\s*throw\s+error\s*;?\s*$/i,                    // throw error;
-            /^\s*throw\s+new\s+Error\s*\(/i,                  // throw new Error(...)
-            /^\s*throw\s+\w+\s*;?\s*$/i,                     // throw errorMsg;
-            /^\s*throw\s+.*\.message\s*;?\s*$/i,             // throw error.message;
-            /^\s*throw\s+.*Error\s*\(/i,                     // throw SomeError(...)
-            /^\s*throw\s+.*error.*\s*;?\s*$/i,               // throw anyVariableWithError;
-        ];
+        const prioritized = rootCause.length > 0 ? rootCause : throwStatements;
         
-        return throwPatterns.some(pattern => pattern.test(trimmed));
+        return prioritized.sort((a, b) => {
+            if (a.stackIndex !== b.stackIndex) {
+                return b.stackIndex - a.stackIndex;
+            }
+            if (a.isActionCode !== b.isActionCode) {
+                return a.isActionCode ? -1 : 1;
+            }
+            if (a.isLearnedSkill !== b.isLearnedSkill) {
+                return a.isLearnedSkill ? -1 : 1;
+            }
+            return a.line - b.line;
+        });
+    }
+    
+    _filterMeaningfulFrames(frames) {
+        return frames.filter(frame => 
+            frame.lineContent && frame.lineContent.trim().length > 0
+        );
+    }
+    
+    _buildErrorReport(frames, error) {
+        if (frames.length === 0) {
+            return this._buildFallbackReport(error);
+        }
+        
+        this.stringBuilder.clear();
+        this.stringBuilder.append('\n#### ERROR CALL CHAIN ###\n');
+        
+        frames.forEach((frame, index) => {
+            const depth = '  '.repeat(index);
+            const arrow = index > 0 ? '↳ ' : '';
+            
+            this.stringBuilder
+                .append(`${depth}${arrow}**${error.message}**\n`)
+                .append(`${depth}  File: ${frame.filePath}\n`)
+                .append(`${depth}  Location: Line ${frame.line}, Column ${frame.column}\n`)
+                .append(`${depth}  Code Context:\n`);
+            
+            this._appendCodeContext(frame, depth);
+            
+            if (index < frames.length - 1) {
+                this.stringBuilder.append('\n');
+            }
+        });
+        
+        if (error.name && error.name !== 'Error') {
+            this.stringBuilder.append(`\nError Type: ${error.name}\n`);
+        }
+        
+        return this.stringBuilder.toString();
+    }
+    
+    _appendCodeContext(frame, depth) {
+        frame.contextLines.forEach(line => {
+            const prefix = line.isError ? '>>> ' : '    ';
+            this.stringBuilder.append(`${depth}  ${prefix}${line.number.toString().padStart(3)}: ${line.content}\n`);
+            
+            if (line.isError && frame.column > 0) {
+                const actualPrefix = `${depth}  ${prefix}${line.number.toString().padStart(3)}: `;
+                const spaces = ' '.repeat(actualPrefix.length + frame.column - 1);
+                this.stringBuilder.append(`${spaces}^\n`);
+            }
+        });
+    }
+    
+    _buildFallbackReport(error) {
+        return `\n#### CODE EXECUTION ERROR INFO ###\nError: ${error.message}\nUnable to map error to source location\n`;
+    }
+    
+    async _getSkillSuggestions(frames, params) {
+        if (frames.length === 0) return '';
+        
+        const errorLineContent = frames[0].lineContent;
+        try {
+            // Get skill suggestions from the agent's skill library
+            const maxSkillSuggestions = 2;
+            const skillDocs = await params.agent?.prompter?.skill_libary?.getRelevantSkillDocs(errorLineContent, maxSkillSuggestions);
+            return skillDocs ? skillDocs + '\n' : '';
+        } catch (error) {
+            return '';
+        }
+    }
+}
+
+/**
+ * Sandbox manager for secure code execution
+ */
+class SandboxManager {
+    constructor(learnedSkillsManager) {
+        this.learnedSkillsManager = learnedSkillsManager;
+        this.skillsCache = new Map();
+        this.skillTimestamps = new Map();
+    }
+    
+    async createCompartment(agent) {
+        const compartment = makeCompartment(this._getGlobalConfig());
+        const learnedSkills = await this._loadLearnedSkills(compartment, agent);
+        compartment.globalThis.learnedSkills = learnedSkills;
+        return compartment;
+    }
+    
+    _getGlobalConfig() {
+        return {
+            Promise,
+            console,
+            setTimeout,
+            setInterval,
+            clearTimeout,
+            clearInterval,
+            ...world,
+            ...skills,
+            Vec3,
+            log: skills.log,
+            world: world,
+            skills: skills
+        };
+    }
+    
+    async _loadLearnedSkills(compartment, agent) {
+        const learnedSkills = {};
+        
+        try {
+            const skillModules = await this.learnedSkillsManager.getLearnedSkillsForBot(agent.name);
+            const currentFiles = new Set();
+            
+            for (const module of skillModules) {
+                currentFiles.add(module.filePath);
+                const lastModified = module.lastModified || 0;
+                const cachedTimestamp = this.skillTimestamps.get(module.filePath) || 0;
+                
+                if (lastModified > cachedTimestamp || !this.skillsCache.has(module.functionName)) {
+                    try {
+                        console.log(`Loading skill: ${module.functionName}`);
+                        const compiledFunction = this._compileSkillInCompartment(compartment, module);
+                        
+                        if (compiledFunction) {
+                            this.skillsCache.set(module.functionName, compiledFunction);
+                            this.skillTimestamps.set(module.filePath, lastModified);
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to load skill ${module.functionName}: ${error.message}`);
+                    }
+                }
+                
+                const skillFunction = this.skillsCache.get(module.functionName);
+                if (skillFunction) {
+                    learnedSkills[module.functionName] = skillFunction;
+                }
+            }
+            
+            this._cleanupDeletedSkills(currentFiles);
+            
+        } catch (error) {
+            console.log(`Failed to load learned skills: ${error.message}`);
+        }
+        
+        return learnedSkills;
+    }
+    
+    _compileSkillInCompartment(compartment, module) {
+        try {
+            const transformedContent = module.content.replace(/export\s+async\s+function\s+(\w+)/g, 'async function $1');
+            
+            const codeWithSourceMap = [
+                transformedContent,
+                `globalThis.${module.functionName} = ${module.functionName};`,
+                `//# sourceURL=${module.filePath}`
+            ].join('\n');
+            
+            compartment.evaluate(codeWithSourceMap);
+            
+            const moduleFunction = compartment.globalThis[module.functionName];
+            
+            if (typeof moduleFunction === 'function') {
+                return moduleFunction;
+            } else {
+                console.warn(`Function ${module.functionName} not found in module ${module.filePath}`);
+                return null;
+            }
+        } catch (error) {
+            console.warn(`Failed to compile skill ${module.functionName}: ${error.message}`);
+            return null;
+        }
+    }
+    
+    _cleanupDeletedSkills(currentFiles) {
+        const cachedFiles = Array.from(this.skillTimestamps.keys());
+        
+        for (const cachedFile of cachedFiles) {
+            if (!currentFiles.has(cachedFile)) {
+                console.log(`Removing deleted skill file from cache: ${cachedFile}`);
+                
+                const skillNameFromPath = cachedFile.split('/').pop().replace('.js', '');
+                this.skillsCache.delete(skillNameFromPath);
+                this.skillTimestamps.delete(cachedFile);
+            }
+        }
     }
 }
 

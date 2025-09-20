@@ -30,6 +30,13 @@ export class LSTool {
             "$schema": "http://json-schema.org/draft-07/schema#"
         };
     }
+    
+    getDescription() {
+        return this.description;
+    }
+    getInputSchema() {
+        return this.input_schema;
+    }
 
     /**
      * Execute the ls operation

@@ -57,18 +57,10 @@ export class LintTool {
         }
     }
 
-    /**
-     * Get tool description
-     * @returns {string} Tool description
-     */
     getDescription() {
         return this.description;
     }
 
-    /**
-     * Get input schema
-     * @returns {Object} Input schema
-     */
     getInputSchema() {
         return this.input_schema;
     }
@@ -145,7 +137,7 @@ export class LintTool {
         } catch (error) {
             return {
                 success: false,
-                message: `## Lint Tool unused ##\n**Error:** ${error.message}`
+                message: `## Lint Tool Error ##\n**Error:** ${error.message}`
             };
         }
     }
@@ -225,7 +217,7 @@ export class LintTool {
                         result += '\n##Available learned skills:\n';
                         result += skillNames.map(name => `- learnedSkills.${name}`).join('\n') + '\n';
                     } else {
-                        result += '\n##No learned skills available. Create skills in learned-skills folder first.\n';
+                        result += '\n##No learned skills available. Create skills in learnedSkills folder first.\n';
                     }
                 }
                 

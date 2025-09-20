@@ -37,18 +37,10 @@ export class EditTool {
         this.readFiles = new Set(); // Track files that have been read
     }
 
-    /**
-     * Get tool description
-     * @returns {string} Tool description
-     */
     getDescription() {
         return this.description;
     }
-
-    /**
-     * Get input schema
-     * @returns {Object} Input schema
-     */
+    
     getInputSchema() {
         return this.input_schema;
     }
@@ -85,6 +77,8 @@ export class EditTool {
 
             // Read current file content
             const content = fs.readFileSync(file_path, 'utf8');
+            // Escape regex special characters in old_string for literal matching
+            const escapedOld = old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
             // Check if old_string exists in file
             if (!content.includes(old_string)) {
@@ -93,7 +87,7 @@ export class EditTool {
 
             // Check for uniqueness if not replace_all
             if (!replace_all) {
-                const occurrences = (content.match(new RegExp(this.escapeRegex(old_string), 'g')) || []).length;
+                const occurrences = (content.match(new RegExp(escapedOld, 'g')) || []).length;
                 if (occurrences > 1) {
                     throw new Error(`[Edit Tool] String "${old_string}" appears ${occurrences} times. Use replace_all=true or provide more context to make it unique`);
                 }
@@ -111,7 +105,7 @@ export class EditTool {
             fs.writeFileSync(file_path, newContent, 'utf8');
 
             const replacements = replace_all 
-                ? (content.match(new RegExp(this.escapeRegex(old_string), 'g')) || []).length
+                ? (content.match(new RegExp(escapedOld, 'g')) || []).length
                 : 1;
 
             return {
@@ -127,23 +121,6 @@ export class EditTool {
                 message: `## Edit Tool Error ##\n**Error:** ${error.message}`
             };
         }
-    }
-
-    /**
-     * Mark a file as read (called by Read tool)
-     * @param {string} filePath - Path to the file that was read
-     */
-    markFileAsRead(filePath) {
-        this.readFiles.add(filePath);
-    }
-
-    /**
-     * Escape special regex characters
-     * @param {string} string - String to escape
-     * @returns {string} Escaped string
-     */
-    escapeRegex(string) {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 }
 

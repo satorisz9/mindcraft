@@ -11,432 +11,288 @@ import { TodoWriteTool } from './todoWrite.js';
 import fs from 'fs';
 import path from 'path';
 
-// ANSI color codes for console output
-const colors = {
-    reset: '\x1b[0m',
-    red: '\x1b[31m',
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    magenta: '\x1b[35m',
-    cyan: '\x1b[36m',
-    white: '\x1b[37m',
-    brightRed: '\x1b[91m',
-    brightGreen: '\x1b[92m',
-    brightYellow: '\x1b[93m',
-    brightBlue: '\x1b[94m',
-    brightMagenta: '\x1b[95m',
-    brightCyan: '\x1b[96m',
-    brightWhite: '\x1b[97m'
+// Constants
+const COLORS = {
+    reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
+    blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m', white: '\x1b[37m',
+    brightRed: '\x1b[91m', brightGreen: '\x1b[92m', brightYellow: '\x1b[93m',
+    brightBlue: '\x1b[94m', brightMagenta: '\x1b[95m', brightCyan: '\x1b[96m'
 };
 
+const TOOL_CLASSES = [
+    ['Edit', EditTool], ['MultiEdit', MultiEditTool], ['Write', WriteTool],
+    ['Execute', ExecuteTool], ['Lint', LintTool], ['Glob', GlobTool],
+    ['Grep', GrepTool], ['LS', LSTool], ['Read', ReadTool], ['TodoWrite', TodoWriteTool]
+];
+
+const REMINDER_THRESHOLD = 60000; // 1 minute in milliseconds
+
 /**
- * Tool Manager - Manages all available tools, executes tools, and provides tool descriptions for prompts
+ * Tool Manager - Manages all available tools and executes Tools with workspace validation
  */
 export class ToolManager {
     constructor(agent = null) {
         this.agent = agent;
         this.tools = new Map();
         this.workspaces = [];
+        this.promptCache = null;
+        this.promptCacheTime = 0;
+        
         this.initializeTools();
         this.initializeWorkspaces();
     }
 
-    /**
-     * Initialize workspaces based on agent configuration
-     */
-    initializeWorkspaces() {
-        if (this.agent && this.agent.name) {
-            // Only use agent.code_workspaces - no fallback to relative paths
-            if (this.agent.code_workspaces && Array.isArray(this.agent.code_workspaces)) {
-                this.workspaces = this.agent.code_workspaces
-                    .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
-                    .map(ws => ws.startsWith('/') ? ws.substring(1) : ws); // Remove leading slash for internal processing
-                //console.log(`SECURITY: Bot ${this.agent.name} initialized with workspaces: ${this.workspaces.join(', ')}`);
-            } else {
-                console.error(`SECURITY: No code_workspaces configured for bot ${this.agent.name}. File operations will be blocked.`);
-                this.workspaces = []; // Empty workspaces - all operations will be blocked
-            }
-        }
-    }
+    // Initialization
 
-    /**
-     * Initialize all available tools
-     */
     initializeTools() {
-        // Register all tools with agent parameter
         const readTool = new ReadTool(this.agent);
         
-        this.tools.set('Edit', new EditTool(this.agent));
-        this.tools.set('MultiEdit', new MultiEditTool(this.agent));
-        this.tools.set('Write', new WriteTool(this.agent));
-        this.tools.set('Execute', new ExecuteTool(this.agent));
-        this.tools.set('Lint', new LintTool(this.agent));
-        this.tools.set('Glob', new GlobTool(this.agent));
-        this.tools.set('Grep', new GrepTool(this.agent));
-        this.tools.set('LS', new LSTool(this.agent));
-        this.tools.set('Read', readTool);
-        this.tools.set('TodoWrite', new TodoWriteTool(this.agent));
-
-        // Set tool registry for cross-tool communication
+        for (const [name, ToolClass] of TOOL_CLASSES) {
+            const tool = name === 'Read' ? readTool : new ToolClass(this.agent);
+            this.tools.set(name, tool);
+        }
+        
         readTool.setToolRegistry(this.tools);
     }
 
-    /**
-     * Execute a tool command
-     * @param {Object} command - The command object
-     * @param {string} command.tool - Tool name
-     * @param {Object} command.params - Tool parameters
-     * @returns {Object} Execution result
-     */
-    async executeCommand(command) {
-        try {
-            const { tool, params } = command;
+    initializeWorkspaces() {
+        if (!this.agent?.name) {
+            this.workspaces = [];
+            return;
+        }
 
-            if (!tool) {
-                throw new Error('Missing tool name in command');
-            }
-
-            const toolInstance = this.tools.get(tool);
-            if (!toolInstance) {
-                throw new Error(`Unknown tool: ${tool}. Available tools: ${Array.from(this.tools.keys()).join(', ')}`);
-            }
-
-            // Execute the tool - all tools now have agent in constructor
-            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Executing ${colors.brightYellow}${tool}${colors.reset} tool...`);
-            const result = await toolInstance.execute(params || {});
-            
-            // Log success or failure with colors
-            if (result.success !== false) {
-                console.log(`${colors.brightGreen}✓ [ToolManager]${colors.reset} ${colors.brightYellow}${tool}${colors.reset} executed successfully`);
-            } else {
-                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} ${colors.brightYellow}${tool}${colors.reset} execution failed: ${result.error || result.message}`);
-            }
-            
-            return {
-                tool,
-                timestamp: new Date().toISOString(),
-                ...result
-            };
-
-        } catch (error) {
-            console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} ${colors.brightYellow}${command.tool || 'unknown'}${colors.reset} execution error: ${error.message}`);
-            return {
-                tool: command.tool || 'unknown',
-                timestamp: new Date().toISOString(),
-                success: false,
-                error: error.message
-            };
+        // Only use agent.code_workspaces - no fallback to relative paths
+        if (this.agent.code_workspaces && Array.isArray(this.agent.code_workspaces)) {
+            this.workspaces = this.agent.code_workspaces
+                .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
+                .map(ws => ws.startsWith('/') ? ws.substring(1) : ws); // Remove leading slash for internal processing
+        } else {
+            this.logSecurity(`No code_workspaces configured for bot ${this.agent.name}. File operations will be blocked.`);
+            this.workspaces = []; // Empty workspaces - all operations will be blocked
         }
     }
 
-    /**
-     * Execute multiple tools in sequence
-     * @param {Array} tools - Array of command objects
-     * @returns {Array} Array of execution results
-     */
-    async executetools(tools) {
-        const results = [];
-        
-        // Validate tools parameter
-        if (!tools || !Array.isArray(tools)) {
-            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} executetools: tools parameter is not a valid array`);
-            return results;
+    // Core Execution
+
+    async executeTool(Tool) {
+        const startTime = Date.now();
+        const { tool: toolName, params = {} } = Tool;
+
+        if (!toolName) {
+            return this.createErrorResult('unknown', 'Missing tool name in Tool', startTime);
         }
-        
-        console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Executing ${colors.brightMagenta}${tools.length}${colors.reset} command(s)...`);
-        
-        for (let i = 0; i < tools.length; i++) {
-            const command = tools[i];
-            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Command ${colors.brightMagenta}${i + 1}/${tools.length}${colors.reset}:`);
+
+        const toolInstance = this.tools.get(toolName);
+        if (!toolInstance) {
+            const availableTools = Array.from(this.tools.keys()).join(', ');
+            return this.createErrorResult(toolName, `Unknown tool: ${toolName}. Available: ${availableTools}`, startTime);
+        }
+
+        try {
+            console.log(`${COLORS.brightBlue}[ToolManager]${COLORS.reset} Executing ${COLORS.brightYellow}${toolName}${COLORS.reset} tool...`);
+            const result = await toolInstance.execute(params);
             
-            const result = await this.executeCommand(command);
-            results.push(result);
+            if (result.success !== false) {
+                console.log(`${COLORS.brightGreen}✓ [ToolManager]${COLORS.reset} ${COLORS.brightYellow}${toolName}${COLORS.reset} executed successfully`);
+            } else {
+                console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} ${COLORS.brightYellow}${toolName}${COLORS.reset} execution failed: ${result.error || result.message}`);
+            }
             
-            // Stop execution if a command fails (optional behavior)
-            if (!result.success) {
-                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} Command ${i + 1} failed, continuing with next command...`);
+            return { tool: toolName, timestamp: new Date().toISOString(), ...result };
+        } catch (error) {
+            console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} ${COLORS.brightYellow}${toolName || 'unknown'}${COLORS.reset} execution error: ${error.message}`);
+            return this.createErrorResult(toolName, error.message, startTime);
+        }
+    }
+
+    async runTools(tools, options = {}) {
+        const { validateWorkspaces = false, aggregate = true } = options;
+        
+        if (!Array.isArray(tools)) {
+            console.log(`${COLORS.brightYellow}⚠ [ToolManager]${COLORS.reset} executeTools: tools parameter is not a valid array`);
+            return [];
+        }
+
+        if (validateWorkspaces) {
+            const validation = this.validateWorkspaces(tools);
+            if (!validation.valid) {
+                throw new Error(`Workspace validation failed: ${validation.error}`);
             }
         }
-        
-        const successCount = results.filter(r => r.success !== false).length;
-        const failureCount = results.length - successCount;
-        
-        if (failureCount === 0) {
-            console.log(`${colors.brightGreen}[OK] [ToolManager]${colors.reset} All ${colors.brightMagenta}${tools.length}${colors.reset} tools executed successfully`);
-        } else {
-            console.log(`${colors.brightYellow}⚠ [ToolManager]${colors.reset} tools completed: ${colors.brightGreen}${successCount} success${colors.reset}, ${colors.brightRed}${failureCount} failed${colors.reset}`);
+
+        console.log(`${COLORS.brightBlue}[ToolManager]${COLORS.reset} Executing ${COLORS.brightMagenta}${tools.length}${COLORS.reset} Tool(s)...`);
+        const results = [];
+
+        for (let i = 0; i < tools.length; i++) {
+            console.log(`${COLORS.brightBlue}[ToolManager]${COLORS.reset} Tool ${COLORS.brightMagenta}${i + 1}/${tools.length}${COLORS.reset}:`);
+            const result = await this.executeTool(tools[i]);
+            results.push(result);
+            
+            if (!result.success) {
+                console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} Tool ${i + 1} failed, continuing with next Tool...`);
+            }
         }
-        
+
+        if (aggregate) {
+            this.logExecutionSummary(results);
+        }
+
         return results;
     }
 
-    /**
-     * Get list of available tools
-     * @returns {Array} Array of tool names
-     */
-    getAvailableTools() {
-        return Array.from(this.tools.keys());
-    }
-
-    /**
-     * Get tool instance
-     * @param {string} toolName - Name of the tool
-     * @returns {Object} Tool instance
-     */
-    getTool(toolName) {
-        return this.tools.get(toolName);
-    }
-
-    /**
-     * Check if a response contains JSON tool tools
-     * @param {string} response - The response text to check
-     * @returns {boolean} True if response contains JSON tools
-     */
-    isJSONToolResponse(response) {
-        if (!response || typeof response !== 'string') {
-            return false;
-        }
-
-        // Strategy 1: Try to parse the entire response as JSON first
+    async executeJSONTools(tools) {
         try {
-            const trimmedResponse = response.trim();
-            const parsed = JSON.parse(trimmedResponse);
+            console.log(`${COLORS.brightBlue}[ToolManager]${COLORS.reset} Starting JSON tools execution...`);
             
-            // Check for {tools:[]} format
-            if (parsed && typeof parsed === 'object' && parsed.tools && Array.isArray(parsed.tools)) {
-                for (const cmd of parsed.tools) {
-                    if (cmd && typeof cmd === 'object' && cmd.name) {
-                        return true;
-                    }
-                }
+            const results = await this.runTools(tools, { validateWorkspaces: true, aggregate: true });
+            const failedResults = results.filter(r => r.success === false);
+
+            if (failedResults.length > 0) {
+                const failedToolNames = failedResults.map(r => r.tool).join(', ');
+                const errorMessage = `${failedResults.length} tools failed: ${failedResults.map(r => r.error).join(', ')}`;
+                console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} JSON tools execution failed: ${failedResults.length} Tool(s) failed`);
+                return { 
+                    success: false, 
+                    message: errorMessage, 
+                    results, 
+                    operations: this.createOperations(results) 
+                };
             }
-            // Check for legacy formats
-            else if (Array.isArray(parsed)) {
-                for (const cmd of parsed) {
-                    if (cmd && typeof cmd === 'object' && cmd.tool) {
-                        return true;
-                    }
-                }
-            } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                return true;
-            }
+
+            const successMessage = results.map(r => `${r.tool}: ${r.file_path || 'executed'}`).join(', ');
+            console.log(`${COLORS.brightGreen}[>] [ToolManager]${COLORS.reset} JSON tools execution completed successfully`);
+            
+            return {
+                success: true,
+                message: `Workspace validation passed. ${successMessage}`,
+                results,
+                operations: this.createOperations(results)
+            };
         } catch (error) {
-            // Continue to other strategies
+            console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} JSON tools execution error: ${error.message}`);
+            return { success: false, message: `Execution error: ${error.message}` };
         }
-
-        // Strategy 2: Look for JSON objects within the text
-        const jsonObjectRegex = /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/g;
-        let match;
-        
-        while ((match = jsonObjectRegex.exec(response)) !== null) {
-            try {
-                const jsonContent = match[0].trim();
-                const parsed = JSON.parse(jsonContent);
-                
-                // Check for {tools:[]} format
-                if (parsed && typeof parsed === 'object' && parsed.tools && Array.isArray(parsed.tools)) {
-                    for (const cmd of parsed.tools) {
-                        if (cmd && typeof cmd === 'object' && cmd.name) {
-                            return true;
-                        }
-                    }
-                }
-                // Check for legacy tool command
-                else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                    return true;
-                }
-            } catch (error) {
-                continue;
-            }
-        }
-
-        // Strategy 3: Look for JSON code blocks (legacy)
-        const jsonBlockRegex = /```json\s*([\s\S]*?)```/gi;
-        const matches = response.match(jsonBlockRegex);
-        
-        if (matches) {
-            for (const match of matches) {
-                try {
-                    const jsonContent = match.replace(/```json\s*|```/gi, '').trim();
-                    const parsed = JSON.parse(jsonContent);
-                    
-                    // Check for {tools:[]} format
-                    if (parsed && typeof parsed === 'object' && parsed.tools && Array.isArray(parsed.tools)) {
-                        for (const cmd of parsed.tools) {
-                            if (cmd && typeof cmd === 'object' && cmd.name) {
-                                return true;
-                            }
-                        }
-                    }
-                    // Check legacy formats
-                    else if (Array.isArray(parsed)) {
-                        for (const cmd of parsed) {
-                            if (cmd && typeof cmd === 'object' && cmd.tool) {
-                                return true;
-                            }
-                        }
-                    } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                        return true;
-                    }
-                } catch (error) {
-                    continue;
-                }
-            }
-        }
-        
-        return false;
     }
 
-    /**
-     * Extract JSON tools from a response
-     * @param {string} response - The response text
-     * @returns {Array} Array of command objects
-     */
-    extractJSONtools(response) {
+    // JSON Tool Processing
+    async processResponse(response) {
+        const parseResult = this.parseJSONTools(response);
+        
+        if (!parseResult.hasTools) {
+            return { success: true, message: 'No JSON tools found in response' };
+        }
+
+        if (parseResult.tools.length === 0) {
+            return { success: false, message: 'Failed to extract valid JSON tools' };
+        }
+
+        console.log(`Detected ${parseResult.tools.length} JSON tool(s) in response`);
+        return await this.executeJSONTools(parseResult.tools);
+    }
+
+    parseJSONTools(response) {
+        if (!response || typeof response !== 'string') {
+            return { hasTools: false, tools: [] };
+        }
+
+        const strategies = [
+            () => this.parseDirectJSON(response),
+            () => this.parseEmbeddedJSON(response),
+            () => this.parseCodeBlockJSON(response)
+        ];
+
+        for (const strategy of strategies) {
+            const result = strategy();
+            if (result.tools.length > 0) {
+                return { hasTools: true, tools: result.tools };
+            }
+        }
+
+        return { hasTools: false, tools: [] };
+    }
+
+    parseDirectJSON(response) {
+        try {
+            const parsed = JSON.parse(response.trim());
+            const tools = this.extractToolsFromParsed(parsed);
+            return { tools, strategy: 'direct parsing' };
+        } catch {
+            return { tools: [], strategy: 'direct parsing' };
+        }
+    }
+
+    parseEmbeddedJSON(response) {
         const tools = [];
-        
-        if (!response || typeof response !== 'string') {
-            return tools;
-        }
-
-        // Strategy 1: Try to parse the entire response as JSON first
-        try {
-            const trimmedResponse = response.trim();
-            const parsed = JSON.parse(trimmedResponse);
-            
-            // Handle {tools:[]} format
-            if (parsed && typeof parsed === 'object' && parsed.tools && Array.isArray(parsed.tools)) {
-                for (const cmd of parsed.tools) {
-                    if (cmd && typeof cmd === 'object' && cmd.name) {
-                        // Create command object with tool name and params
-                        const { name, ...params } = cmd;
-                        tools.push({ tool: name, params });
-                    }
-                }
-            }
-            // Handle legacy formats: single tools and arrays
-            else if (Array.isArray(parsed)) {
-                for (const cmd of parsed) {
-                    if (cmd && typeof cmd === 'object' && cmd.tool) {
-                        tools.push(cmd);
-                    }
-                }
-            } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                tools.push(parsed);
-            }
-            
-            // If we successfully parsed JSON and found tools, return them
-            if (tools.length > 0) {
-                console.log(`Extracted ${tools.length} JSON command(s) from direct parsing`);
-                return tools;
-            }
-        } catch (error) {
-            // Direct parsing failed, continue to code block parsing
-            console.log('Direct JSON parsing failed, trying code block extraction...');
-        }
-
-        // Strategy 2: Look for JSON objects within the text (not in code blocks)
-        // Use a more robust regex to find complete JSON objects
         const jsonObjectRegex = /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/g;
         let match;
-        
+
         while ((match = jsonObjectRegex.exec(response)) !== null) {
             try {
-                const jsonContent = match[0].trim();
-                const parsed = JSON.parse(jsonContent);
-                
-                // Check if this is a {tools:[]} format
-                if (parsed && typeof parsed === 'object' && parsed.tools && Array.isArray(parsed.tools)) {
-                    for (const cmd of parsed.tools) {
-                        if (cmd && typeof cmd === 'object' && cmd.name) {
-                            // Create command object with tool name and params
-                            const { name, ...params } = cmd;
-                            tools.push({ tool: name, params });
-                        }
-                    }
-                }
-                // Check if this is a legacy tool command
-                else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                    tools.push(parsed);
-                }
-            } catch (error) {
-                // Continue to next match
+                const parsed = JSON.parse(match[0].trim());
+                tools.push(...this.extractToolsFromParsed(parsed));
+            } catch {
                 continue;
             }
         }
-        
-        // If we found tools from object extraction, return them
-        if (tools.length > 0) {
-            console.log(`Extracted ${tools.length} JSON command(s) from object parsing`);
-            return tools;
-        }
 
-        // Strategy 3: Look for code block wrapped JSON (original behavior)
+        return { tools, strategy: 'embedded JSON parsing' };
+    }
+
+    parseCodeBlockJSON(response) {
+        const tools = [];
         const jsonBlockRegex = /```json\s*([\s\S]*?)```/gi;
-        
+        let match;
+
         while ((match = jsonBlockRegex.exec(response)) !== null) {
             try {
-                const jsonContent = match[1].trim();
-                const parsed = JSON.parse(jsonContent);
-                
-                // Handle both single tools and arrays
-                if (Array.isArray(parsed)) {
-                    for (const cmd of parsed) {
-                        if (cmd && typeof cmd === 'object' && cmd.tool) {
-                            tools.push(cmd);
-                        }
-                    }
-                } else if (parsed && typeof parsed === 'object' && parsed.tool) {
-                    tools.push(parsed);
-                }
-            } catch (error) {
-                console.warn('Failed to parse JSON command from code block:', error.message);
+                const parsed = JSON.parse(match[1].trim());
+                tools.push(...this.extractToolsFromParsed(parsed));
+            } catch {
+                continue;
             }
         }
-        
-        if (tools.length > 0) {
-            console.log(`Extracted ${tools.length} JSON command(s) from code blocks`);
-        } else {
-            console.log('No valid JSON tools found in response');
+
+        return { tools, strategy: 'code block parsing' };
+    }
+
+    extractToolsFromParsed(parsed) {
+        const tools = [];
+
+        // Handle {tools:[]} format
+        if (parsed?.tools && Array.isArray(parsed.tools)) {
+            for (const cmd of parsed.tools) {
+                if (cmd?.name) {
+                    const { name, ...params } = cmd;
+                    tools.push({ tool: name, params });
+                }
+            }
         }
-        
+        // Handle legacy formats
+        else if (Array.isArray(parsed)) {
+            tools.push(...parsed.filter(cmd => cmd?.tool));
+        } else if (parsed?.tool) {
+            tools.push(parsed);
+        }
+
         return tools;
     }
 
-    /**
-     * Validate that tools only operate within allowed workspaces
-     * @param {Array} tools - Array of command objects
-     * @returns {Object} Validation result
-     */
-    validateCommandWorkspaces(tools) {
+    // Workspace Validation
+
+    validateWorkspaces(tools) {
         try {
             if (!Array.isArray(tools)) {
-                //console.log(`SECURITY: validateCommandWorkspaces - tools is not an array: ${typeof tools}`);
-                return { valid: false, error: 'tools must be an array' };
+                return { valid: false, error: 'Tools must be an array' };
             }
 
-            //console.log(`SECURITY: validateCommandWorkspaces - processing ${tools.length} tools`);
-            //console.log(`SECURITY: validateCommandWorkspaces - this.workspaces:`, this.workspaces);
+            for (const Tool of tools) {
+                const filePath = Tool.params?.file_path || Tool.params?.path;
+                if (!filePath) continue;
 
-            for (const command of tools) {
-                if (!command || !command.params) {
-                    //console.log(`SECURITY: validateCommandWorkspaces - skipping command without params:`, command);
-                    continue;
-                }
-
-                const filePath = command.params.file_path || command.params.path;
-                if (!filePath) {
-                    continue;
-                }
-
-                // Check if file path is within allowed workspaces
-                // Only support absolute paths (must start with /)
                 if (!filePath.startsWith('/')) {
-                    //console.log(`SECURITY: Blocked relative path, only absolute paths allowed: ${filePath}`);
                     return {
                         valid: false,
-                        error: `File access denied: Only absolute paths are allowed, got relative path: ${filePath}`
+                        error: `File access denied: Only absolute paths allowed, got: ${filePath}`
                     };
                 }
 
@@ -448,129 +304,37 @@ export class ToolManager {
                 });
 
                 if (!isAllowed) {
-                    //console.log(`SECURITY: Blocked file access outside workspace: ${filePath}`);
-                    //console.log(`SECURITY: Allowed workspaces: ${(this.workspaces || []).join(', ')}`);
                     return {
                         valid: false,
-                        error: `File access denied: ${filePath} is outside allowed workspaces: ${(this.workspaces || []).join(', ')}`
+                        error: `File access denied: ${filePath} is outside allowed workspaces: ${this.workspaces.join(', ')}`
                     };
                 }
             }
 
             return { valid: true };
         } catch (error) {
-            console.error(`SECURITY: validateCommandWorkspaces - Error in validation:`, error);
-            console.error(`SECURITY: validateCommandWorkspaces - Error stack:`, error.stack);
-            console.error(`SECURITY: validateCommandWorkspaces - tools:`, JSON.stringify(tools, null, 2));
-            console.error(`SECURITY: validateCommandWorkspaces - this.workspaces:`, this.workspaces);
-            return { 
-                valid: false, 
-                error: `Workspace validation failed: ${error.message}. tools type: ${typeof tools}, workspaces: ${this.workspaces}` 
-            };
+            this.logSecurity(`Workspace validation error: ${error.message}`);
+            return { valid: false, error: `Workspace validation failed: ${error.message}` };
         }
     }
 
-    /**
-     * Execute JSON tools with workspace validation
-     * @param {Array} tools - Array of command objects
-     * @returns {Object} Execution result
-     */
-    async executeJSONtools(tools) {
-        let message = '';
-        try {
-            console.log(`${colors.brightBlue}[ToolManager]${colors.reset} Starting JSON tools execution...`);
-            // Validate workspaces
-            const validation = this.validateCommandWorkspaces(tools);
-  
-            if (!validation.valid) {
-                message += `Workspace validation failed: ${validation.error}`;
-                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} Workspace validation failed: ${validation.error}`);
-                return {
-                    success: false,
-                    message: message
-                };
-            }
-            message += `Workspace validation passed`;
-            console.log(`${colors.brightGreen}[·] [ToolManager]${colors.reset} Workspace validation passed`);
+    // Tool Information
 
-            // Execute tools
-            const results = await this.executetools(tools) || [];
-            const successCount = results.filter(r => r.success !== false).length;
-            const failedResults = results.filter(r => r.success === false);
-
-            if (failedResults.length > 0) {
-                message += `${failedResults.length} tools failed: ${failedResults.map(r => r.error).join(', ')}`;
-                console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON tools execution failed: ${failedResults.length} command(s) failed`);
-                return {
-                    success: false,
-                    message: message,
-                    results
-                };
-            }
-
-            const executedTools = results.map(r => `${r.tool}: ${r.file_path || 'executed'}`).join(', ');
-            
-            // Create operations array for coder.js compatibility
-            const operations = results.map(r => ({
-                tool: r.tool || r.action,
-                path: r.file_path
-            }));
-            
-            console.log(`${colors.brightGreen}[>] [ToolManager]${colors.reset} JSON tools execution completed successfully`);
-            message += executedTools;
-            return {
-                success: true,
-                message: message,
-                results,
-                operations
-            };
-        } catch (error) {
-            console.log(`${colors.brightRed}✗ [ToolManager]${colors.reset} JSON tools execution error: ${error.message}`);
-            message += `Execution error: ${error.message}`;
-            return {
-                success: false,
-                message: message
-            };
-        }
+    getAvailableTools() {
+        return Array.from(this.tools.keys());
     }
 
-    /**
-     * Process a response and execute any JSON tools found
-     * @param {string} response - The response text
-     * @returns {Object} Processing result
-     */
-    async processResponse(response) {
-        if (!this.isJSONToolResponse(response)) {
-            return {
-                success: true,
-                message: 'No JSON tool tools found in response'
-            };
-        }
-
-        console.log('Detected JSON tool tools in response');
-        const tools = this.extractJSONtools(response);
-        
-        if (tools.length === 0) {
-            return {
-                success: false,
-                message: 'Failed to extract valid JSON tools'
-            };
-        }
-
-        return await this.executeJSONtools(tools);
+    getTool(toolName) {
+        return this.tools.get(toolName);
     }
 
-    /**
-     * Generate tool descriptions for prompts
-     * @returns {Object} Tool descriptions in {tools:[]} format
-     */
     getToolDescriptions() {
         const descriptions = [];
         
         for (const [name, tool] of this.tools) {
             if (tool.getDescription && tool.getInputSchema) {
                 descriptions.push({
-                    name: name,
+                    name,
                     description: tool.getDescription(),
                     input_schema: tool.getInputSchema()
                 });
@@ -580,110 +344,127 @@ export class ToolManager {
         return { tools: descriptions };
     }
 
-    /**
-     * Check if TODOLIST.md is empty or doesn't exist
-     * @returns {boolean} True if todo list is empty or doesn't exist
-     */
-    isTodoListEmpty() {
-        if (!this.agent || !this.agent.name) {
-            return true;
-        }
-        
-        // Get the base directory from the current module path
-        const currentDir = path.dirname(new URL(import.meta.url).pathname);
-        const projectRoot = path.resolve(currentDir, '..');
-        const todoFilePath = path.join(projectRoot, 'bots', this.agent.name, 'TODOLIST.md');
-        
-        try {
-            if (!fs.existsSync(todoFilePath)) {
-                return true;
-            }
-            
-            const content = fs.readFileSync(todoFilePath, 'utf8').trim();
-            
-            // Check if file is empty or only contains basic structure without actual todos
-            if (!content) {
-                return true;
-            }
-            
-            // Check if file only contains header and no actual todo items
-            const lines = content.split('\n').filter(line => line.trim());
-            const todoLines = lines.filter(line => line.trim().startsWith('- ['));
-            
-            return todoLines.length === 0;
-        } catch (error) {
-            // If there's an error reading the file, consider it empty
-            return true;
-        }
-    }
-
-    /**
-     * Check if learned-skills folder needs attention
-     * @returns {boolean} True if reminder should be shown
-     */
-    shouldShowLearnedSkillsReminder() {
-        try {
-            if (!this.agent || !this.agent.name) return false;
-            
-            const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-            const learnedSkillsPath = path.join(projectRoot, 'bots', this.agent.name, 'learned-skills');
-            
-            // Check if folder exists
-            if (!fs.existsSync(learnedSkillsPath)) {
-                return true; // No folder exists
-            }
-            
-            // Check files in the folder
-            const files = fs.readdirSync(learnedSkillsPath).filter(file => file.endsWith('.js'));
-            if (files.length === 0) {
-                return true; // No skill files exist
-            }
-            
-            // Check if any file was modified in the last minute
-            const oneMinuteAgo = Date.now() - 60000;
-            for (const file of files) {
-                const filePath = path.join(learnedSkillsPath, file);
-                const stats = fs.statSync(filePath);
-                if (stats.mtime.getTime() > oneMinuteAgo) {
-                    return false; // Recent activity found
-                }
-            }
-            
-            return true; // No recent activity
-        } catch (error) {
-            console.warn('Error checking learned-skills folder:', error.message);
-            return false;
-        }
-    }
-
-    /**
-     * Generate formatted tool descriptions for prompts
-     * @returns {string} Formatted tool descriptions
-     */
     getFormattedToolDescriptions() {
+        const now = Date.now();
+        
+        // Use cache if available and fresh (within 30 seconds)
+        if (this.promptCache && (now - this.promptCacheTime) < 30000) {
+            return this.promptCache;
+        }
+
         try {
             const toolsPromptPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'tools-prompt.md');
             let content = fs.readFileSync(toolsPromptPath, 'utf8');
             
-            // Check if todo list is empty and add system reminder
-            if (this.isTodoListEmpty()) {
-                content += '\n\n<system-reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a todo list please use the TodoWrite tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.</system-reminder>';
+            // Add system reminders
+            const reminders = this.generateSystemReminders();
+            if (reminders) {
+                content += reminders;
             }
             
-            // Check if learned-skills folder needs attention
-            if (this.shouldShowLearnedSkillsReminder()) {
-                content += '\n\n<system-reminder>You haven\'t learned any new skills in the past minute. If you have developed useful code patterns or solutions, consider saving them as reusable skills in the learned-skills folder using the Write tool. If you haven\'t learned anything new, feel free to ignore this message. DO NOT mention this reminder to the user.</system-reminder>';
-            }
+            // Cache the result
+            this.promptCache = content;
+            this.promptCacheTime = now;
             
             return content;
         } catch (error) {
             console.error('Error reading tools-prompt.md:', error);
-            // Fallback to original method if file reading fails
             const descriptions = this.getToolDescriptions();
             return JSON.stringify(descriptions, null, 2);
         }
     }
 
+    // System Reminders
+
+    generateSystemReminders() {
+        const reminders = [];
+        
+        if (this.isTodoListEmpty()) {
+            reminders.push('<system-reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a todo list please use the TodoWrite tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.</system-reminder>');
+        }
+        
+        if (this.shouldShowLearnedSkillsReminder()) {
+            reminders.push('<system-reminder>You haven\'t learned any new skills in the past minute. If you have developed useful code patterns or solutions, consider saving them as reusable skills in the learnedSkills folder using the Write tool. If you haven\'t learned anything new, feel free to ignore this message. DO NOT mention this reminder to the user.</system-reminder>');
+        }
+        
+        return reminders.length > 0 ? '\n\n' + reminders.join('\n\n') : '';
+    }
+
+    isTodoListEmpty() {
+        if (!this.agent?.name) return true;
+        
+        try {
+            const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+            const todoFilePath = path.join(projectRoot, 'bots', this.agent.name, 'TODOLIST.md');
+            
+            if (!fs.existsSync(todoFilePath)) return true;
+            
+            const content = fs.readFileSync(todoFilePath, 'utf8').trim();
+            if (!content) return true;
+            
+            const todoLines = content.split('\n').filter(line => line.trim().startsWith('- ['));
+            return todoLines.length === 0;
+        } catch {
+            return true;
+        }
+    }
+
+    shouldShowLearnedSkillsReminder() {
+        if (!this.agent?.name) return false;
+        
+        try {
+            const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+            const learnedSkillsPath = path.join(projectRoot, 'bots', this.agent.name, 'learnedSkills');
+            
+            if (!fs.existsSync(learnedSkillsPath)) return true;
+            
+            const files = fs.readdirSync(learnedSkillsPath).filter(file => file.endsWith('.js'));
+            if (files.length === 0) return true;
+            
+            const threshold = Date.now() - REMINDER_THRESHOLD;
+            return !files.some(file => {
+                const filePath = path.join(learnedSkillsPath, file);
+                const stats = fs.statSync(filePath);
+                return stats.mtime.getTime() > threshold;
+            });
+        } catch (error) {
+            console.warn('Error checking learnedSkills folder:', error.message);
+            return false;
+        }
+    }
+
+    // Utility Methods
+
+    createErrorResult(tool, message, startTime) {
+        return {
+            tool,
+            timestamp: new Date().toISOString(),
+            success: false,
+            error: message
+        };
+    }
+
+    createOperations(results) {
+        return results.map(r => ({
+            tool: r.tool,
+            path: r.file_path
+        }));
+    }
+
+    logSecurity(message) {
+        console.error(`${COLORS.brightRed}SECURITY: ${message}${COLORS.reset}`);
+    }
+
+    logExecutionSummary(results) {
+        const successCount = results.filter(r => r.success !== false).length;
+        const failureCount = results.length - successCount;
+        
+        if (failureCount === 0) {
+            console.log(`${COLORS.brightGreen}[OK] [ToolManager]${COLORS.reset} All ${COLORS.brightMagenta}${results.length}${COLORS.reset} tools executed successfully`);
+        } else {
+            console.log(`${COLORS.brightYellow}⚠ [ToolManager]${COLORS.reset} Tools completed: ${COLORS.brightGreen}${successCount} success${COLORS.reset}, ${COLORS.brightRed}${failureCount} failed${COLORS.reset}`);
+        }
+    }
 }
 
 export default ToolManager;

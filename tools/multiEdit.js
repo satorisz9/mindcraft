@@ -50,18 +50,12 @@ export class MultiEditTool {
         this.editTool = new EditTool();
     }
 
-    /**
-     * Get tool description
-     * @returns {string} Tool description
-     */
+
     getDescription() {
         return this.description;
     }
 
-    /**
-     * Get input schema
-     * @returns {Object} Input schema
-     */
+
     getInputSchema() {
         return this.input_schema;
     }
@@ -115,9 +109,12 @@ export class MultiEditTool {
                     throw new Error(`[MultiEdit Tool] Edit ${i + 1}: String not found in file: "${old_string}"`);
                 }
 
+                // Escape regex special characters in old_string for literal matching
+                const escapedOld = old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
                 // Check for uniqueness if not replace_all
                 if (!replace_all) {
-                    const occurrences = (content.match(new RegExp(this.escapeRegex(old_string), 'g')) || []).length;
+                    const occurrences = (content.match(new RegExp(escapedOld, 'g')) || []).length;
                     if (occurrences > 1) {
                         throw new Error(`[MultiEdit Tool] Edit ${i + 1}: String "${old_string}" appears ${occurrences} times. Use replace_all=true or provide more context to make it unique`);
                     }
@@ -132,7 +129,7 @@ export class MultiEditTool {
                 }
 
                 const replacements = replace_all 
-                    ? (originalContent.match(new RegExp(this.escapeRegex(old_string), 'g')) || []).length
+                    ? (originalContent.match(new RegExp(escapedOld, 'g')) || []).length
                     : 1;
 
                 results.push({
@@ -164,23 +161,6 @@ export class MultiEditTool {
                 message: `## MultiEdit Tool Error ##\n**Error:** ${error.message}`
             };
         }
-    }
-
-    /**
-     * Mark a file as read (called by Read tool)
-     * @param {string} filePath - Path to the file that was read
-     */
-    markFileAsRead(filePath) {
-        this.editTool.markFileAsRead(filePath);
-    }
-
-    /**
-     * Escape special regex characters
-     * @param {string} string - String to escape
-     * @returns {string} Escaped string
-     */
-    escapeRegex(string) {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 }
 
