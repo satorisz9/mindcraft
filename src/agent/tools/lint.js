@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { ESLint } from "eslint";
 import path from 'path';
-import { LearnedSkillsManager } from '../src/agent/library/learnedSkillsManager.js';
+import { LearnedSkillsManager } from '../library/learnedSkillsManager.js';
 
 /**
  * Lint Tool - Validates JavaScript code files for syntax and skill usage

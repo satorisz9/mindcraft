@@ -1,12 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { readFile } from 'fs/promises';
-import { makeCompartment } from '../src/agent/library/lockdown.js';
-import * as skills from '../src/agent/library/skills.js';
-import * as world from '../src/agent/library/world.js';
+import { makeCompartment } from '../library/lockdown.js';
+import * as skills from '../library/skills.js';
+import * as world from '../library/world.js';
 import { Vec3 } from 'vec3';
 import { LintTool } from './lint.js';
-import { LearnedSkillsManager } from '../src/agent/library/learnedSkillsManager.js';
+import { LearnedSkillsManager } from '../library/learnedSkillsManager.js';
 
 // Regex patterns for stack trace parsing
 const StackTracePatterns = {
