@@ -316,53 +316,44 @@ export class Prompter {
         return messages;
     }
 
-    async promptCoding(messages) {
+    async promptCoding(messages, codingGoal) {
         if (this.awaiting_coding) {
             console.warn('Already awaiting coding response, returning no response.');
             return '```//no response```';
         }
         this.awaiting_coding = true;
-        
         try {
+            // Prepare messages and prompt
             await this.checkCooldown();
-            
-            // Check message length before sending
             messages = this._trimMessages(messages);
-            
-            // Read prompt from coding.md file if it exists, otherwise use profile.coding
             let prompt;
             try {
-                const codingMdPath = './profiles/defaults/coding.md';
-                prompt = await fs.readFile(codingMdPath, 'utf8');
+                prompt = await fs.readFile('./profiles/defaults/coding.md', 'utf8');
             } catch (error) {
                 console.log('coding.md not found, using profile.coding');
                 prompt = this.profile.coding;
             }
-            
+            prompt = prompt.replaceAll('$CODING_GOAL', codingGoal);
             prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
-
-            let resp = await this.code_model.sendRequest(messages, prompt);
+            
+            // Send request and handle response
+            const resp = await this.code_model.sendRequest(messages, prompt);
             await this._saveLog(prompt, messages, resp, 'coding');
-            this.max_messages+=1;
+            this.max_messages++;
+            
             return resp;
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
-            
-            // Check if the input length exceeds the limit
-            if (error.message && error.message.includes('Range of input length should be')) {
+            // Handle input length exceeded error
+            if (error.message?.includes('Range of input length should be')) {
                 console.log('Input length exceeded, trimming messages and adjusting max_messages');
-                
-                // Remove the oldest message
-                if (messages.length > 1) {
+                if (messages.length > 2) {
                     messages.shift();
                     console.log(`Removed oldest message, new length: ${messages.length}`);
-                    
-                    // Adjust max_messages to the current length
-                    this.max_messages = messages.length-2;
+                    this.max_messages = messages.length - 2;
                     console.log(`Adjusted max_messages to: ${this.max_messages}`);
                 }
             }
-            
             throw error;
         } finally {
             this.awaiting_coding = false;
@@ -405,7 +396,7 @@ export class Prompter {
         system_message = await this.replaceStrings(system_message, messages);
 
         let user_message = 'Use the below info to determine what goal to target next\n\n';
-        user_message += '$LAST_GOALS\n$STATS\n$INVENTORY\n$CONVO'
+        user_message += '$LAST_GOALS\n$STATS\n$INVENTORY\n$CONVO';
         user_message = await this.replaceStrings(user_message, messages, null, null, last_goals);
         let user_messages = [{role: 'user', content: user_message}];
 

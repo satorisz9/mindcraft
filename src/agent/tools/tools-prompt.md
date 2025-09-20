@@ -1,41 +1,23 @@
 # Tools operations
 
-Tool name: Glob
-Tool description: - Fast file pattern matching tool that works with any codebase size
-- Supports glob patterns like "**/*.js" or "src/**/*.ts"
-- Returns matching file paths sorted by modification time
-- Use this tool when you need to find files by name patterns
-- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead
-- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.
-Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The glob pattern to match files against'}, 'path': {'type': 'string', 'description': 'The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
+Tool name: FinishCoding
+Tool description: Finish the current coding session and return to normal mode. Use this tool when you have completed all the required coding tasks and want to provide a summary of what was accomplished during the coding session.
+
+Usage:
+- Call this tool only when you have finished all coding tasks
+- Provide a comprehensive summary of what was accomplished
+- This will gracefully exit the coding mode and return control to the main agent
+- The summary will be returned as the result of the newAction command
+
+Input schema: {'type': 'object', 'properties': {'summary': {'type': 'string', 'description': 'A comprehensive summary of what was accomplished during this coding session, including files created/modified, features implemented, and any important notes.'}}, 'required': ['summary'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
 
 ---
-
-
-Tool name: Grep
-Tool description: A powerful search tool built on ripgrep
-
-  Usage:
-  - ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command. The Grep tool has been optimized for correct permissions and access.
-  - Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
-  - Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter (e.g., "js", "py", "rust")
-  - Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
-  - Use Task tool for open-ended searches requiring multiple rounds
-  - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code)
-  - Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \{[\s\S]*?field`, use `multiline: true`
-
-Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The regular expression pattern to search for in file contents'}, 'path': {'type': 'string', 'description': 'File or directory to search in (rg PATH). Defaults to current working directory.'}, 'glob': {'type': 'string', 'description': 'Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}") - maps to rg --glob'}, 'output_mode': {'type': 'string', 'enum': ['content', 'files_with_matches', 'count'], 'description': 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".'}, '-B': {'type': 'number', 'description': 'Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.'}, '-A': {'type': 'number', 'description': 'Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.'}, '-C': {'type': 'number', 'description': 'Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.'}, '-n': {'type': 'boolean', 'description': 'Show line numbers in output (rg -n). Requires output_mode: "content", ignored otherwise.'}, '-i': {'type': 'boolean', 'description': 'Case insensitive search (rg -i)'}, 'type': {'type': 'string', 'description': 'File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.'}, 'head_limit': {'type': 'number', 'description': 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, shows all results from ripgrep.'}, 'multiline': {'type': 'boolean', 'description': 'Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
----
-
 
 Tool name: LS
 Tool description: Lists files and directories in a given path. The path parameter must be an absolute path, not a relative path. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools, if you know which directories to search.
 Input schema: {'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'The absolute path to the directory to list (must be absolute, not relative)'}, 'ignore': {'type': 'array', 'items': {'type': 'string'}, 'description': 'List of glob patterns to ignore'}}, 'required': ['path'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
 
 ---
-
-
 
 Tool name: Read
 Tool description: Reads a file from the local filesystem. You can access any file directly by using this tool.
@@ -312,5 +294,34 @@ The assistant did not use the todo list because this is a single command executi
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
 
 Input schema: {'type': 'object', 'properties': {'todos': {'type': 'array', 'items': {'type': 'object', 'properties': {'content': {'type': 'string', 'minLength': 1}, 'status': {'type': 'string', 'enum': ['pending', 'in_progress', 'completed']}, 'id': {'type': 'string'}}, 'required': ['content', 'status', 'id'], 'additionalProperties': False}, 'description': 'The updated todo list'}}, 'required': ['todos'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
+
+---
+
+
+Tool name: Glob
+Tool description: - Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time
+- Use this tool when you need to find files by name patterns
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead
+- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.
+Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The glob pattern to match files against'}, 'path': {'type': 'string', 'description': 'The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
+
+---
+
+
+Tool name: Grep
+Tool description: A powerful search tool built on ripgrep
+
+  Usage:
+  - ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command. The Grep tool has been optimized for correct permissions and access.
+  - Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
+  - Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter (e.g., "js", "py", "rust")
+  - Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
+  - Use Task tool for open-ended searches requiring multiple rounds
+  - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code)
+  - Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \{[\s\S]*?field`, use `multiline: true`
+
+Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The regular expression pattern to search for in file contents'}, 'path': {'type': 'string', 'description': 'File or directory to search in (rg PATH). Defaults to current working directory.'}, 'glob': {'type': 'string', 'description': 'Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}") - maps to rg --glob'}, 'output_mode': {'type': 'string', 'enum': ['content', 'files_with_matches', 'count'], 'description': 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".'}, '-B': {'type': 'number', 'description': 'Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.'}, '-A': {'type': 'number', 'description': 'Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.'}, '-C': {'type': 'number', 'description': 'Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.'}, '-n': {'type': 'boolean', 'description': 'Show line numbers in output (rg -n). Requires output_mode: "content", ignored otherwise.'}, '-i': {'type': 'boolean', 'description': 'Case insensitive search (rg -i)'}, 'type': {'type': 'string', 'description': 'File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.'}, 'head_limit': {'type': 'number', 'description': 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, shows all results from ripgrep.'}, 'multiline': {'type': 'boolean', 'description': 'Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
 
 ---

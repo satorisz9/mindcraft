@@ -8,6 +8,7 @@ import { ReadTool } from './read.js';
 import { ExecuteTool } from './execute.js';
 import { LintTool } from './lint.js';
 import { TodoWriteTool } from './todoWrite.js';
+import { FinishCodingTool } from './finishCoding.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,7 +23,8 @@ const COLORS = {
 const TOOL_CLASSES = [
     ['Edit', EditTool], ['MultiEdit', MultiEditTool], ['Write', WriteTool],
     ['Execute', ExecuteTool], ['Lint', LintTool], ['Glob', GlobTool],
-    ['Grep', GrepTool], ['LS', LSTool], ['Read', ReadTool], ['TodoWrite', TodoWriteTool]
+    ['Grep', GrepTool], ['LS', LSTool], ['Read', ReadTool], ['TodoWrite', TodoWriteTool],
+    ['FinishCoding', FinishCodingTool]
 ];
 
 const REMINDER_THRESHOLD = 60000; // 1 minute in milliseconds
