@@ -1,5 +1,5 @@
 import { sleep } from 'groq-sdk/core.mjs';
-import { ToolManager } from '../../tools/toolManager.js';
+import { ToolManager } from './tools/toolManager.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -34,7 +34,7 @@ export class Coder {
                 console.log('Response:', response);
                 
                 // Check if response is in JSON tool format
-                if (!this.codeToolsManager.isJSONToolResponse(response)) {
+                if (!this.codeToolsManager.parseJSONTools(response).hasTools) {
                     console.log('Response is not in JSON tool format. Please use JSON tool command format.');
                     await sleep(1000);
                     messages.push({
@@ -48,7 +48,7 @@ export class Coder {
                 // Process JSON tool commands
                 const toolResult = await this.codeToolsManager.processResponse(response);
  
-                // 构建工具执行结果反馈
+                // Build feedback for tool execution results
                 let toolResultFeedback = '';
                 
                 if (!toolResult.success) {
@@ -59,7 +59,7 @@ export class Coder {
                     toolResultFeedback = `##JSON tool execution succeeded##\n${toolResult.message}`;
                 }
                 
-                // 如果有具体的工具执行结果，添加详细信息
+                // If there are specific tool results, add detailed information
                 if (toolResult.results && toolResult.results.length > 0) {
                     toolResultFeedback += '\n\nDetailed tool results:';
                     toolResult.results.forEach((result, index) => {
@@ -75,22 +75,22 @@ export class Coder {
                     content: toolResultFeedback
                 });
                 console.log("\x1b[32m==================:\x1b[0m");
-                //显示最后4条消息
+                // Display the last 4 messages
                 const lastMessages = messages.slice(-4);
                 lastMessages.forEach((msg, index) => {
                     console.log(`\x1b[32mMessage ${index + 1} (${msg.role}):\x1b[0m`);
-                    // 处理转义字符，让内容更易读
+                    // Process escape characters to make the content easier to read
                     let content = msg.content;
                     if (typeof content === 'string') {
-                        // 创建ANSI转义序列的正则表达式
+                        // Create a regular expression for ANSI escape sequences
                         const ansiEscape = String.fromCharCode(27) + '\\[[0-9]+m';
                         const ansiRegex = new RegExp(ansiEscape, 'g');
                         
                         content = content
-                            .replace(/\\n/g, '\n')  // 转换 \n 为真正的换行
-                            .replace(/\\t/g, '\t')  // 转换 \t 为真正的制表符
-                            .replace(/\\"/g, '"')   // 转换 \" 为引号
-                            .replace(ansiRegex, ''); // 移除ANSI颜色代码
+                            .replace(/\\n/g, '\n')  // Convert \\n to actual newline
+                            .replace(/\\t/g, '\t')  // Convert \\t to actual tab
+                            .replace(/\\"/g, '"')   // Convert \\\" to a quote
+                            .replace(ansiRegex, ''); // Remove ANSI color codes
                     }
                     console.log(`\x1b[32m${content}\x1b[0m`);
                     console.log('\x1b[32m---\x1b[0m');

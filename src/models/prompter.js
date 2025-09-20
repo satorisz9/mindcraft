@@ -307,10 +307,10 @@ export class Prompter {
         return '';
     }
 
-    // 检查并修剪消息数组长度
+    // Check and trim the messages array length
     _trimMessages(messages) {
         while (messages.length > this.max_messages) {
-            messages.shift(); // 删除最久远的消息
+            messages.shift(); // Remove the oldest message
             console.log(`Trimmed oldest message, current length: ${messages.length}`);
         }
         return messages;
@@ -326,7 +326,7 @@ export class Prompter {
         try {
             await this.checkCooldown();
             
-            // 发送前检查消息长度
+            // Check message length before sending
             messages = this._trimMessages(messages);
             
             // Read prompt from coding.md file if it exists, otherwise use profile.coding
@@ -348,17 +348,17 @@ export class Prompter {
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
             
-            // 检查是否是输入长度超限错误
+            // Check if the input length exceeds the limit
             if (error.message && error.message.includes('Range of input length should be')) {
                 console.log('Input length exceeded, trimming messages and adjusting max_messages');
                 
-                // 删除最久远的消息
+                // Remove the oldest message
                 if (messages.length > 1) {
                     messages.shift();
                     console.log(`Removed oldest message, new length: ${messages.length}`);
                     
-                    // 调整max_messages为当前长度
-                    this.max_messages = messages.length;
+                    // Adjust max_messages to the current length
+                    this.max_messages = messages.length-2;
                     console.log(`Adjusted max_messages to: ${this.max_messages}`);
                 }
             }
