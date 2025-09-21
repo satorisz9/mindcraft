@@ -20,7 +20,7 @@ function runAsAction (actionFn, resume = false, timeout = -1) {
         if (code_return.interrupted && !code_return.timedout)
             return;
         return code_return.message;
-    }
+    };
 
     return wrappedAction;
 }
@@ -67,23 +67,24 @@ export const actionsList = [
     {
         name: '!stfu',
         description: 'Stop all chatting and self prompting, but continue current action.',
-        perform: async function (agent) {
+        perform: function (agent) {
             agent.openChat('Shutting up.');
             agent.shutUp();
-            return;
+            return 'Agent is now quiet.';
         }
     },
     {
         name: '!restart',
         description: 'Restart the agent process.',
-        perform: async function (agent) {
+        perform: function (agent) {
             agent.cleanKill();
+            return 'Agent restart initiated.';
         }
     },
     {
         name: '!clearChat',
         description: 'Clear the chat history.',
-        perform: async function (agent) {
+        perform: function (agent) {
             agent.history.clear();
             return agent.name + "'s chat history was cleared, starting new conversation from scratch.";
         }
@@ -132,7 +133,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, block_type, range) => {
             if (range < 32) {
-                log(agent.bot, `Minimum search range is 32.`);
+                skills.log(agent.bot, `Minimum search range is 32.`);
                 range = 32;
             }
             await skills.goToNearestBlock(agent.bot, block_type, 4, range);
@@ -161,7 +162,7 @@ export const actionsList = [
         name: '!rememberHere',
         description: 'Save the current location with a given name.',
         params: {'name': { type: 'string', description: 'The name to remember the location as.' }},
-        perform: async function (agent, name) {
+        perform: function (agent, name) {
             const pos = agent.bot.entity.position;
             agent.memory_bank.rememberPlace(name, pos.x, pos.y, pos.z);
             return `Location saved as "${name}".`;
@@ -174,10 +175,11 @@ export const actionsList = [
         perform: runAsAction(async (agent, name) => {
             const pos = agent.memory_bank.recallPlace(name);
             if (!pos) {
-            skills.log(agent.bot, `No location named "${name}" saved.`);
-            return;
+                skills.log(agent.bot, `No location named "${name}" saved.`);
+                return `No location named "${name}" saved.`;
             }
             await skills.goToPosition(agent.bot, pos[0], pos[1], pos[2], 1);
+            return `Successfully went to remembered place "${name}".`;
         })
     },
     {
@@ -318,9 +320,10 @@ export const actionsList = [
             let player = agent.bot.players[player_name]?.entity;
             if (!player) {
                 skills.log(agent.bot, `Could not find player ${player_name}.`);
-                return false;
+                return `Could not find player ${player_name}.`;
             }
             await skills.attackEntity(agent.bot, player, true);
+            return `Attacked player ${player_name}.`;
         })
     },
     {
@@ -345,7 +348,7 @@ export const actionsList = [
             'mode_name': { type: 'string', description: 'The name of the mode to enable.' },
             'on': { type: 'boolean', description: 'Whether to enable or disable the mode.' }
         },
-        perform: async function (agent, mode_name, on) {
+        perform: function (agent, mode_name, on) {
             const modes = agent.bot.modes;
             if (!modes.exists(mode_name))
             return `Mode ${mode_name} does not exist.` + modes.getDocs();
@@ -361,19 +364,21 @@ export const actionsList = [
         params: {
             'selfPrompt': { type: 'string', description: 'The goal prompt.' },
         },
-        perform: async function (agent, prompt) {
+        perform: function (agent, prompt) {
             if (convoManager.inConversation()) {
                 agent.self_prompter.setPromptPaused(prompt);
+                return 'Goal set and will start after conversation ends.';
             }
             else {
                 agent.self_prompter.start(prompt);
+                return 'Self-prompting started with goal: ' + prompt;
             }
         }
     },
     {
         name: '!endGoal',
         description: 'Call when you have accomplished your goal. It will stop self-prompting and the current action. ',
-        perform: async function (agent) {
+        perform: function (agent) {
             agent.self_prompter.stop();
             return 'Self-prompting stopped.';
         }
@@ -405,14 +410,17 @@ export const actionsList = [
             'player_name': { type: 'string', description: 'The name of the player to send the message to.' },
             'message': { type: 'string', description: 'The message to send.' },
         },
-        perform: async function (agent, player_name, message) {
+        perform: function (agent, player_name, message) {
             if (!convoManager.isOtherAgent(player_name))
                 return player_name + ' is not a bot, cannot start conversation.';
             if (convoManager.inConversation() && !convoManager.inConversation(player_name)) 
                 convoManager.forceEndCurrentConversation();
-            else if (convoManager.inConversation(player_name))
+            else if (convoManager.inConversation(player_name)) {
                 agent.history.add('system', 'You are already in conversation with ' + player_name + '. Don\'t use this command to talk to them.');
+                return 'Already in conversation with ' + player_name + '.';
+            }
             convoManager.startConversation(player_name, message);
+            return 'Started conversation with ' + player_name + '.';
         }
     },
     {
@@ -421,7 +429,7 @@ export const actionsList = [
         params: {
             'player_name': { type: 'string', description: 'The name of the player to end the conversation with.' }
         },
-        perform: async function (agent, player_name) {
+        perform: function (agent, player_name) {
             if (!convoManager.inConversation(player_name))
                 return `Not in conversation with ${player_name}.`;
             convoManager.endConversation(player_name);
@@ -472,7 +480,7 @@ export const actionsList = [
         description: 'Digs down a specified distance. Will stop if it reaches lava, water, or a fall of >=4 blocks below the bot.',
         params: {'distance': { type: 'int', description: 'Distance to dig down', domain: [1, Number.MAX_SAFE_INTEGER] }},
         perform: runAsAction(async (agent, distance) => {
-            await skills.digDown(agent.bot, distance)
+            await skills.digDown(agent.bot, distance);
         })
     },
     {
