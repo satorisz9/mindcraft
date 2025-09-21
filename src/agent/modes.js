@@ -46,6 +46,11 @@ const modes_list = [
                     await skills.moveAway(bot, 2);
                 }).catch(error => {
                     console.error(`Error in self_preservation falling block avoidance:`, error);
+                    say(agent, 'Failed to avoid falling blocks!');
+                    this.active = false;
+                    setTimeout(() => { 
+                        this.active = true; 
+                    }, 5000).unref(); 
                 });
             }
             else if (block.name === 'lava' || block.name === 'fire' ||
@@ -77,6 +82,10 @@ const modes_list = [
                     }).catch(error => {
                         console.error(`Error escaping fire/lava:`, error);
                         say(agent, 'Failed to escape fire!');
+                        this.active = false;
+                        setTimeout(() => { 
+                            this.active = true; 
+                        }, 5000).unref(); 
                     });
                 }
             }
@@ -87,6 +96,10 @@ const modes_list = [
                 }).catch(error => {
                     console.error(`Error in emergency escape:`, error);
                     say(agent, 'Failed to escape danger!');
+                    this.active = false;
+                    setTimeout(() => { 
+                        this.active = true; 
+                    }, 5000).unref(); 
                 });
             }
             else if (agent.isIdle()) {
@@ -130,7 +143,25 @@ const modes_list = [
                 this.stuck_time = 0;
                 execute(this, agent, async () => {
                     const initialPos = bot.entity.position.clone();
-                    await skills.moveAway(bot, 3);
+                    
+                    // Try 5 times to move to a random nearby position (1 block away)
+                    let attemptSuccessful = false;
+                    for (let attempt = 0; attempt < 5 && !attemptSuccessful; attempt++) {
+                        const randomX = initialPos.x + (Math.random() - 0.5) * 2; // -1 to +1
+                        const randomZ = initialPos.z + (Math.random() - 0.5) * 2; // -1 to +1
+                        const randomY = initialPos.y; // Keep same Y level
+                        
+                        try {
+                            await skills.goToPosition(bot, randomX, randomY, randomZ, 0.5);
+                            const currentPos = bot.entity.position;
+                            if (initialPos.distanceTo(currentPos) > 0.5) {
+                                attemptSuccessful = true;
+                                break;
+                            }
+                        } catch (error) {
+                            continue;
+                        }
+                    }
                     
                     // Wait 3 seconds to check if unstuck was successful
                     await new Promise(resolve => setTimeout(resolve, 3000));
