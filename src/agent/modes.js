@@ -133,7 +133,7 @@ const modes_list = [
                     await skills.moveAway(bot, 5);
                     
                     // Wait 3 seconds to check if unstuck was successful
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                     
                     const finalPos = bot.entity.position;
                     const moved = initialPos.distanceTo(finalPos) > 2;
@@ -284,14 +284,11 @@ const modes_list = [
                     // wait a random amount of time to avoid identical movements with other bots
                     const wait_time = Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, wait_time));
-                    
-                    // Re-check if player still exists before following
-                    const currentPlayer = world.getNearestEntityWhere(agent.bot, entity => entity.type === 'player', this.distance);
-                    if (currentPlayer) {
-                        await skills.followPlayer(agent.bot, currentPlayer, this.distance);
+                    if (player.position.distanceTo(agent.bot.entity.position) < this.distance) {
+                        await skills.moveAwayFromEntity(agent.bot, player, this.distance);
                     }
                 }).catch(error => {
-                    console.error(`Error following player:`, error);
+                    console.error(`Error moving away from player:`, error);
                 });
             }
         }
