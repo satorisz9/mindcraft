@@ -49,7 +49,7 @@ const settings = {
     // code workspace configuration - strictly enforced security measure
     "code_workspaces": [
         "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/action-code",
-        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/learned-skills",
+        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/learnedSkills",
         "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/"
     ],
 
@@ -62,7 +62,7 @@ const settings = {
 
     "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
   
-    "log_all_prompts": true, // log ALL prompts to file
+    "log_all_prompts": false, // log ALL prompts to file
 };
 
 export default settings;
