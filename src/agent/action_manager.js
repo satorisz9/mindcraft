@@ -84,9 +84,16 @@ export class ActionManager {
             // await current action to finish (executing=false), with 20 seconds timeout
             // also tell agent.bot to stop various actions
             if (this.executing) {
-                console.log(`action "${actionLabel}" trying to interrupt current action "${this.currentActionLabel}"`);
-                this.agent.bot.interrupt_code = true;
-                this.agent.bot.pathfinder.stop();
+                if (this.currentActionLabel.startsWith('mode:self_preservation')) {
+                    console.log(`action "${actionLabel}" waiting for self_preservation to complete...`);
+                    while (this.executing && this.currentActionLabel.startsWith('mode:self_preservation')) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                } else {
+                    console.log(`action "${actionLabel}" trying to interrupt current action "${this.currentActionLabel}"`);
+                    this.agent.bot.interrupt_code = true;
+                    this.agent.bot.pathfinder.stop();
+                }
             }
             await this.stop();
 
