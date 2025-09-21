@@ -44,6 +44,8 @@ const modes_list = [
             else if (this.fall_blocks.some(name => blockAbove.name.includes(name))) {
                 execute(this, agent, async () => {
                     await skills.moveAway(bot, 2);
+                }).catch(error => {
+                    console.error(`Error in self_preservation falling block avoidance:`, error);
                 });
             }
             else if (block.name === 'lava' || block.name === 'fire' ||
@@ -55,6 +57,9 @@ const modes_list = [
                     execute(this, agent, async () => {
                         await skills.placeBlock(bot, 'water_bucket', block.position.x, block.position.y, block.position.z);
                         say(agent, 'Placed some water, ahhhh that\'s better!');
+                    }).catch(error => {
+                        console.error(`Error placing water bucket:`, error);
+                        say(agent, 'Failed to place water!');
                     });
                 }
                 else {
@@ -62,12 +67,16 @@ const modes_list = [
                         let nearestWater = world.getNearestBlock(bot, 'water', 20);
                         if (nearestWater) {
                             const pos = nearestWater.position;
-                            await skills.goToPosition(bot, pos.x, pos.y, pos.z, 0.2);
-                            say(agent, 'Found some water, ahhhh that\'s better!');
+                            await skills.goToPosition(bot, pos.x, pos.y, pos.z, 1);
+                            say(agent, 'Ahhhh that\'s better!');
                         }
                         else {
                             await skills.moveAway(bot, 5);
+                            say(agent, 'I\'m on fire! Get me away from here!');
                         }
+                    }).catch(error => {
+                        console.error(`Error escaping fire/lava:`, error);
+                        say(agent, 'Failed to escape fire!');
                     });
                 }
             }
@@ -75,6 +84,9 @@ const modes_list = [
                 say(agent, 'I\'m dying!');
                 execute(this, agent, async () => {
                     await skills.moveAway(bot, 20);
+                }).catch(error => {
+                    console.error(`Error in emergency escape:`, error);
+                    say(agent, 'Failed to escape danger!');
                 });
             }
             else if (agent.isIdle()) {
@@ -115,13 +127,27 @@ const modes_list = [
             }
             const max_stuck_time = cur_dig_block?.name === 'obsidian' ? this.max_stuck_time * 2 : this.max_stuck_time;
             if (this.stuck_time > max_stuck_time) {
-                say(agent, 'I\'m stuck!');
                 this.stuck_time = 0;
                 execute(this, agent, async () => {
-                    const crashTimeout = setTimeout(() => { agent.cleanKill("Got stuck and couldn't get unstuck") }, 10000);
+                    const initialPos = bot.entity.position.clone();
                     await skills.moveAway(bot, 5);
-                    clearTimeout(crashTimeout);
-                    say(agent, 'I\'m free.');
+                    
+                    // Wait 3 seconds to check if unstuck was successful
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    const finalPos = bot.entity.position;
+                    const moved = initialPos.distanceTo(finalPos) > 2;
+                    
+                    if (moved) {
+                        say(agent, 'I\'m free.');
+                    } else {
+                        say(agent, 'Still stuck, restarting...');
+                        agent.cleanKill("Got stuck and couldn't get unstuck");
+                    }
+                }).catch(error => {
+                    console.error(`Error in unstuck mode:`, error);
+                    say(agent, 'Unstuck failed, restarting...');
+                    agent.cleanKill("Unstuck operation failed");
                 });
             }
             this.last_time = Date.now();
@@ -144,6 +170,9 @@ const modes_list = [
                 say(agent, `Aaa! A ${enemy.name.replace("_", " ")}!`);
                 execute(this, agent, async () => {
                     await skills.avoidEnemies(agent.bot, 24);
+                }).catch(error => {
+                    console.error(`Error avoiding enemies:`, error);
+                    say(agent, 'Failed to avoid enemy!');
                 });
             }
         }
@@ -160,6 +189,9 @@ const modes_list = [
                 say(agent, `Fighting ${enemy.name}!`);
                 execute(this, agent, async () => {
                     await skills.defendSelf(agent.bot, 8);
+                }).catch(error => {
+                    console.error(`Error in self defense:`, error);
+                    say(agent, 'Failed to defend myself!');
                 });
             }
         }
@@ -176,6 +208,9 @@ const modes_list = [
                 execute(this, agent, async () => {
                     say(agent, `Hunting ${huntable.name}!`);
                     await skills.attackEntity(agent.bot, huntable);
+                }).catch(error => {
+                    console.error(`Error hunting:`, error);
+                    say(agent, 'Failed to hunt target!');
                 });
             }
         }
@@ -202,6 +237,9 @@ const modes_list = [
                     this.prev_item = item;
                     execute(this, agent, async () => {
                         await skills.pickupNearbyItems(agent.bot);
+                    }).catch(error => {
+                        console.error(`Error picking up items:`, error);
+                        say(agent, 'Failed to pick up items!');
                     });
                     this.noticed_at = -1;
                 }
@@ -225,6 +263,8 @@ const modes_list = [
                 execute(this, agent, async () => {
                     const pos = agent.bot.entity.position;
                     await skills.placeBlock(agent.bot, 'torch', pos.x, pos.y, pos.z, 'bottom', true);
+                }).catch(error => {
+                    console.error(`Error placing torch:`, error);
                 });
                 this.last_place = Date.now();
             }
@@ -244,9 +284,14 @@ const modes_list = [
                     // wait a random amount of time to avoid identical movements with other bots
                     const wait_time = Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, wait_time));
-                    if (player.position.distanceTo(agent.bot.entity.position) < this.distance) {
-                        await skills.moveAway(agent.bot, this.distance);
+                    
+                    // Re-check if player still exists before following
+                    const currentPlayer = world.getNearestEntityWhere(agent.bot, entity => entity.type === 'player', this.distance);
+                    if (currentPlayer) {
+                        await skills.followPlayer(agent.bot, currentPlayer, this.distance);
                     }
+                }).catch(error => {
+                    console.error(`Error following player:`, error);
                 });
             }
         }
