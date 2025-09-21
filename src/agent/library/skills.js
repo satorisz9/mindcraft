@@ -42,9 +42,19 @@ export async function craftRecipe(bot, itemName, num=1) {
      * @example
      * await skills.craftRecipe(bot, "stick");
      **/
+    
+    // Cheat mode: use /give command to instantly get crafted items
+    if (bot.modes.isOn('cheat')) {
+        bot.chat(`/give @s ${itemName} ${num}`);
+        log(bot, `Used cheat mode to give ${num} ${itemName}.`);
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for command processing
+        return true;
+    }
+    
     let placedTable = false;
     
-    if (mc.getItemCraftingRecipes(itemName).length == 0) {
+    const craftingRecipes = mc.getItemCraftingRecipes(itemName);
+    if (!craftingRecipes || craftingRecipes.length == 0) {
         log(bot, `${itemName} is either not an item, or it does not have a crafting recipe!`);
         return false;
     }
@@ -86,7 +96,10 @@ export async function craftRecipe(bot, itemName, num=1) {
         }
     }
     if (!recipes || recipes.length === 0) {
-        log(bot, `You do not have the resources to craft a ${itemName}. It requires: ${Object.entries(mc.getItemCraftingRecipes(itemName)[0][0]).map(([key, value]) => `${key}: ${value}`).join(', ')}.`);
+        const recipeRequirements = craftingRecipes && craftingRecipes[0] && craftingRecipes[0][0] 
+            ? Object.entries(craftingRecipes[0][0]).map(([key, value]) => `${key}: ${value}`).join(', ')
+            : 'unknown ingredients';
+        log(bot, `You do not have the resources to craft a ${itemName}. It requires: ${recipeRequirements}.`);
         if (placedTable) {
             await collectBlock(bot, 'crafting_table', 1);
         }
@@ -437,6 +450,14 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
         log(bot, `Invalid number of blocks to collect: ${num}.`);
         return false;
     }
+    
+    // Cheat mode: use /give command to instantly get items
+    if (bot.modes.isOn('cheat')) {
+        bot.chat(`/give @s ${blockType} ${num}`);
+        log(bot, `Used cheat mode to give ${num} ${blockType}.`);
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for command processing
+        return true;
+    }
     let blocktypes = [blockType];
     if (blockType === 'coal' || blockType === 'diamond' || blockType === 'emerald' || blockType === 'iron' || blockType === 'gold' || blockType === 'lapis_lazuli' || blockType === 'redstone')
         blocktypes.push(blockType+'_ore');
@@ -685,12 +706,14 @@ export async function placeBlock(bot, blockType, x, y, z, placeOn='bottom', dont
         if (useDelay) { await new Promise(resolve => setTimeout(resolve, blockPlaceDelay)); }
         let msg = '/setblock ' + Math.floor(x) + ' ' + Math.floor(y) + ' ' + Math.floor(z) + ' ' + blockType;
         bot.chat(msg);
-        if (blockType.includes('door'))
+        if (blockType.includes('door')) {
             if (useDelay) { await new Promise(resolve => setTimeout(resolve, blockPlaceDelay)); }
             bot.chat('/setblock ' + Math.floor(x) + ' ' + Math.floor(y+1) + ' ' + Math.floor(z) + ' ' + blockType + '[half=upper]');
-        if (blockType.includes('bed'))
+        }
+        if (blockType.includes('bed')) {
             if (useDelay) { await new Promise(resolve => setTimeout(resolve, blockPlaceDelay)); }
             bot.chat('/setblock ' + Math.floor(x) + ' ' + Math.floor(y) + ' ' + Math.floor(z-1) + ' ' + blockType + '[part=head]');
+        }
         log(bot, `Used /setblock to place ${blockType} at ${target_dest}.`);
         return true;
     }
@@ -1192,6 +1215,7 @@ function startDoorInterval(bot) {
             
             for (let position of positions) {
                 if (bot.interrupt_code) {
+                    clearInterval(doorCheckInterval);
                     log(bot, 'Interrupted while opening door.');
                     break;
                 }
@@ -1210,7 +1234,7 @@ function startDoorInterval(bot) {
         }
         prev_pos = bot.entity.position.clone();
         prev_check = now;
-    }, 200);
+    }, 100);
     _doorInterval = doorCheckInterval;
     return doorCheckInterval;
 }
@@ -1455,13 +1479,15 @@ export async function moveAway(bot, distance) {
     if (bot.modes.isOn('cheat')) {
         const move = new pf.Movements(bot);
         const path = await bot.pathfinder.getPathTo(move, inverted_goal, 10000);
-        let last_move = path.path[path.path.length-1];
-        if (last_move) {
-            let x = Math.floor(last_move.x);
-            let y = Math.floor(last_move.y);
-            let z = Math.floor(last_move.z);
-            bot.chat('/tp @s ' + x + ' ' + y + ' ' + z);
-            return true;
+        if (path && path.path && path.path.length > 0) {
+            let last_move = path.path[path.path.length-1];
+            if (last_move) {
+                let x = Math.floor(last_move.x);
+                let y = Math.floor(last_move.y);
+                let z = Math.floor(last_move.z);
+                bot.chat('/tp @s ' + x + ' ' + y + ' ' + z);
+                return true;
+            }
         }
     }
 
@@ -2103,6 +2129,9 @@ export async function useToolOn(bot, toolName, targetName) {
     const viewBlocked = () => {
         const blockInView = bot.blockAtCursor(5);
         const headPos = bot.entity.position.offset(0, bot.entity.height, 0);
+        log(bot, `Block in view: ${blockInView.name} at ${blockInView.position}, target block: ${block.name} at ${block.position}`);
+        console.log(`Block in view: ${blockInView.name} at ${blockInView.position}, target block: ${block.name} at ${block.position}`);
+        
         return blockInView && 
             !blockInView.position.equals(block.position) && 
             blockInView.position.distanceTo(headPos) < block.position.distanceTo(headPos);
