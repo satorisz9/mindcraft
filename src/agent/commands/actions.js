@@ -98,6 +98,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, player_name, closeness) => {
             await skills.goToPlayer(agent.bot, player_name, closeness);
+            return `Went to player ${player_name}.`;
         })
     },
     {
@@ -109,6 +110,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, player_name, follow_dist) => {
             await skills.followPlayer(agent.bot, player_name, follow_dist);
+            return `Following player ${player_name} at distance ${follow_dist}.`;
         }, true)
     },
     {
@@ -122,6 +124,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, x, y, z, closeness) => {
             await skills.goToPosition(agent.bot, x, y, z, closeness);
+            return `Went to coordinates ${x}, ${y}, ${z}.`;
         })
     },
     {
@@ -137,6 +140,7 @@ export const actionsList = [
                 range = 32;
             }
             await skills.goToNearestBlock(agent.bot, block_type, 4, range);
+            return `Found and went to nearest ${block_type}.`;
         })
     },
     {
@@ -148,6 +152,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, entity_type, range) => {
             await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
+            return `Found and went to nearest ${entity_type}.`;
         })
     },
     {
@@ -156,6 +161,7 @@ export const actionsList = [
         params: {'distance': { type: 'float', description: 'The distance to move away.', domain: [0, Infinity] }},
         perform: runAsAction(async (agent, distance) => {
             await skills.moveAway(agent.bot, distance);
+            return `Moved away from current location by ${distance}.`;
         })
     },
     {
@@ -192,6 +198,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, player_name, item_name, num) => {
             await skills.giveToPlayer(agent.bot, item_name, player_name, num);
+            return `Gave ${item_name} ${num} times to player ${player_name}.`;
         })
     },
     {
@@ -200,6 +207,7 @@ export const actionsList = [
         params: {'item_name': { type: 'ItemName', description: 'The name of the item to consume.' }},
         perform: runAsAction(async (agent, item_name) => {
             await skills.consume(agent.bot, item_name);
+            return `Consumed ${item_name}.`;
         })
     },
     {
@@ -208,6 +216,7 @@ export const actionsList = [
         params: {'item_name': { type: 'ItemName', description: 'The name of the item to equip.' }},
         perform: runAsAction(async (agent, item_name) => {
             await skills.equip(agent.bot, item_name);
+            return `Equipped ${item_name}.`;
         })
     },
     {
@@ -219,6 +228,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, item_name, num) => {
             await skills.putInChest(agent.bot, item_name, num);
+            return `Put ${item_name} ${num} times.`;
         })
     },
     {
@@ -230,6 +240,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, item_name, num) => {
             await skills.takeFromChest(agent.bot, item_name, num);
+            return `Took ${item_name} ${num} times.`;
         })
     },
     {
@@ -238,6 +249,7 @@ export const actionsList = [
         params: { },
         perform: runAsAction(async (agent) => {
             await skills.viewChest(agent.bot);
+            return `Viewed nearest chest.`;
         })
     },
     {
@@ -252,6 +264,7 @@ export const actionsList = [
             await skills.moveAway(agent.bot, 5);
             await skills.discard(agent.bot, item_name, num);
             await skills.goToPosition(agent.bot, start_loc.x, start_loc.y, start_loc.z, 0);
+            return `Discarded ${item_name} ${num} times.`;
         })
     },
     {
@@ -263,6 +276,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, type, num) => {
             await skills.collectBlock(agent.bot, type, num);
+            return `Collected ${type} ${num} times.`;
         }, false, 10) // 10 minute timeout
     },
     {
@@ -274,6 +288,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, recipe_name, num) => {
             await skills.craftRecipe(agent.bot, recipe_name, num);
+            return `Crafted ${recipe_name} ${num} times.`;
         })
     },
     {
@@ -285,6 +300,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, item_name, num) => {
             await skills.smeltItem(agent.bot, item_name, num);
+            return `Smelted ${item_name} ${num} times.`;
         })
     },
     {
@@ -293,6 +309,7 @@ export const actionsList = [
         params: { },
         perform: runAsAction(async (agent) => {
             await skills.clearNearestFurnace(agent.bot);
+            return `Cleared nearest furnace.`;
         })
     },
         {
@@ -302,6 +319,7 @@ export const actionsList = [
         perform: runAsAction(async (agent, type) => {
             let pos = agent.bot.entity.position;
             await skills.placeBlock(agent.bot, type, pos.x, pos.y, pos.z);
+            return `Placed ${type} at ${pos.x}, ${pos.y}, ${pos.z}.`;
         })
     },
     {
@@ -310,6 +328,7 @@ export const actionsList = [
         params: {'type': { type: 'string', description: 'The type of entity to attack.'}},
         perform: runAsAction(async (agent, type) => {
             await skills.attackNearest(agent.bot, type, true);
+            return `Attacked nearest entity of type ${type}.`;
         })
     },
     {
@@ -331,6 +350,7 @@ export const actionsList = [
         description: 'Go to the nearest bed and sleep.',
         perform: runAsAction(async (agent) => {
             await skills.goToBed(agent.bot);
+            return `Go to bed.`;
         })
     },
     {
@@ -339,6 +359,7 @@ export const actionsList = [
         params: {'type': { type: 'int', description: 'The number of seconds to stay. -1 for forever.', domain: [-1, Number.MAX_SAFE_INTEGER] }},
         perform: runAsAction(async (agent, seconds) => {
             await skills.stay(agent.bot, seconds);
+            return `Stayed for ${seconds} seconds.`;
         })
     },
     {
@@ -389,6 +410,7 @@ export const actionsList = [
         params: {'id': { type: 'int', description: 'The id number of the villager that you want to trade with.' }},
         perform: runAsAction(async (agent, id) => {
             await skills.showVillagerTrades(agent.bot, id);
+            return `Showed trades of villager ${id}.`;
         })
     },
     {
@@ -401,6 +423,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, id, index, count) => {
             await skills.tradeWithVillager(agent.bot, id, index, count);
+            return `Traded with villager ${id} ${index} times.`;
         })
     },
     {
@@ -481,6 +504,7 @@ export const actionsList = [
         params: {'distance': { type: 'int', description: 'Distance to dig down', domain: [1, Number.MAX_SAFE_INTEGER] }},
         perform: runAsAction(async (agent, distance) => {
             await skills.digDown(agent.bot, distance);
+            return `Dug down ${distance} blocks.`;
         })
     },
     {
@@ -492,6 +516,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, tool_name, target) => {
             await skills.useToolOn(agent.bot, tool_name, target);
+            return `Used ${tool_name} on ${target}.`;
         })
     },
 ];
