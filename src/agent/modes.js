@@ -130,7 +130,7 @@ const modes_list = [
                 this.stuck_time = 0;
                 execute(this, agent, async () => {
                     const initialPos = bot.entity.position.clone();
-                    await skills.moveAway(bot, 5);
+                    await skills.moveAway(bot, 3);
                     
                     // Wait 3 seconds to check if unstuck was successful
                     await new Promise(resolve => setTimeout(resolve, 3000));
