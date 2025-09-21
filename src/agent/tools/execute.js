@@ -25,50 +25,16 @@ const StackTracePatterns = {
 };
 
 
-/**
- * Execute Tool - Executes JavaScript code files in Minecraft bot context
- */
+//Execute Tool - Executes JavaScript code files in Minecraft bot context
 export class ExecuteTool {
     constructor(agent = null) {
         this.name = 'Execute';
-        this.description = "Executes a JavaScript file containing bot actions in Minecraft.\n\nUsage:\n- The file_path parameter must be an absolute path to a .js file\n- The file should contain an async function that accepts a bot parameter\n- The function will be executed in the Minecraft bot context with access to skills, world APIs, and learned skills\n- Only files within allowed workspaces can be executed for security\n- The file must exist and be readable before execution";
         this.agent = agent;
-        
         this.learnedSkillsManager = new LearnedSkillsManager();
         this.fileCache = new FileContentCache();
         this.errorAnalyzer = new ErrorAnalyzer(this.fileCache);
         this.sandboxManager = new SandboxManager(this.learnedSkillsManager);
         
-        this.input_schema = {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "The absolute path to the JavaScript file to execute (must be absolute, not relative)"
-                },
-                "executable_files": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Array of executable file paths to choose from (will find action-code files automatically)"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Optional description of what this execution should accomplish"
-                }
-            },
-            "additionalProperties": false,
-            "$schema": "http://json-schema.org/draft-07/schema#"
-        };
-    }
-
-    getDescription() {
-        return this.description;
-    }
-
-    getInputSchema() {
-        return this.input_schema;
     }
     
     /**
@@ -90,9 +56,7 @@ export class ExecuteTool {
             
             originalChat = this._setupChatCapture();
             const compartment = await this.sandboxManager.createCompartment(this.agent);
-            
             const result = await this._executeWithTimeout(compartment, fileData.content, targetFile);
-            
             return this._formatSuccessResult(result, targetFile, params.description);
             
         } catch (error) {
@@ -110,7 +74,6 @@ export class ExecuteTool {
         }
 
         let targetFile = file_path;
-
         if (executable_files && Array.isArray(executable_files)) {
             if (executable_files.length === 0) {
                 throw new Error('No executable action-code files found - code generation may have failed');
@@ -192,8 +155,8 @@ export class ExecuteTool {
         const timeoutPromise = new Promise((_, reject) => {
             timeoutId = setTimeout(() => {
                 abortController.abort();
-                reject(new Error('Code execution timeout: exceeded 60 seconds'));
-            }, 60000); // 60 seconds timeout
+                reject(new Error('Code execution timeout: exceeded 30 seconds'));
+            }, 30000); // 60 seconds timeout
         });
         
         try {
@@ -259,23 +222,19 @@ export class ExecuteTool {
         if (this.agent.bot) {
             try {
                 this.agent.bot.clearControlStates();
-                
                 if (this.agent.bot.pathfinder) {
                     this.agent.bot.pathfinder.stop();
                 }
-                
+
                 this.agent.bot.stopDigging();
-                
                 if (this.agent.bot.pvp) {
                     this.agent.bot.pvp.stop();
                 }
-                
+
                 if (this.agent.bot.collectBlock) {
                     this.agent.bot.collectBlock.cancelTask();
                 }
-                
                 this.agent.bot.interrupt_code = true;
-                
                 console.log('Successfully stopped all bot actions');
             } catch (stopError) {
                 console.warn('Failed to stop bot actions:', stopError.message);
@@ -366,9 +325,7 @@ export class ExecuteTool {
 }
 
 
-/**
- * String builder for efficient string concatenation
- */
+//String builder for efficient string concatenation
 class StringBuilder {
     constructor() {
         this.parts = [];
@@ -394,11 +351,9 @@ class StringBuilder {
     }
 }
 
-/**
- * File content cache with TTL and LRU eviction
- */
+//File content cache with TTL and LRU eviction
 class FileContentCache {
-    constructor(maxSize = 100, ttlMs = 300000) { // 5 minutes TTL
+    constructor(maxSize = 100, ttlMs = 300000) {
         this.cache = new Map();
         this.maxSize = maxSize;
         this.ttlMs = ttlMs;
@@ -440,9 +395,7 @@ class FileContentCache {
     }
 }
 
-/**
- * Error analyzer for intelligent stack trace processing
- */
+//Error analyzer for intelligent stack trace processing
 class ErrorAnalyzer {
     constructor(fileCache) {
         this.fileCache = fileCache;
@@ -656,9 +609,7 @@ class ErrorAnalyzer {
     }
 }
 
-/**
- * Sandbox manager for secure code execution
- */
+//Sandbox manager for secure code execution
 class SandboxManager {
     constructor(learnedSkillsManager) {
         this.learnedSkillsManager = learnedSkillsManager;
@@ -700,22 +651,15 @@ class SandboxManager {
             for (const module of skillModules) {
                 currentFiles.add(module.filePath);
                 const lastModified = module.lastModified || 0;
-                const cachedTimestamp = this.skillTimestamps.get(module.filePath) || 0;
-                
+                const cachedTimestamp = this.skillTimestamps.get(module.filePath) || 0; 
                 if (lastModified > cachedTimestamp || !this.skillsCache.has(module.functionName)) {
-                    try {
-                        console.log(`Loading skill: ${module.functionName}`);
-                        const compiledFunction = this._compileSkillInCompartment(compartment, module);
-                        
-                        if (compiledFunction) {
-                            this.skillsCache.set(module.functionName, compiledFunction);
-                            this.skillTimestamps.set(module.filePath, lastModified);
-                        }
-                    } catch (error) {
-                        console.warn(`Failed to load skill ${module.functionName}: ${error.message}`);
+                    console.log(`Loading skill: ${module.functionName}`);
+                    const compiledFunction = this._compileSkillInCompartment(compartment, module);
+                    if (compiledFunction) {
+                        this.skillsCache.set(module.functionName, compiledFunction);
+                        this.skillTimestamps.set(module.filePath, lastModified);
                     }
                 }
-                
                 const skillFunction = this.skillsCache.get(module.functionName);
                 if (skillFunction) {
                     learnedSkills[module.functionName] = skillFunction;
@@ -744,7 +688,6 @@ class SandboxManager {
             compartment.evaluate(codeWithSourceMap);
             
             const moduleFunction = compartment.globalThis[module.functionName];
-            
             if (typeof moduleFunction === 'function') {
                 return moduleFunction;
             } else {
@@ -763,7 +706,6 @@ class SandboxManager {
         for (const cachedFile of cachedFiles) {
             if (!currentFiles.has(cachedFile)) {
                 console.log(`Removing deleted skill file from cache: ${cachedFile}`);
-                
                 const skillNameFromPath = cachedFile.split('/').pop().replace('.js', '');
                 this.skillsCache.delete(skillNameFromPath);
                 this.skillTimestamps.delete(cachedFile);

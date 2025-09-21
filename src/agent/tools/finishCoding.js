@@ -4,27 +4,6 @@
 export class FinishCodingTool {
     constructor(agent = null) {
         this.agent = agent;
-        this.description = "Finish the current coding session and return to normal mode. Use this tool when you have completed all the required coding tasks and want to provide a summary of what was accomplished during the coding session.\n\nUsage:\n- Call this tool only when you have finished all coding tasks\n- Provide a comprehensive summary of what was accomplished\n- This will gracefully exit the coding mode and return control to the main agent\n- The summary will be returned as the result of the newAction command";
-        this.input_schema = {
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "A comprehensive summary of what was accomplished during this coding session, including files created/modified, features implemented, and any important notes."
-                }
-            },
-            "required": ["summary"],
-            "additionalProperties": false,
-            "$schema": "http://json-schema.org/draft-07/schema#"
-        };
-    }
-
-    getDescription() {
-        return this.description;
-    }
-    
-    getInputSchema() {
-        return this.input_schema;
     }
 
     /**

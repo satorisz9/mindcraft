@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import process from 'process';
 
 /**
  * TodoWrite Tool - Creates and manages structured task lists for coding sessions
@@ -8,39 +9,6 @@ export class TodoWriteTool {
     constructor(agent = null) {
         this.name = 'TodoWrite';
         this.agent = agent;
-        this.description = "Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user. It also helps the user understand the progress of the task and overall progress of their requests.";
-        this.input_schema = {
-            "type": "object",
-            "properties": {
-                "todos": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "content": {
-                                "type": "string",
-                                "minLength": 1,
-                                "description": "Task description"
-                            },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Task status"
-                            },
-                            "id": {
-                                "type": "string",
-                                "description": "Unique task identifier"
-                            }
-                        },
-                        "required": ["content", "status", "id"],
-                        "additionalProperties": false
-                    },
-                    "description": "The updated todo list"
-                }
-            },
-            "required": ["todos"],
-            "additionalProperties": false
-        };
     }
 
     /**
@@ -55,7 +23,8 @@ export class TodoWriteTool {
             if (!params.todos || !Array.isArray(params.todos)) {
                 return {
                     success: false,
-                    message: "todos parameter must be an array"
+                    message: "todos parameter must be an array",
+                    file_path: this.getTodoFilePath()
                 };
             }
 
@@ -64,14 +33,16 @@ export class TodoWriteTool {
                 if (!todo.content || !todo.status || !todo.id) {
                     return {
                         success: false,
-                        message: "Each todo must have content, status, and id"
+                        message: "Each todo must have content, status, and id",
+                        file_path: this.getTodoFilePath()
                     };
                 }
 
-                if (!["pending", "in_progress", "completed"].includes(todo.status)) {
+                if (!['pending', 'in_progress', 'completed'].includes(todo.status)) {
                     return {
                         success: false,
-                        message: `Invalid status: ${todo.status}. Must be pending, in_progress, or completed`
+                        message: `Invalid status: ${todo.status}. Must be pending, in_progress, or completed`,
+                        file_path: this.getTodoFilePath()
                     };
                 }
             }
@@ -81,7 +52,8 @@ export class TodoWriteTool {
             if (inProgressTasks.length > 1) {
                 return {
                     success: false,
-                    message: "Only one task can be in_progress at a time"
+                    message: "Only one task can be in_progress at a time",
+                    file_path: this.getTodoFilePath()
                 };
             }
 
@@ -105,13 +77,15 @@ export class TodoWriteTool {
 
             return {
                 success: true,
-                message: message
+                message: message,
+                file_path: todoFilePath
             };
 
         } catch (error) {
             return {
                 success: false,
-                message: `TodoWrite execution failed: ${error.message}`
+                message: `TodoWrite execution failed: ${error.message}`,
+                file_path: this.getTodoFilePath()
             };
         }
     }
@@ -170,15 +144,13 @@ export class TodoWriteTool {
         return `${pendingCount} pending, ${inProgressCount} in progress, ${completedCount} completed`;
     }
 
-    /**
-     * Get the todo file path based on agent configuration
-     * @returns {string} File path for todo list
-     */
+
     getTodoFilePath() {
+        const projectRoot = process.cwd();
         if (this.agent && this.agent.name) {
-            return `/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/${this.agent.name}/TODOLIST.md`;
+            return path.join(projectRoot, 'bots', this.agent.name, 'TODOLIST.md');
         }
-        return `/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/default/TODOLIST.md`;
+        return path.join(projectRoot, 'bots', 'default', 'TODOLIST.md');
     }
 }
 

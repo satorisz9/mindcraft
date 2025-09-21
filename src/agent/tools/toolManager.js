@@ -12,26 +12,15 @@ import { FinishCodingTool } from './finishCoding.js';
 import fs from 'fs';
 import path from 'path';
 
-// Constants
-const COLORS = {
-    reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
-    blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m', white: '\x1b[37m',
-    brightRed: '\x1b[91m', brightGreen: '\x1b[92m', brightYellow: '\x1b[93m',
-    brightBlue: '\x1b[94m', brightMagenta: '\x1b[95m', brightCyan: '\x1b[96m'
-};
-
 const TOOL_CLASSES = [
     ['Edit', EditTool], ['MultiEdit', MultiEditTool], ['Write', WriteTool],
     ['Execute', ExecuteTool], ['Lint', LintTool], ['Glob', GlobTool],
     ['Grep', GrepTool], ['LS', LSTool], ['Read', ReadTool], ['TodoWrite', TodoWriteTool],
     ['FinishCoding', FinishCodingTool]
 ];
+const REMINDER_THRESHOLD = 60000; 
 
-const REMINDER_THRESHOLD = 60000; // 1 minute in milliseconds
-
-/**
- * Tool Manager - Manages all available tools and executes Tools with workspace validation
- */
+//Tool Manager - Manages all available tools and executes Tools with workspace validation
 export class ToolManager {
     constructor(agent = null) {
         this.agent = agent;
@@ -44,17 +33,11 @@ export class ToolManager {
         this.initializeWorkspaces();
     }
 
-    // Initialization
-
     initializeTools() {
-        const readTool = new ReadTool(this.agent);
-        
         for (const [name, ToolClass] of TOOL_CLASSES) {
-            const tool = name === 'Read' ? readTool : new ToolClass(this.agent);
+            const tool = new ToolClass(this.agent);
             this.tools.set(name, tool);
         }
-        
-        readTool.setToolRegistry(this.tools);
     }
 
     initializeWorkspaces() {
@@ -63,18 +46,16 @@ export class ToolManager {
             return;
         }
 
-        // Only use agent.code_workspaces - no fallback to relative paths
         if (this.agent.code_workspaces && Array.isArray(this.agent.code_workspaces)) {
             this.workspaces = this.agent.code_workspaces
                 .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
                 .map(ws => ws.startsWith('/') ? ws.substring(1) : ws); // Remove leading slash for internal processing
         } else {
-            this.logSecurity(`No code_workspaces configured for bot ${this.agent.name}. File operations will be blocked.`);
-            this.workspaces = []; // Empty workspaces - all operations will be blocked
+            console.error(`${COLORS.brightRed}SECURITY: No code_workspaces configured for bot ${this.agent.name}. File operations will be blocked.${COLORS.reset}`);
+            this.workspaces = []; 
         }
     }
 
-    // Core Execution
 
     async executeTool(Tool) {
         const startTime = Date.now();
@@ -94,11 +75,10 @@ export class ToolManager {
             console.log(`${COLORS.brightBlue}[ToolManager]${COLORS.reset} Executing ${COLORS.brightYellow}${toolName}${COLORS.reset} tool...`);
             const result = await toolInstance.execute(params);
             
-            if (result.success !== false) {
+            if (result.success !== false)
                 console.log(`${COLORS.brightGreen}✓ [ToolManager]${COLORS.reset} ${COLORS.brightYellow}${toolName}${COLORS.reset} executed successfully`);
-            } else {
+            else 
                 console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} ${COLORS.brightYellow}${toolName}${COLORS.reset} execution failed: ${result.error || result.message}`);
-            }
             
             return { tool: toolName, timestamp: new Date().toISOString(), ...result };
         } catch (error) {
@@ -106,7 +86,15 @@ export class ToolManager {
             return this.createErrorResult(toolName, error.message, startTime);
         }
     }
-
+    
+    createErrorResult(tool, message, startTime) {
+        return {
+            tool,
+            timestamp: new Date().toISOString(),
+            success: false,
+            error: message
+        };
+    }
     async runTools(tools, options = {}) {
         const { validateWorkspaces = false, aggregate = true } = options;
         
@@ -130,13 +118,18 @@ export class ToolManager {
             const result = await this.executeTool(tools[i]);
             results.push(result);
             
-            if (!result.success) {
+            if (!result.success) 
                 console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} Tool ${i + 1} failed, continuing with next Tool...`);
-            }
         }
 
         if (aggregate) {
-            this.logExecutionSummary(results);
+            const successCount = results.filter(r => r.success !== false).length;
+            const failureCount = results.length - successCount;
+        
+            if (failureCount === 0)
+                console.log(`${COLORS.brightGreen}[OK] [ToolManager]${COLORS.reset} All ${COLORS.brightMagenta}${results.length}${COLORS.reset} tools executed successfully`);
+            else 
+                console.log(`${COLORS.brightYellow}⚠ [ToolManager]${COLORS.reset} Tools completed: ${COLORS.brightGreen}${successCount} success${COLORS.reset}, ${COLORS.brightRed}${failureCount} failed${COLORS.reset}`);
         }
 
         return results;
@@ -157,7 +150,10 @@ export class ToolManager {
                     success: false, 
                     message: errorMessage, 
                     results, 
-                    operations: this.createOperations(results) 
+                    operations: results.map(r => ({
+                        tool: r.tool,
+                        path: r.file_path
+                    })) 
                 };
             }
 
@@ -168,7 +164,10 @@ export class ToolManager {
                 success: true,
                 message: `Workspace validation passed. ${successMessage}`,
                 results,
-                operations: this.createOperations(results)
+                operations: results.map(r => ({
+                    tool: r.tool,
+                    path: r.file_path
+                }))
             };
         } catch (error) {
             console.log(`${COLORS.brightRed}✗ [ToolManager]${COLORS.reset} JSON tools execution error: ${error.message}`);
@@ -225,15 +224,32 @@ export class ToolManager {
 
     parseEmbeddedJSON(response) {
         const tools = [];
-        const jsonObjectRegex = /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/g;
-        let match;
-
-        while ((match = jsonObjectRegex.exec(response)) !== null) {
-            try {
-                const parsed = JSON.parse(match[0].trim());
-                tools.push(...this.extractToolsFromParsed(parsed));
-            } catch {
-                continue;
+        
+        // Find JSON objects by looking for balanced braces
+        let braceCount = 0;
+        let jsonStart = -1;
+        
+        for (let i = 0; i < response.length; i++) {
+            const char = response[i];
+            
+            if (char === '{') {
+                if (braceCount === 0) {
+                    jsonStart = i;
+                }
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+                
+                if (braceCount === 0 && jsonStart !== -1) {
+                    const jsonStr = response.substring(jsonStart, i + 1);
+                    try {
+                        const parsed = JSON.parse(jsonStr.trim());
+                        tools.push(...this.extractToolsFromParsed(parsed));
+                    } catch {
+                        // Continue looking for other JSON objects
+                    }
+                    jsonStart = -1;
+                }
             }
         }
 
@@ -260,7 +276,6 @@ export class ToolManager {
     extractToolsFromParsed(parsed) {
         const tools = [];
 
-        // Handle {tools:[]} format
         if (parsed?.tools && Array.isArray(parsed.tools)) {
             for (const cmd of parsed.tools) {
                 if (cmd?.name) {
@@ -269,7 +284,6 @@ export class ToolManager {
                 }
             }
         }
-        // Handle legacy formats
         else if (Array.isArray(parsed)) {
             tools.push(...parsed.filter(cmd => cmd?.tool));
         } else if (parsed?.tool) {
@@ -278,8 +292,6 @@ export class ToolManager {
 
         return tools;
     }
-
-    // Workspace Validation
 
     validateWorkspaces(tools) {
         try {
@@ -298,9 +310,8 @@ export class ToolManager {
                     };
                 }
 
-                const normalizedPath = filePath.substring(1); // Remove leading '/'
+                const normalizedPath = filePath.substring(1); 
                 const isAllowed = (this.workspaces || []).some(workspace => {
-                    // Remove trailing slash from workspace for consistent comparison
                     const cleanWorkspace = workspace.endsWith('/') ? workspace.slice(0, -1) : workspace;
                     return normalizedPath.startsWith(cleanWorkspace + '/') || normalizedPath === cleanWorkspace;
                 });
@@ -315,68 +326,10 @@ export class ToolManager {
 
             return { valid: true };
         } catch (error) {
-            this.logSecurity(`Workspace validation error: ${error.message}`);
+            console.error(`${COLORS.brightRed}SECURITY: Workspace validation error: ${error.message}${COLORS.reset}`);
             return { valid: false, error: `Workspace validation failed: ${error.message}` };
         }
     }
-
-    // Tool Information
-
-    getAvailableTools() {
-        return Array.from(this.tools.keys());
-    }
-
-    getTool(toolName) {
-        return this.tools.get(toolName);
-    }
-
-    getToolDescriptions() {
-        const descriptions = [];
-        
-        for (const [name, tool] of this.tools) {
-            if (tool.getDescription && tool.getInputSchema) {
-                descriptions.push({
-                    name,
-                    description: tool.getDescription(),
-                    input_schema: tool.getInputSchema()
-                });
-            }
-        }
-        
-        return { tools: descriptions };
-    }
-
-    getFormattedToolDescriptions() {
-        const now = Date.now();
-        
-        // Use cache if available and fresh (within 30 seconds)
-        if (this.promptCache && (now - this.promptCacheTime) < 30000) {
-            return this.promptCache;
-        }
-
-        try {
-            const toolsPromptPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'tools-prompt.md');
-            let content = fs.readFileSync(toolsPromptPath, 'utf8');
-            
-            // Add system reminders
-            const reminders = this.generateSystemReminders();
-            if (reminders) {
-                content += reminders;
-            }
-            
-            // Cache the result
-            this.promptCache = content;
-            this.promptCacheTime = now;
-            
-            return content;
-        } catch (error) {
-            console.error('Error reading tools-prompt.md:', error);
-            const descriptions = this.getToolDescriptions();
-            return JSON.stringify(descriptions, null, 2);
-        }
-    }
-
-    // System Reminders
 
     generateSystemReminders() {
         const reminders = [];
@@ -434,39 +387,13 @@ export class ToolManager {
             return false;
         }
     }
-
-    // Utility Methods
-
-    createErrorResult(tool, message, startTime) {
-        return {
-            tool,
-            timestamp: new Date().toISOString(),
-            success: false,
-            error: message
-        };
-    }
-
-    createOperations(results) {
-        return results.map(r => ({
-            tool: r.tool,
-            path: r.file_path
-        }));
-    }
-
-    logSecurity(message) {
-        console.error(`${COLORS.brightRed}SECURITY: ${message}${COLORS.reset}`);
-    }
-
-    logExecutionSummary(results) {
-        const successCount = results.filter(r => r.success !== false).length;
-        const failureCount = results.length - successCount;
-        
-        if (failureCount === 0) {
-            console.log(`${COLORS.brightGreen}[OK] [ToolManager]${COLORS.reset} All ${COLORS.brightMagenta}${results.length}${COLORS.reset} tools executed successfully`);
-        } else {
-            console.log(`${COLORS.brightYellow}⚠ [ToolManager]${COLORS.reset} Tools completed: ${COLORS.brightGreen}${successCount} success${COLORS.reset}, ${COLORS.brightRed}${failureCount} failed${COLORS.reset}`);
-        }
-    }
 }
+
+const COLORS = {
+    reset: '\x1b[0m', red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
+    blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m', white: '\x1b[37m',
+    brightRed: '\x1b[91m', brightGreen: '\x1b[92m', brightYellow: '\x1b[93m',
+    brightBlue: '\x1b[94m', brightMagenta: '\x1b[95m', brightCyan: '\x1b[96m'
+};
 
 export default ToolManager;
