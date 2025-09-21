@@ -9,6 +9,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { selectAPI, createModel } from './_model_map.js';
+import process from 'process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,6 +40,14 @@ export class Prompter {
         for (let key in base_profile) {
             if (this.profile[key] === undefined)
                 this.profile[key] = base_profile[key];
+            // Load md file content if the config value contains 'prompt'
+            if (typeof this.profile[key] === 'string' && this.profile[key].includes('prompt')) {
+                try {
+                    this.profile[key] = readFileSync(this.profile[key], 'utf8');
+                } catch (err) {
+                    console.warn(`Failed to read prompt file: ${this.profile[key]}, keeping original config`);
+                }
+            }
         }
         // base overrides default, individual overrides base
 
@@ -196,12 +205,7 @@ export class Prompter {
             prompt = prompt.replaceAll('$LAST_GOALS', goal_text.trim());
         }
         if (prompt.includes('$TOOLS')) {
-            // Get tool descriptions from ToolManager for JSON tool commands
-            let toolDescriptions = '';
-            if (this.agent.coder && this.agent.coder.codeToolsManager) {
-                toolDescriptions = this.agent.coder.codeToolsManager.getFormattedToolDescriptions();
-            }
-            prompt = prompt.replaceAll('$TOOLS', toolDescriptions);
+            prompt = prompt.replaceAll('$TOOLS', this.profile.tools_manual);
         }
         if (prompt.includes('$BLUEPRINTS')) {
             if (this.agent.npc.constructions) {
@@ -212,13 +216,9 @@ export class Prompter {
                 prompt = prompt.replaceAll('$BLUEPRINTS', blueprints.slice(0, -2));
             }
         }
-        if (prompt.includes('$WORKSPACES')) {
-            const workspaces = this.agent.code_workspaces || [];
-            const workspaceList = workspaces
-                .map(ws => ws.replace('{BOT_NAME}', this.agent.name))
-                .map(ws => `- ${ws}`)
-                .join('\n');
-            prompt = prompt.replaceAll('$WORKSPACES', workspaceList);
+        if (prompt.includes('$ABSOLUTE_PATH_PREFIX')) {
+            const absolutePathPrefix = process.cwd();
+            prompt = prompt.replaceAll('$ABSOLUTE_PATH_PREFIX', absolutePathPrefix);
         }
 
         // check if there are any remaining placeholders with syntax $<word>
@@ -236,13 +236,11 @@ export class Prompter {
                 fs.default.mkdirSync(logsDir, { recursive: true });
             }
             
-            const logFile = path.default.join(logsDir, 'prompt-test.md');
             const timestamp = new Date().toISOString();
             // Convert \n escape sequences to actual newlines for better readability
             const formattedPrompt = prompt.replace(/\\n/g, '\n');
             const logEntry = `\n## Prompt Generated at ${timestamp}\n\n\`\`\`\n${formattedPrompt}\n\`\`\`\n\n---\n`;
             
-            fs.default.appendFileSync(logFile, logEntry, 'utf8');
         } catch (error) {
             console.warn('Failed to write prompt to log file:', error.message);
         }
@@ -307,14 +305,6 @@ export class Prompter {
         return '';
     }
 
-    // Check and trim the messages array length
-    _trimMessages(messages) {
-        while (messages.length > this.max_messages) {
-            messages.shift(); // Remove the oldest message
-            console.log(`Trimmed oldest message, current length: ${messages.length}`);
-        }
-        return messages;
-    }
 
     async promptCoding(messages, codingGoal) {
         if (this.awaiting_coding) {
@@ -323,20 +313,15 @@ export class Prompter {
         }
         this.awaiting_coding = true;
         try {
-            // Prepare messages and prompt
             await this.checkCooldown();
-            messages = this._trimMessages(messages);
-            let prompt;
-            try {
-                prompt = await fs.readFile('./profiles/defaults/coding.md', 'utf8');
-            } catch (error) {
-                console.log('coding.md not found, using profile.coding');
-                prompt = this.profile.coding;
+            while (messages.length > this.max_messages && messages.length > 1) {
+                messages.shift(); // Remove the oldest message
+                console.log(`Trimmed oldest message, current length: ${messages.length}`);
             }
+
+            let prompt = this.profile.coding;
             prompt = prompt.replaceAll('$CODING_GOAL', codingGoal);
             prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
-            
-            // Send request and handle response
             const resp = await this.code_model.sendRequest(messages, prompt);
             await this._saveLog(prompt, messages, resp, 'coding');
             this.max_messages++;
@@ -344,7 +329,6 @@ export class Prompter {
             return resp;
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
-            // Handle input length exceeded error
             if (error.message?.includes('Range of input length should be')) {
                 console.log('Input length exceeded, trimming messages and adjusting max_messages');
                 if (messages.length > 2) {
@@ -352,6 +336,12 @@ export class Prompter {
                     console.log(`Removed oldest message, new length: ${messages.length}`);
                     this.max_messages = messages.length - 2;
                     console.log(`Adjusted max_messages to: ${this.max_messages}`);
+                } else {
+                    console.log('Messages too few, clearing all messages and resetting max_messages to default');
+                    // Clear all messages and reset to default
+                    messages.length = 0;
+                    this.max_messages = 15; // Reset to default value
+                    console.log('Cleared messages and reset max_messages to 15');
                 }
             }
             throw error;
