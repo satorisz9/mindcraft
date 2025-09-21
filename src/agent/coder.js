@@ -21,7 +21,7 @@ export class Coder {
 
         for (let i = 0; i < MAX_ATTEMPTS; i++) {
             try {
-                if (this.agent.bot.interrupt_code) return 'Interrupted coding session';
+                if (this.agent.bot.interrupt_code) return null;
 
                 // Step 1: Get AI response with interrupt check
                 const response = await Promise.race([
@@ -44,10 +44,15 @@ export class Coder {
                 messages.push({ role: 'assistant', content: response });
                 console.log('Response:', response);
                 
-                // Step 2: Validate Tool format
+                // Step 2: Handle no response case
+                if (response.includes('//no response')) {
+                    console.log('Received no response due to concurrent request protection. Waiting...');
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+                    continue;
+                }
+                // Step 3: Validate Tool format
                 if (!this.codeToolsManager.parseJSONTools(response).hasTools) {
                     console.log('Response is not in Tool format. Please use Tool command format.');
-                    await sleep(1000);
                     messages.push({ role: 'user', content: 'Response is not in Tool format. Please use Tool command format as described above.' });
                     continue;
                 }
@@ -95,6 +100,7 @@ export class Coder {
     }
 
     /**
+     * TODO: Remove after testing
      * Display the last 4 messages from the conversation history
      * @param {Array} messages - The message history array
      */
