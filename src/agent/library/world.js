@@ -148,15 +148,26 @@ export function getNearestBlocksWhere(bot, predicate, distance=8, count=10000) {
     /**
      * Get a list of the nearest blocks that satisfy the given predicate.
      * @param {Bot} bot - The bot to get the nearest blocks for.
-     * @param {function} predicate - The predicate to filter the blocks.
+     * @param {function|array} predicate - The predicate to filter the blocks, or array of block IDs.
      * @param {number} distance - The maximum distance to search, default 16.
      * @param {number} count - The maximum number of blocks to find, default 10000.
      * @returns {Block[]} - The nearest blocks that satisfy the given predicate.
      * @example
      * let waterBlocks = world.getNearestBlocksWhere(bot, block => block.name === 'water', 16, 10);
      **/
-    let positions = bot.findBlocks({matching: predicate, maxDistance: distance, count: count});
-    let blocks = positions.map(position => bot.blockAt(position));
+    let positions;
+    if (Array.isArray(predicate)) {
+        // If predicate is an array of block IDs, use it directly
+        positions = bot.findBlocks({matching: predicate, maxDistance: distance, count: count});
+    } else {
+        // If predicate is a function, use it as matching function
+        positions = bot.findBlocks({matching: predicate, maxDistance: distance, count: count});
+    }
+    let blocks = positions.map(position => {
+        let block = bot.blockAt(position);
+        block.position = position; // Add position property to block
+        return block;
+    });
     return blocks;
 }
 
