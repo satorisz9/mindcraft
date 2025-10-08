@@ -13,6 +13,8 @@ import { selectAPI, createModel } from './_model_map.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const SPAM_LIMIT = 10;
+
 export class Prompter {
     constructor(agent, profile) {
         this.agent = agent;
@@ -49,6 +51,8 @@ export class Prompter {
         this.cooldown = this.profile.cooldown ? this.profile.cooldown : 0;
         this.last_prompt_time = 0;
         this.awaiting_coding = false;
+
+        this.spam_count = 0;
 
         // for backwards compatibility, move max_tokens to params
         let max_tokens = null;
@@ -210,11 +214,32 @@ export class Prompter {
         this.last_prompt_time = Date.now();
     }
 
+    async checkSpam() {
+        if (this.spam_count >= SPAM_LIMIT) {
+            console.warn('Spam limit reached, returning no response.');
+            return true;
+        }
+        let elapsed = Date.now() - this.last_prompt_time;
+        if (elapsed < 100) {
+            this.spam_count++;
+            if (this.spam_count >= SPAM_LIMIT) {
+                console.error('Prompt spam detected, shutting down.');
+                await new Promise(r => setTimeout(r, 100));
+                this.agent.cleanKill('Prompt spam detected, shutting down.');
+            }
+        }
+        else {
+            this.spam_count = 0;
+        }
+        this.last_prompt_time = Date.now();
+    }
+
     async promptConvo(messages) {
         this.most_recent_msg_time = Date.now();
         let current_msg_time = this.most_recent_msg_time;
 
         for (let i = 0; i < 3; i++) { // try 3 times to avoid hallucinations
+            await this.checkSpam();
             await this.checkCooldown();
             if (current_msg_time !== this.most_recent_msg_time) {
                 return '';
@@ -266,6 +291,7 @@ export class Prompter {
             return '```//no response```';
         }
         this.awaiting_coding = true;
+        await this.checkSpam();
         await this.checkCooldown();
         let prompt = this.profile.coding;
         prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
@@ -277,6 +303,7 @@ export class Prompter {
     }
 
     async promptMemSaving(to_summarize) {
+        await this.checkSpam();
         await this.checkCooldown();
         let prompt = this.profile.saving_memory;
         prompt = await this.replaceStrings(prompt, null, null, to_summarize);
@@ -290,6 +317,7 @@ export class Prompter {
     }
 
     async promptShouldRespondToBot(new_message) {
+        await this.checkSpam();
         await this.checkCooldown();
         let prompt = this.profile.bot_responder;
         let messages = this.agent.history.getHistory();
@@ -300,6 +328,7 @@ export class Prompter {
     }
 
     async promptVision(messages, imageBuffer) {
+        await this.checkSpam();
         await this.checkCooldown();
         let prompt = this.profile.image_analysis;
         prompt = await this.replaceStrings(prompt, messages, null, null, null);
