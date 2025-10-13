@@ -61,8 +61,7 @@ You can configure the agent's name, model, and prompts in their profile like `an
 | `huggingface`    | `HUGGINGFACE_API_KEY` | `huggingface/Qwen/Qwen3-Next-80B-A3B-Instruct` | [docs](https://huggingface.co/models) |
 | `novita`         | `NOVITA_API_KEY` | `novita/deepseek/deepseek-v3.2-exp` | [docs](https://novita.ai/model-api/product/llm-api?utm_source=github_mindcraft&utm_medium=github_readme&utm_campaign=link) |
 | `openrouter`     | `OPENROUTER_API_KEY` | `openrouter/anthropic/claude-sonnet-4.5` | [docs](https://openrouter.ai/models) |
-| `glhf.chat`      | `GHLF_API_KEY` | `glhf/hf:meta-llama/Llama-3.1-405B-Instruct` | [docs](https://glhf.chat/user-settings/api) |
-<!-- GLHF.chat has been rebranded to synthetic.new; keep this? -->
+| `glhf.chat`      | `GHLF_API_KEY` | `glhf/hf:meta-llama/Llama-3.1-405B-Instruct` | [docs](https://glhf.chat/user-settings/api) <!-- GLHF.chat has been rebranded to synthetic.new; keep this? --> |
 | `hyperbolic`     | `HYPERBOLIC_API_KEY` | `hyperbolic/deepseek-ai/DeepSeek-V3` | [docs](https://docs.hyperbolic.xyz/docs/getting-started) |
 | `vllm`           | n/a | `vllm/llama3` | n/a |
 | `cerebras`       | `CEREBRAS_API_KEY` | `cerebras/llama-3.3-70b` | [docs](https://inference-docs.cerebras.ai/introduction) |
