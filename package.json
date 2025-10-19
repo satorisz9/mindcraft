@@ -1,4 +1,5 @@
 {
+    "name": "mindcraft",
     "type": "module",
     "dependencies": {
         "@anthropic-ai/sdk": "^0.17.1",
@@ -21,7 +22,7 @@
         "mineflayer-collectblock": "^1.4.1",
         "mineflayer-pathfinder": "^2.4.5",
         "mineflayer-pvp": "^1.3.2",
-        "node-canvas-webgl": "PrismarineJS/node-canvas-webgl",
+        "node-canvas-webgl": "^0.3.0",
         "open": "^10.2.0",
         "openai": "^4.4.0",
         "prismarine-item": "^1.15.0",
@@ -35,6 +36,10 @@
         "tree-sitter-bash": "^0.21.0",
         "vec3": "^0.1.10",
         "yargs": "^17.7.2"
+    },
+    "overrides": {
+      "canvas": "^3.1.0",
+      "gl": "^8.1.6"
     },
     "scripts": {
         "postinstall": "patch-package",
