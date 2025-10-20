@@ -155,8 +155,8 @@ export class ExecuteTool {
         const timeoutPromise = new Promise((_, reject) => {
             timeoutId = setTimeout(() => {
                 abortController.abort();
-                reject(new Error('Code execution timeout: exceeded 30 seconds'));
-            }, 30000); // 60 seconds timeout
+                reject(new Error('Code execution timeout: exceeded 60 seconds'));
+            }, 60000); // 60 seconds timeout
         });
         
         try {
@@ -178,6 +178,12 @@ export class ExecuteTool {
             
             if (abortController.signal.aborted) {
                 this._stopBotActions();
+            }
+            
+            // CRITICAL: Reset interrupt flag after stopping actions to allow retry
+            // Without this, coder.js Promise.race will continuously reject with "Interrupted coding session"
+            if (this.agent.bot) {
+                this.agent.bot.interrupt_code = false;
             }
             
             throw error;
@@ -288,7 +294,7 @@ export class ExecuteTool {
                 this.agent.bot.output = '';
             }
         }
-        
+        this.agent.bot.chat(executionOutput);
         return executionOutput;
     }
 

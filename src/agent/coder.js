@@ -9,19 +9,30 @@ export class Coder {
     constructor(agent) {
         this.agent = agent;
         this.codeToolsManager = new ToolManager(agent);
+        this.MAX_ATTEMPTS;
+        this.debug = false;
+        // Modes to pause during coding to prevent interference
+        // this.MODES_TO_PAUSE = ['unstuck', 'item_collecting', 'hunting', 'self_defense', 'self_preservation']; //TODO: remove after test
+        this.MODES_TO_PAUSE = ['unstuck', 'item_collecting'];
     }
 
     async generateCode(agent_history,codingGoal) {
-        console.log('### Generating code...');
-        this.agent.bot.modes.pause('unstuck');
+        console.log('### Generating code...'); 
         
-        // this message history is transient and only maintained until the coding session is finished
-        let messages = agent_history.getHistory();
-        const MAX_ATTEMPTS = 100;
+        try {
+            // this message history is transient and only maintained until the coding session is finished
+            let messages = agent_history.getHistory();
 
-        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+            if(this.debug)
+                this.MAX_ATTEMPTS = 10000;                
+            else
+                this.MAX_ATTEMPTS = 100;
+            // Pause some automatic modes to prevent interference with code execution
+            this.MODES_TO_PAUSE.forEach(mode => this.agent.bot.modes.pause(mode));
+            for (let i = 0; i < this.MAX_ATTEMPTS; i++) {
             try {
-                if (this.agent.bot.interrupt_code) return null;
+                if (this.agent.bot.interrupt_code && this.debug == false) 
+                    return "Coding session interrupted";
 
                 // Step 1: Get AI response with interrupt check
                 const response = await Promise.race([
@@ -30,6 +41,9 @@ export class Coder {
                         const check = () => {
                             if (this.agent.bot.interrupt_code) {
                                 this.agent.bot.pathfinder.stop();
+                                // This prevents deadlock when promptCoding is still waiting for AI response
+                                this.agent.prompter.awaiting_coding = false;
+                                console.log('[Coder] Interrupt detected, reset awaiting_coding flag');
                                 reject(new Error('Interrupted coding session'));
                             } else {
                                 setTimeout(check, 100);
@@ -46,6 +60,7 @@ export class Coder {
                 
                 // Step 2: Handle no response case
                 if (response.includes('//no response')) {
+                    this.agent.bot.interrupt_code = true;
                     console.log('Received no response due to concurrent request protection. Waiting...');
                     await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
                     continue;
@@ -84,7 +99,7 @@ export class Coder {
                 
                 // Step 6: Continue coding loop
                 messages.push({ role: 'user', content: toolResultFeedback });
-                this._displayRecentMessages(messages);
+                this._displayRecentMessages(messages);//TODO: remove after test
                 const operationSummary = toolResult.operations 
                     ? toolResult.operations.map(op => `${op.tool}: ${op.path}`).join(', ')
                     : 'No operations recorded';
@@ -92,11 +107,21 @@ export class Coder {
                 console.log(operationSummary);
 
             } catch (error) {
+                // Reset awaiting_coding flag in case of error to prevent deadlock
+                this.agent.prompter.awaiting_coding = false;
+                console.log('[Coder] Error caught, reset awaiting_coding flag');
+                
                 messages.push({ role: 'user', content: `Code generation error: ${error.message}` });
                 console.warn(`Security check: Attempt ${i + 1} failed: ${error.message}`);
+                }
             }
+            
+            return `Code generation failed after ${this.MAX_ATTEMPTS} attempts.`;
+            
+        } finally {
+            this.MODES_TO_PAUSE.forEach(mode => this.agent.bot.modes.unpause(mode));
+            this.agent.prompter.awaiting_coding = false;
         }
-        return `Code generation failed after ${MAX_ATTEMPTS} attempts.`;
     }
 
     /**

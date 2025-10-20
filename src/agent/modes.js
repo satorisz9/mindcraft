@@ -150,37 +150,47 @@ const modes_list = [
                 this.stuck_time = 0;
                 execute(this, agent, async () => {
                     const initialPos = bot.entity.position.clone();
-                    
+
                     // Try 5 times to move to a random nearby position (1 block away)
                     let attemptSuccessful = false;
+                    let successfulAttempts = 0;
+                    let failedAttempts = 0;
                     for (let attempt = 0; attempt < 5 && !attemptSuccessful; attempt++) {
-                        const randomX = initialPos.x + (Math.random() - 0.5) * 2; // -1 to +1
-                        const randomZ = initialPos.z + (Math.random() - 0.5) * 2; // -1 to +1
+                        const randomX = initialPos.x + (Math.random() - 0.5) * 6; // -3 to +3
+                        const randomZ = initialPos.z + (Math.random() - 0.5) * 6; // -3 to +3
                         const randomY = initialPos.y; // Keep same Y level
-                        
+
                         try {
-                            await skills.goToPosition(bot, randomX, randomY, randomZ, 0.5);
+                            await skills.goToPosition(bot, randomX, randomY, randomZ, 1.0);
                             const currentPos = bot.entity.position;
-                            if (initialPos.distanceTo(currentPos) > 0.5) {
+                            const distance = initialPos.distanceTo(currentPos);
+                            if (distance > 0.8) {
                                 attemptSuccessful = true;
+                                successfulAttempts++;
                                 break;
+                            } else {
+                                failedAttempts++;
                             }
                         } catch (error) {
+                            failedAttempts++;
+                            console.log(`[Unstuck] Attempt ${attempt + 1}/5: ERROR - ${error.message}`);
                             continue;
                         }
                     }
-                    
-                    // Wait 3 seconds to check if unstuck was successful
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    
-                    const finalPos = bot.entity.position;
-                    const moved = initialPos.distanceTo(finalPos) > 2;
-                    
-                    if (moved) {
-                        say(agent, 'I\'m free.');
+                    if (attemptSuccessful) {
+                        say(agent, 'I\'m free.').catch(err => console.error('Failed to say message:', err));
                     } else {
-                        say(agent, 'Still stuck, restarting...');
-                        agent.cleanKill("Got stuck and couldn't get unstuck");
+                        // All attempts failed, wait 2 seconds and check if bot moved naturally
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        const finalPos = bot.entity.position;
+                        const totalDistance = initialPos.distanceTo(finalPos);
+                        if (totalDistance > 0.5) {
+                            say(agent, 'I\'m free.').catch(err => console.error('Failed to say message:', err));
+                        } else {
+                            console.log(`[Unstuck] FAILURE - Bot only moved ${totalDistance.toFixed(2)} blocks (< 0.5), restarting agent...`);
+                            say(agent, 'Still stuck, restarting...');
+                            agent.cleanKill("Got stuck and couldn't get unstuck");
+                        }
                     }
                 }).catch(error => {
                     console.error(`Error in unstuck mode:`, error);
