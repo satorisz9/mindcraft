@@ -17,45 +17,77 @@ export class Claude {
         this.anthropic = new Anthropic(config);
     }
 
-    async sendRequest(turns, systemMessage) {
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
         const messages = strictFormat(turns);
-        let res = null;
+        
         try {
-            console.log(`Awaiting anthropic response from ${this.model_name}...`)
+            const logMessage = tools 
+                ? `Awaiting anthropic response with native tool calling (${tools.length} tools) from ${this.model_name}...`
+                : `Awaiting anthropic response from ${this.model_name}...`;
+            console.log(logMessage);
+            
             if (!this.params.max_tokens) {
                 if (this.params.thinking?.budget_tokens) {
                     this.params.max_tokens = this.params.thinking.budget_tokens + 1000;
-                    // max_tokens must be greater than thinking.budget_tokens
                 } else {
                     this.params.max_tokens = 4096;
                 }
             }
-            const resp = await this.anthropic.messages.create({
+            
+            const requestConfig = {
                 model: this.model_name || "claude-sonnet-4-20250514",
                 system: systemMessage,
                 messages: messages,
                 ...(this.params || {})
-            });
-
+            };
+            
+            if (tools && Array.isArray(tools) && tools.length > 0) {
+                console.log(`Using native tool calling with ${tools.length} tools`);
+                requestConfig.tools = tools.map(tool => ({
+                    name: tool.function.name,
+                    description: tool.function.description,
+                    input_schema: tool.function.parameters
+                }));
+            }
+            
+            const resp = await this.anthropic.messages.create(requestConfig);
             console.log('Received.')
-            // get first content of type text
+            
+            // Check for tool use
+            const toolUse = resp.content.find(content => content.type === 'tool_use');
+            if (toolUse) {
+                console.log(`Received tool call from API`);
+                const tool_calls = resp.content
+                    .filter(item => item.type === 'tool_use')
+                    .map((item, index) => ({
+                        id: item.id || `call_${Date.now()}_${index}`,
+                        type: 'function',
+                        function: {
+                            name: item.name,
+                            arguments: JSON.stringify(item.input || {})
+                        }
+                    }));
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls
+                });
+            }
+            
             const textContent = resp.content.find(content => content.type === 'text');
             if (textContent) {
-                res = textContent.text;
-            } else {
-                console.warn('No text content found in the response.');
-                res = 'No response from Claude.';
+                return textContent.text;
             }
+            
+            console.warn('No text content found in the response.');
+            return 'No response from Claude.';
         }
         catch (err) {
             if (err.message.includes("does not support image input")) {
-                res = "Vision is only supported by certain models.";
-            } else {
-                res = "My brain disconnected, try again.";
+                return "Vision is only supported by certain models.";
             }
             console.log(err);
+            return "My brain disconnected, try again.";
         }
-        return res;
     }
 
     async sendVisionRequest(turns, systemMessage, imageBuffer) {

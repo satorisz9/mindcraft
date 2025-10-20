@@ -36,10 +36,7 @@ export class Mistral {
         }
     }
 
-    async sendRequest(turns, systemMessage) {
-
-        let result;
-
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
         try {
             const model = this.model_name || "mistral-large-latest";
 
@@ -48,24 +45,48 @@ export class Mistral {
             ];
             messages.push(...strictFormat(turns));
 
-            console.log('Awaiting mistral api response...')
-            const response  = await this.#client.chat.complete({
+            const requestConfig = {
                 model,
                 messages,
                 ...(this.params || {})
-            });
+            };
 
-            result = response.choices[0].message.content;
+            if (tools && Array.isArray(tools) && tools.length > 0) {
+                console.log(`Using native tool calling with ${tools.length} tools`);
+                requestConfig.tools = tools.map(tool => ({
+                    type: 'function',
+                    function: {
+                        name: tool.function.name,
+                        description: tool.function.description,
+                        parameters: tool.function.parameters
+                    }
+                }));
+            }
+
+            const logMessage = tools 
+                ? `Awaiting mistral api response with native tool calling (${tools.length} tools)...`
+                : 'Awaiting mistral api response...';
+            console.log(logMessage);
+
+            const response = await this.#client.chat.complete(requestConfig);
+
+            const message = response.choices[0].message;
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls: message.tool_calls
+                });
+            }
+
+            return message.content;
         } catch (err) {
             if (err.message.includes("A request containing images has been given to a model which does not have the 'vision' capability.")) {
-                result = "Vision is only supported by certain models.";
-            } else {
-                result = "My brain disconnected, try again.";
+                return "Vision is only supported by certain models.";
             }
             console.log(err);
+            return "My brain disconnected, try again.";
         }
-
-        return result;
     }
 
     async sendVisionRequest(messages, systemMessage, imageBuffer) {

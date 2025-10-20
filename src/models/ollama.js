@@ -10,7 +10,7 @@ export class Ollama {
         this.embedding_endpoint = '/api/embeddings';
     }
 
-    async sendRequest(turns, systemMessage) {
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
         let model = this.model_name || 'sweaterdog/andy-4:micro-q8_0';
         let messages = strictFormat(turns);
         messages.unshift({ role: 'system', content: systemMessage });
@@ -20,24 +20,42 @@ export class Ollama {
 
         while (attempt < maxAttempts) {
             attempt++;
-            console.log(`Awaiting local response... (model: ${model}, attempt: ${attempt})`);
+            const logMessage = tools 
+                ? `Awaiting local response with tool calling (${tools.length} tools)... (model: ${model}, attempt: ${attempt})`
+                : `Awaiting local response... (model: ${model}, attempt: ${attempt})`;
+            console.log(logMessage);
+
             let res = null;
             try {
-                let apiResponse = await this.send(this.chat_endpoint, {
+                const requestBody = {
                     model: model,
                     messages: messages,
                     stream: false,
                     ...(this.params || {})
-                });
-                if (apiResponse) {
-                    res = apiResponse['message']['content'];
-                } else {
+                };
+
+                if (tools && Array.isArray(tools) && tools.length > 0) {
+                    console.log(`Using tool calling with ${tools.length} tools`);
+                    requestBody.tools = tools;
+                }
+
+                let apiResponse = await this.send(this.chat_endpoint, requestBody);
+                
+                if (!apiResponse) {
                     res = 'No response data.';
+                } else if (apiResponse.message?.tool_calls && apiResponse.message.tool_calls.length > 0) {
+                    console.log(`Received ${apiResponse.message.tool_calls.length} tool call(s) from API`);
+                    return JSON.stringify({
+                        _native_tool_calls: true,
+                        tool_calls: apiResponse.message.tool_calls
+                    });
+                } else {
+                    res = apiResponse['message']['content'];
                 }
             } catch (err) {
                 if (err.message.toLowerCase().includes('context length') && turns.length > 1) {
                     console.log('Context length exceeded, trying again with shorter context.');
-                    return await this.sendRequest(turns.slice(1), systemMessage);
+                    return await this.sendRequest(turns.slice(1), systemMessage, stop_seq, tools);
                 } else {
                     console.log(err);
                     res = 'My brain disconnected, try again.';

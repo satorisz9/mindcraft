@@ -21,11 +21,9 @@ export class Hyperbolic {
      * @param {string} stopSeq - A stopping sequence, default '<|EOT|>'.
      * @returns {Promise<string>} - The model's reply.
      */
-    async sendRequest(turns, systemMessage, stopSeq = '<|EOT|>') {
-        // Prepare the messages with a system prompt at the beginning
+    async sendRequest(turns, systemMessage, stopSeq = '<|EOT|>', tools=null) {
         const messages = [{ role: 'system', content: systemMessage }, ...turns];
 
-        // Build the request payload
         const payload = {
             model: this.modelName,
             messages: messages,
@@ -35,14 +33,22 @@ export class Hyperbolic {
             stream: false
         };
 
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            console.log(`Using native tool calling with ${tools.length} tools`);
+            payload.tools = tools;
+            payload.tool_choice = 'required';
+        }
+
         const maxAttempts = 5;
         let attempt = 0;
         let finalRes = null;
 
         while (attempt < maxAttempts) {
             attempt++;
-            console.log(`Awaiting Hyperbolic API response... (attempt: ${attempt})`);
-            console.log('Messages:', messages);
+            const logMessage = tools 
+                ? `Awaiting Hyperbolic API response with native tool calling (${tools.length} tools)... (attempt: ${attempt})`
+                : `Awaiting Hyperbolic API response... (attempt: ${attempt})`;
+            console.log(logMessage);
 
             let completionContent = null;
 
@@ -65,7 +71,16 @@ export class Hyperbolic {
                     throw new Error('Context length exceeded');
                 }
 
-                completionContent = data?.choices?.[0]?.message?.content || '';
+                const message = data?.choices?.[0]?.message;
+                if (message?.tool_calls && message.tool_calls.length > 0) {
+                    console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+                    return JSON.stringify({
+                        _native_tool_calls: true,
+                        tool_calls: message.tool_calls
+                    });
+                }
+
+                completionContent = message?.content || '';
                 console.log('Received response from Hyperbolic.');
             } catch (err) {
                 if (
@@ -73,7 +88,7 @@ export class Hyperbolic {
                     turns.length > 1
                 ) {
                     console.log('Context length exceeded, trying again with a shorter context...');
-                    return await this.sendRequest(turns.slice(1), systemMessage, stopSeq);
+                    return await this.sendRequest(turns.slice(1), systemMessage, stopSeq, tools);
                 } else {
                     console.error(err);
                     completionContent = 'My brain disconnected, try again.';
@@ -86,7 +101,7 @@ export class Hyperbolic {
 
             if ((hasOpenTag && !hasCloseTag)) {
                 console.warn("Partial <think> block detected. Re-generating...");
-                continue; // Retry the request
+                continue;
             }
 
             if (hasCloseTag && !hasOpenTag) {
@@ -98,7 +113,7 @@ export class Hyperbolic {
             }
 
             finalRes = completionContent.replace(/<\|separator\|>/g, '*no response*');
-            break; // Valid response obtained—exit loop
+            break;
         }
 
         if (finalRes == null) {

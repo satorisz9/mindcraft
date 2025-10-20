@@ -13,8 +13,7 @@ export class Cerebras {
         this.client = new CerebrasSDK({ apiKey: getKey('CEREBRAS_API_KEY') });
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>') {
-        // Format messages array
+    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>', tools=null) {
         const messages = strictFormat(turns);
         messages.unshift({ role: 'system', content: systemMessage });
 
@@ -25,16 +24,39 @@ export class Cerebras {
             ...(this.params || {}),
         };
 
-        let res;
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            console.log(`Using native tool calling with ${tools.length} tools`);
+            pack.tools = tools;
+            pack.tool_choice = 'required';
+        }
+
         try {
+            const logMessage = tools 
+                ? `Awaiting Cerebras API response with native tool calling (${tools.length} tools)...`
+                : 'Awaiting Cerebras API response...';
+            console.log(logMessage);
+
             const completion = await this.client.chat.completions.create(pack);
-            // OpenAI-compatible shape
-            res = completion.choices?.[0]?.message?.content || '';
+            
+            if (!completion?.choices?.[0]) {
+                console.error('No completion or choices returned');
+                return 'No response received.';
+            }
+
+            const message = completion.choices[0].message;
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls: message.tool_calls
+                });
+            }
+
+            return message.content || '';
         } catch (err) {
             console.error('Cerebras API error:', err);
-            res = 'My brain disconnected, try again.';
+            return 'My brain disconnected, try again.';
         }
-        return res;
     }
 
     async sendVisionRequest(messages, systemMessage, imageBuffer) {

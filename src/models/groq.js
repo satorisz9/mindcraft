@@ -9,33 +9,24 @@ export class GroqCloudAPI {
     static prefix = 'groq';
 
     constructor(model_name, url, params) {
-
         this.model_name = model_name;
         this.url = url;
         this.params = params || {};
 
-        // Remove any mention of "tools" from params:
-        if (this.params.tools)
-            delete this.params.tools;
-        // This is just a bit of future-proofing in case we drag Mindcraft in that direction.
-
-        // I'm going to do a sneaky ReplicateAPI theft for a lot of this, aren't I?
         if (this.url)
             console.warn("Groq Cloud has no implementation for custom URLs. Ignoring provided URL.");
 
         this.groq = new Groq({ apiKey: getKey('GROQCLOUD_API_KEY') });
-
-
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = null) {
-        // Construct messages array
+    async sendRequest(turns, systemMessage, stop_seq = null, tools=null) {
         let messages = [{"role": "system", "content": systemMessage}].concat(turns);
 
-        let res = null;
-
         try {
-            console.log("Awaiting Groq response...");
+            const logMessage = tools 
+                ? `Awaiting Groq response with native tool calling (${tools.length} tools)...`
+                : 'Awaiting Groq response...';
+            console.log(logMessage);
 
             // Handle deprecated max_tokens parameter
             if (this.params.max_tokens) {
@@ -48,27 +39,47 @@ export class GroqCloudAPI {
                 this.params.max_completion_tokens = 4000;
             }
 
-            let completion = await this.groq.chat.completions.create({
-                "messages": messages,
-                "model": this.model_name || "qwen/qwen3-32b",
-                "stream": false,
-                "stop": stop_seq,
+            const pack = {
+                messages: messages,
+                model: this.model_name || "qwen/qwen3-32b",
+                stream: false,
+                stop: stop_seq,
                 ...(this.params || {})
-            });
+            };
 
-            res = completion.choices[0].message.content;
+            if (tools && Array.isArray(tools) && tools.length > 0) {
+                console.log(`Using native tool calling with ${tools.length} tools`);
+                pack.tools = tools;
+                pack.tool_choice = 'required';
+                delete pack.stop;
+            }
 
+            let completion = await this.groq.chat.completions.create(pack);
+
+            if (!completion?.choices?.[0]) {
+                return 'No response received.';
+            }
+
+            const message = completion.choices[0].message;
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls: message.tool_calls
+                });
+            }
+
+            let res = message.content;
             res = res.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            return res;
         }
         catch(err) {
             if (err.message.includes("content must be a string")) {
-                res = "Vision is only supported by certain models.";
-            } else {
-                res = "My brain disconnected, try again.";
+                return "Vision is only supported by certain models.";
             }
             console.log(err);
+            return "My brain disconnected, try again.";
         }
-        return res;
     }
 
     async sendVisionRequest(messages, systemMessage, imageBuffer) {

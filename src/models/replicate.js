@@ -19,17 +19,54 @@ export class ReplicateAPI {
 		});
 	}
 
-	async sendRequest(turns, systemMessage) {
-		const stop_seq = '<|EOT|>';
-		const prompt = toSinglePrompt(turns, null, stop_seq);
+	async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>', tools=null) {
 		let model_name = this.model_name || 'meta/meta-llama-3-70b-instruct';
 
+		// If tools are provided, use non-streaming API for tool calling
+		if (tools && Array.isArray(tools) && tools.length > 0) {
+			console.log(`Using tool calling with ${tools.length} tools`);
+			console.log('Awaiting Replicate API response with tool calling...');
+			
+			try {
+				const messages = [
+					{ role: "system", content: systemMessage },
+					...turns
+				];
+				
+				const output = await this.replicate.run(model_name, {
+					input: {
+						messages: messages,
+						tools: tools,
+						tool_choice: 'auto',
+						...(this.params || {})
+					}
+				});
+
+				// Check if output contains tool calls
+				if (output?.tool_calls && output.tool_calls.length > 0) {
+					console.log(`Received ${output.tool_calls.length} tool call(s) from API`);
+					return JSON.stringify({
+						_native_tool_calls: true,
+						tool_calls: output.tool_calls
+					});
+				}
+
+				console.log('Received.');
+				return output?.content || output || '';
+			} catch (err) {
+				console.log(err);
+				return 'My brain disconnected, try again.';
+			}
+		}
+
+		// Original streaming logic for non-tool calls
+		const prompt = toSinglePrompt(turns, null, stop_seq);
 		const input = { 
 			prompt, 
 			system_prompt: systemMessage,
 			...(this.params || {})
 		};
-		let res = null;
+		
 		try {
 			console.log('Awaiting Replicate API response...');
 			let result = '';
@@ -41,13 +78,12 @@ export class ReplicateAPI {
 					break;
 				}
 			}
-			res = result;
+			console.log('Received.');
+			return result;
 		} catch (err) {
 			console.log(err);
-			res = 'My brain disconnected, try again.';
+			return 'My brain disconnected, try again.';
 		}
-		console.log('Received.');
-		return res;
 	}
 
 	async embed(text) {

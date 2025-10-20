@@ -1,54 +1,17 @@
 import OpenAIApi from 'openai';
-import { getKey, hasKey } from '../utils/keys.js';
-import { strictFormat } from '../utils/text.js';
+import { getKey } from '../utils/keys.js';
+import { GPT } from './gpt.js';
 
-export class Qwen {
+export class Qwen extends GPT {
     static prefix = 'qwen';
     constructor(model_name, url, params) {
-        this.model_name = model_name;
-        this.params = params;
-        let config = {};
+        super(model_name, url, params);
 
+        let config = {};
         config.baseURL = url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
         config.apiKey = getKey('QWEN_API_KEY');
 
         this.openai = new OpenAIApi(config);
-    }
-
-    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>') {
-        let messages = [{'role': 'system', 'content': systemMessage}].concat(turns);
-
-        messages = strictFormat(messages);
-
-        const pack = {
-            model: this.model_name || "qwen-plus",
-            messages,
-            stop: stop_seq,
-            ...(this.params || {})
-        };
-
-        let res = null;
-        try {
-            console.log('Awaiting Qwen api response...');
-            // console.log('Messages:', messages);
-            let completion = await this.openai.chat.completions.create(pack);
-            // console.log('Qwen Received: ', completion);
-            // console.log('Qwen Received: ', completion.choices[0].message);
-            if (completion.choices[0].finish_reason == 'length')
-                throw new Error('Context length exceeded');
-            console.log('Received.');
-            res = completion.choices[0].message.content;
-        }
-        catch (err) {
-            if ((err.message == 'Context length exceeded' || err.code == 'context_length_exceeded') && turns.length > 1) {
-                console.log('Context length exceeded, trying again with shorter context.');
-                return await this.sendRequest(turns.slice(1), systemMessage, stop_seq);
-            } else {
-                console.log(err);
-                res = 'My brain disconnected, try again.';
-            }
-        }
-        return res;
     }
 
     // Why random backoff?

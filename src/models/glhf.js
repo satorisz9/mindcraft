@@ -1,10 +1,12 @@
 import OpenAIApi from 'openai';
 import { getKey } from '../utils/keys.js';
+import { GPT } from './gpt.js';
 
-export class GLHF {
+export class GLHF extends GPT {
     static prefix = 'glhf';
-    constructor(model_name, url) {
-        this.model_name = model_name;
+    constructor(model_name, url, params) {
+        super(model_name, url, params);
+
         const apiKey = getKey('GHLF_API_KEY');
         if (!apiKey) {
             throw new Error('API key not found. Please check keys.json and ensure GHLF_API_KEY is defined.');
@@ -15,15 +17,7 @@ export class GLHF {
         });
     }
 
-    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>') {
-        // Construct the message array for the API request.
-        let messages = [{ role: 'system', content: systemMessage }].concat(turns);
-        const pack = {
-            model: this.model_name || "hf:meta-llama/Llama-3.1-405B-Instruct",
-            messages,
-            stop: [stop_seq]
-        };
-
+    async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>', tools=null) {
         const maxAttempts = 5;
         let attempt = 0;
         let finalRes = null;
@@ -31,12 +25,15 @@ export class GLHF {
         while (attempt < maxAttempts) {
             attempt++;
             console.log(`Awaiting glhf.chat API response... (attempt: ${attempt})`);
+            
             try {
-                let completion = await this.openai.chat.completions.create(pack);
-                if (completion.choices[0].finish_reason === 'length') {
-                    throw new Error('Context length exceeded');
+                let res = await super.sendRequest(turns, systemMessage, stop_seq, tools);
+                
+                // If it's a tool calling response, return directly without processing
+                if (res.startsWith('{') && res.includes('_native_tool_calls')) {
+                    return res;
                 }
-                let res = completion.choices[0].message.content;
+                
                 // If there's an open <think> tag without a corresponding </think>, retry.
                 if (res.includes("<think>") && !res.includes("</think>")) {
                     console.warn("Partial <think> block detected. Re-generating...");
@@ -47,11 +44,11 @@ export class GLHF {
                     res = "<think>" + res;
                 }
                 finalRes = res.replace(/<\|separator\|>/g, '*no response*');
-                break; // Valid response obtained.
+                break;
             } catch (err) {
                 if ((err.message === 'Context length exceeded' || err.code === 'context_length_exceeded') && turns.length > 1) {
                     console.log('Context length exceeded, trying again with shorter context.');
-                    return await this.sendRequest(turns.slice(1), systemMessage, stop_seq);
+                    return await this.sendRequest(turns.slice(1), systemMessage, stop_seq, tools);
                 } else {
                     console.error(err);
                     finalRes = 'My brain disconnected, try again.';

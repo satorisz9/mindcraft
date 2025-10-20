@@ -34,8 +34,11 @@ export class Gemini {
         this.genAI = new GoogleGenAI({apiKey: getKey('GEMINI_API_KEY')});
     }
 
-    async sendRequest(turns, systemMessage) {
-        console.log('Awaiting Google API response...');
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
+        const logMessage = tools 
+            ? `Awaiting Google API response with native tool calling (${tools.length} tools)...`
+            : 'Awaiting Google API response...';
+        console.log(logMessage);
 
         turns = strictFormat(turns);
         let contents = [];
@@ -46,7 +49,7 @@ export class Gemini {
             });
         }
 
-        const result = await this.genAI.models.generateContent({
+        const requestConfig = {
             model: this.model_name || "gemini-2.5-flash",
             contents: contents,
             safetySettings: this.safetySettings,
@@ -54,12 +57,51 @@ export class Gemini {
                 systemInstruction: systemMessage,
                 ...(this.params || {})
             }
-        });
+        };
+
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            console.log(`Using native tool calling with ${tools.length} tools`);
+            requestConfig.tools = [{ functionDeclarations: this._convertToGeminiTools(tools) }];
+        }
+
+        const result = await this.genAI.models.generateContent(requestConfig);
+        
+        const candidate = result.candidates?.[0];
+        if (candidate?.content?.parts) {
+            const functionCall = candidate.content.parts.find(part => part.functionCall);
+            if (functionCall) {
+                console.log(`Received tool call from API`);
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls: this._convertFromGeminiToolCalls(candidate.content.parts)
+                });
+            }
+        }
+
         const response = await result.text;
-
         console.log('Received.');
-
         return response;
+    }
+
+    _convertToGeminiTools(openaiTools) {
+        return openaiTools.map(tool => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: tool.function.parameters
+        }));
+    }
+
+    _convertFromGeminiToolCalls(parts) {
+        return parts
+            .filter(part => part.functionCall)
+            .map((part, index) => ({
+                id: `call_${Date.now()}_${index}`,
+                type: 'function',
+                function: {
+                    name: part.functionCall.name,
+                    arguments: JSON.stringify(part.functionCall.args || {})
+                }
+            }));
     }
 
     async sendVisionRequest(turns, systemMessage, imageBuffer) {

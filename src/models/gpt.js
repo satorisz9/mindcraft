@@ -20,33 +20,59 @@ export class GPT {
         this.openai = new OpenAIApi(config);
     }
 
-    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>') {
-        let messages = strictFormat(turns);
-        messages = messages.map(message => {
-            message.content += stop_seq;
-            return message;
-        });
+    async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
+        let messages = [{'role': 'system', 'content': systemMessage}].concat(turns);
+        messages = strictFormat(messages);
+        
         let model = this.model_name || "gpt-4o-mini";
+
+        const pack = {
+            model: model,
+            messages,
+            ...(this.params || {})
+        };
+        
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            console.log(`Using native tool calling with ${tools.length} tools`);
+            pack.tools = tools;
+            pack.tool_choice = 'required';
+        } else {
+            pack.stop = stop_seq;
+        }
 
         let res = null;
 
         try {
-            console.log('Awaiting openai api response from model', model)
-            const response = await this.openai.responses.create({
-                model: model,
-                instructions: systemMessage,
-                input: messages,
-                ...(this.params || {})
-            });
+            const logMessage = tools 
+                ? `Awaiting openai api response with native tool calling (${tools.length} tools) from model ${model}`
+                : `Awaiting openai api response from model ${model}`;
+            console.log(logMessage);
+            
+            const completion = await this.openai.chat.completions.create(pack);
+            
+            if (!completion?.choices?.[0]) {
+                console.error('No completion or choices returned:', completion);
+                return 'No response received.';
+            }
+            
+            if (completion.choices[0].finish_reason == 'length')
+                throw new Error('Context length exceeded');
             console.log('Received.')
-            res = response.output_text;
-            let stop_seq_index = res.indexOf(stop_seq);
-            res = stop_seq_index !== -1 ? res.slice(0, stop_seq_index) : res;
+            
+            const message = completion.choices[0].message;
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+                return JSON.stringify({
+                    _native_tool_calls: true,
+                    tool_calls: message.tool_calls
+                });
+            }
+            res = message.content;
         }
         catch (err) {
             if ((err.message == 'Context length exceeded' || err.code == 'context_length_exceeded') && turns.length > 1) {
                 console.log('Context length exceeded, trying again with shorter context.');
-                return await this.sendRequest(turns.slice(1), systemMessage, stop_seq);
+                return await this.sendRequest(turns.slice(1), systemMessage, stop_seq, tools);
             } else if (err.message.includes('image_url')) {
                 console.log(err);
                 res = 'Vision is only supported by certain models.';

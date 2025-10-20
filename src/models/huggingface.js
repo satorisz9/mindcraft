@@ -17,16 +17,44 @@ export class HuggingFace {
     this.huggingface = new HfInference(getKey('HUGGINGFACE_API_KEY'));
   }
 
-  async sendRequest(turns, systemMessage) {
-    const stop_seq = '<|EOT|>';
-    // Build a single prompt from the conversation turns
-    const prompt = toSinglePrompt(turns, null, stop_seq);
-    // Fallback model if none was provided
+  async sendRequest(turns, systemMessage, stop_seq = '<|EOT|>', tools=null) {
     const model_name = this.model_name || 'meta-llama/Meta-Llama-3-8B';
-    // Combine system message with the prompt
-    const input = systemMessage + "\n" + prompt;
+    
+    // If tools are provided, use non-streaming API for tool calling
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      console.log(`Using tool calling with ${tools.length} tools`);
+      console.log(`Awaiting Hugging Face API response with tool calling... (model: ${model_name})`);
+      
+      try {
+        const messages = [{ role: "system", content: systemMessage }, ...turns];
+        const response = await this.huggingface.chatCompletion({
+          model: model_name,
+          messages: messages,
+          tools: tools,
+          tool_choice: 'auto',
+          ...(this.params || {})
+        });
 
-    // We'll try up to 5 times in case of partial <think> blocks for DeepSeek-R1 models.
+        const message = response.choices[0].message;
+        if (message.tool_calls && message.tool_calls.length > 0) {
+          console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+          return JSON.stringify({
+            _native_tool_calls: true,
+            tool_calls: message.tool_calls
+          });
+        }
+
+        console.log('Received.');
+        return message.content || '';
+      } catch (err) {
+        console.log(err);
+        return 'My brain disconnected, try again.';
+      }
+    }
+
+    // Original streaming logic for non-tool calls
+    const prompt = toSinglePrompt(turns, null, stop_seq);
+    const input = systemMessage + "\n" + prompt;
     const maxAttempts = 5;
     let attempt = 0;
     let finalRes = null;
@@ -36,7 +64,6 @@ export class HuggingFace {
       console.log(`Awaiting Hugging Face API response... (model: ${model_name}, attempt: ${attempt})`);
       let res = '';
       try {
-        // Consume the streaming response chunk by chunk
         for await (const chunk of this.huggingface.chatCompletionStream({
           model: model_name,
           messages: [{ role: "user", content: input }],
@@ -47,36 +74,30 @@ export class HuggingFace {
       } catch (err) {
         console.log(err);
         res = 'My brain disconnected, try again.';
-        // Break out immediately; we only retry when handling partial <think> tags.
         break;
       }
 
-      // If the model is DeepSeek-R1, check for mismatched <think> blocks.
-        const hasOpenTag = res.includes("<think>");
-        const hasCloseTag = res.includes("</think>");
+      const hasOpenTag = res.includes("<think>");
+      const hasCloseTag = res.includes("</think>");
 
-        // If there's a partial mismatch, warn and retry the entire request.
-        if ((hasOpenTag && !hasCloseTag)) {
-          console.warn("Partial <think> block detected. Re-generating...");
-          continue;
-        }
+      if ((hasOpenTag && !hasCloseTag)) {
+        console.warn("Partial <think> block detected. Re-generating...");
+        continue;
+      }
 
-        // If both tags are present, remove the <think> block entirely.
-        if (hasOpenTag && hasCloseTag) {
-          res = res.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-        }
+      if (hasOpenTag && hasCloseTag) {
+        res = res.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      }
 
       finalRes = res;
-      break; // Exit loop if we got a valid response.
+      break;
     }
 
-    // If no valid response was obtained after max attempts, assign a fallback.
     if (finalRes == null) {
       console.warn("Could not get a valid <think> block or normal response after max attempts.");
       finalRes = 'I thought too hard, sorry, try again.';
     }
     console.log('Received.');
-    console.log(finalRes);
     return finalRes;
   }
 
