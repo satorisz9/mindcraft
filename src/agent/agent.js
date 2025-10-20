@@ -16,6 +16,8 @@ import { serverProxy, sendOutputToServer } from './mindserver_proxy.js';
 import settings from './settings.js';
 import { Task } from './tasks/tasks.js';
 import { speak } from './speak.js';
+import path from 'path';
+import process from 'process';
 
 export class Agent {
     async start(load_mem=false, init_message=null, count_id=0) {
@@ -28,7 +30,10 @@ export class Agent {
         this.name = this.prompter.getName();
         console.log(`Initializing agent ${this.name}...`);
         
-        this.code_workspaces = settings.code_workspaces;
+        // Auto-complete relative paths to absolute paths for code_workspaces
+        this.code_workspaces = settings.code_workspaces.map(workspace => {
+            return path.join(process.cwd(), workspace);
+        });
         this.history = new History(this);
         this.coder = new Coder(this);
         this.npc = new NPCContoller(this);

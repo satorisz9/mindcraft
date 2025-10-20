@@ -10,12 +10,12 @@ const settings = {
     
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [
-        // "./andy.json",
+        "./andy.json",
         // "./profiles/gpt.json",
         // "./profiles/claude.json",
         // "./profiles/gemini.json",
         // "./profiles/llama.json",
-        "./profiles/qwen.json",
+        //"./profiles/qwen.json",
         // "./profiles/grok.json",
         // "./profiles/mistral.json",
         // "./profiles/deepseek.json",
@@ -40,7 +40,7 @@ const settings = {
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
     "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
 
-    "allow_insecure_coding": true, // allows newAction command and model can write/run code on your computer. enable at own risk
+    "allow_insecure_coding": false, // allows newAction command and model can write/run code on your computer. enable at own risk
     "allow_vision": false, // allows vision model to interpret screenshots as inputs
     "blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"] , // commands to disable and remove from docs. Ex: ["!setMode"]
     "code_timeout_mins": -1, // minutes code is allowed to run. -1 for no timeout
@@ -48,9 +48,9 @@ const settings = {
 
     // code workspace configuration - strictly enforced security measure
     "code_workspaces": [
-        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/action-code",
-        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/learnedSkills",
-        "/Users/quyi/AI-IDE/mindCraft/mindcraft/bots/{BOT_NAME}/"
+        "bots/{BOT_NAME}/action-code",
+        "bots/{BOT_NAME}/learnedSkills",
+        "bots/{BOT_NAME}/"
     ],
 
     "max_messages": 15, // max number of messages to keep in context

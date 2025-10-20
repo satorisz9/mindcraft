@@ -317,6 +317,7 @@ Maintain a Memory.md file to capture learning and insights:
 - Only use Write tool for creating completely new files that don't exist yet
 
 <RelevantSkillsDoc>
+** Prioritize the use of learnedSkills **
 $CODE_DOCS
 </RelevantSkillsDoc>
 

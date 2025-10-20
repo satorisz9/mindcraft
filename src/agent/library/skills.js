@@ -782,7 +782,7 @@ export async function placeBlock(bot, blockType, x, y, z, placeOn='bottom', dont
             return false;
         }
         const block = bot.blockAt(target_dest.plus(d));
-        if (!empty_blocks.includes(block.name)) {
+        if (block && !empty_blocks.includes(block.name)) {
             buildOffBlock = block;
             faceVec = new Vec3(-d.x, -d.y, -d.z); // invert
             break;
@@ -2058,6 +2058,10 @@ export async function goToSurface(bot) {
      **/
     const pos = bot.entity.position;
     for (let y = 360; y > -64; y--) { // probably not the best way to find the surface but it works
+        if (bot.interrupt_code) {
+            log(bot, 'Interrupted while goToSurface.');
+            return false;
+        }
         const block = bot.blockAt(new Vec3(pos.x, y, pos.z));
         if (!block || block.name === 'air' || block.name === 'cave_air') {
             continue;

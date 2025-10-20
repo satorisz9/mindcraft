@@ -46,7 +46,7 @@ export class SkillLibrary {
         }
         
         // Combine both types of docs
-        return [...coreSkillDocs, ...learnedSkillDocs];
+        return [...learnedSkillDocs,...coreSkillDocs];
     }
 
     async getRelevantSkillDocs(message, select_num) {

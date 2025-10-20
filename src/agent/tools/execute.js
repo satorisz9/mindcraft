@@ -125,7 +125,13 @@ export class ExecuteTool {
         }
         
         this.agent.bot.chat = (message) => {
-            this.agent.bot.output += `[CHAT] ${message}\n`;
+            // Limit chat message length to prevent output overflow
+            const maxChatLength = 100;
+            let chatMessage = message;
+            if (chatMessage.length > maxChatLength) {
+                chatMessage = chatMessage.substring(0, maxChatLength - 3) + '...';
+            }
+            this.agent.bot.output += `[CHAT] ${chatMessage}\n`;
             return originalChat.call(this.agent.bot, message);
         };
 
@@ -269,13 +275,16 @@ export class ExecuteTool {
         console.log(`Bot at: ${executionInfo.botPosition}`);
         console.log(`Output: ${executionInfo.output}`);
         
-        const message = "## Code Execution Result ##\n" +
+        let message = "## Code Execution Result ##\n" +
             "**File:** " + executionInfo.file + "\n" +
             "**Task:** " + executionInfo.description + "\n" +
             "**Your Position:** " + executionInfo.botPosition + "\n" +
             "**Result:** " + executionInfo.result + "\n" +
             "**Execution Log:** \n" + executionInfo.output;
-   
+        
+        // Limit message length to 1000 characters
+        if (message.length > 500) 
+            message = message.substring(0, 497) + '...';
         return {
             success: true,
             message: message,
