@@ -5,6 +5,18 @@ import { LearnedSkillsManager } from '../library/learnedSkillsManager.js';
 
 //Lint Tool - Validates JavaScript code files for syntax and skill usage
 export class LintTool {
+    static description = 'Validate JavaScript code syntax without executing it';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the JavaScript file to validate" 
+            }
+        },
+        required: ["file_path"]
+    };
+
     constructor(agent = null) {
         this.name = 'Lint';
         this.description = "Validates JavaScript code files for syntax errors and skill usage.\n\nUsage:\n- The file_path parameter must be an absolute path to a .js file\n- Validates code syntax using ESLint\n- Checks for missing skill functions including learned skills\n- Returns validation results with errors and executable files\n- Can validate single files or arrays of files";

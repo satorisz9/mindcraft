@@ -3,6 +3,30 @@ import path from 'path';
 
 //Edit Tool - Performs exact string replacements in files
 export class EditTool {
+    static description = 'Edit existing file by replacing old_string with new_string';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the file to edit" 
+            },
+            old_string: { 
+                type: "string", 
+                description: "The exact text to replace" 
+            },
+            new_string: { 
+                type: "string", 
+                description: "The new text to replace with" 
+            },
+            replace_all: { 
+                type: "boolean", 
+                description: "Replace all occurrences (default: false)" 
+            }
+        },
+        required: ["file_path", "old_string", "new_string"]
+    };
+
     constructor(agent = null) {
         this.name = 'Edit';
         this.agent = agent;

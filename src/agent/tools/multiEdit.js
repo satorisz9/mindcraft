@@ -6,6 +6,31 @@ import { EditTool } from './edit.js';
  * MultiEdit Tool - Performs multiple edits on a single file in one atomic operation
  */
 export class MultiEditTool {
+    static description = 'Perform multiple edits on a single file in one atomic operation';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the file to edit" 
+            },
+            edits: {
+                type: "array",
+                description: "Array of edit operations to perform sequentially",
+                items: {
+                    type: "object",
+                    properties: {
+                        old_string: { type: "string", description: "Text to replace" },
+                        new_string: { type: "string", description: "Replacement text" },
+                        replace_all: { type: "boolean", description: "Replace all occurrences" }
+                    },
+                    required: ["old_string", "new_string"]
+                }
+            }
+        },
+        required: ["file_path", "edits"]
+    };
+
     constructor(agent = null) {
         this.name = 'MultiEdit';
         this.agent = agent;

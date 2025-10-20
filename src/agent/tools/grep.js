@@ -5,6 +5,26 @@ import process from 'process';
 
 //Grep Tool - Powerful regex-based content searching using ripgrep
 export class GrepTool {
+    static description = 'Search for text content within files using regex patterns';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            query: { 
+                type: "string", 
+                description: "Search query or regex pattern" 
+            },
+            path: { 
+                type: "string", 
+                description: "Directory or file to search in" 
+            },
+            is_regex: { 
+                type: "boolean", 
+                description: "Treat query as regex pattern (default: false)" 
+            }
+        },
+        required: ["query", "path"]
+    };
+
     constructor(agent = null) {
         this.name = 'Grep';
         this.agent = agent;

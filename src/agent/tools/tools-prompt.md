@@ -9,14 +9,10 @@ Usage:
 - This will gracefully exit the coding mode and return control to the main agent
 - The summary will be returned as the result of the newAction command
 
-Input schema: {'type': 'object', 'properties': {'summary': {'type': 'string', 'description': 'A comprehensive summary of what was accomplished during this coding session, including files created/modified, features implemented, and any important notes.'}}, 'required': ['summary'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 Tool name: LS
 Tool description: Lists files and directories in a given path. The path parameter must be an absolute path, not a relative path. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools, if you know which directories to search.
-Input schema: {'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'The absolute path to the directory to list (must be absolute, not relative)'}, 'ignore': {'type': 'array', 'items': {'type': 'string'}, 'description': 'List of glob patterns to ignore'}}, 'required': ['path'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 Tool name: Read
@@ -35,8 +31,6 @@ Usage:
 - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. 
 - You will regularly be asked to read screenshots. If the user provides a path to a screenshot ALWAYS use this tool to view the file at the path. This tool will work with all temporary file paths like /var/folders/123/abc/T/TemporaryItems/NSIRD_screencaptureui_ZfB1tD/Screenshot.png
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.
-Input schema: {'type': 'object', 'properties': {'file_path': {'type': 'string', 'description': 'The absolute path to the file to read'}, 'offset': {'type': 'number', 'description': 'The line number to start reading from. Only provide if the file is too large to read at once'}, 'limit': {'type': 'number', 'description': 'The number of lines to read. Only provide if the file is too large to read at once.'}}, 'required': ['file_path'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 
@@ -50,8 +44,6 @@ Usage:
 - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
 - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`. 
 - Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
-Input schema: {'type': 'object', 'properties': {'file_path': {'type': 'string', 'description': 'The absolute path to the file to modify'}, 'old_string': {'type': 'string', 'description': 'The text to replace'}, 'new_string': {'type': 'string', 'description': 'The text to replace it with (must be different from old_string)'}, 'replace_all': {'type': 'boolean', 'default': False, 'description': 'Replace all occurences of old_string (default false)'}}, 'required': ['file_path', 'old_string', 'new_string'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 
@@ -98,8 +90,6 @@ If you want to create a new file, use:
 - A new file path, including dir name if needed
 - First edit: empty old_string and the new file's contents as new_string
 - Subsequent edits: normal edit operations on the created content
-Input schema: {'type': 'object', 'properties': {'file_path': {'type': 'string', 'description': 'The absolute path to the file to modify'}, 'edits': {'type': 'array', 'items': {'type': 'object', 'properties': {'old_string': {'type': 'string', 'description': 'The text to replace'}, 'new_string': {'type': 'string', 'description': 'The text to replace it with'}, 'replace_all': {'type': 'boolean', 'default': False, 'description': 'Replace all occurences of old_string (default false).'}}, 'required': ['old_string', 'new_string'], 'additionalProperties': False}, 'minItems': 1, 'description': 'Array of edit operations to perform sequentially on the file'}}, 'required': ['file_path', 'edits'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 
@@ -112,8 +102,6 @@ Usage:
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
 - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
-Input schema: {'type': 'object', 'properties': {'file_path': {'type': 'string', 'description': 'The absolute path to the file to write (must be absolute, not relative)'}, 'content': {'type': 'string', 'description': 'The content to write to the file'}}, 'required': ['file_path', 'content'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 Tool name: TodoWrite
@@ -293,8 +281,6 @@ The assistant did not use the todo list because this is a single command executi
 
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
 
-Input schema: {'type': 'object', 'properties': {'todos': {'type': 'array', 'items': {'type': 'object', 'properties': {'content': {'type': 'string', 'minLength': 1}, 'status': {'type': 'string', 'enum': ['pending', 'in_progress', 'completed']}, 'id': {'type': 'string'}}, 'required': ['content', 'status', 'id'], 'additionalProperties': False}, 'description': 'The updated todo list'}}, 'required': ['todos'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 
@@ -305,8 +291,6 @@ Tool description: - Fast file pattern matching tool that works with any codebase
 - Use this tool when you need to find files by name patterns
 - When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead
 - You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.
-Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The glob pattern to match files against'}, 'path': {'type': 'string', 'description': 'The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---
 
 
@@ -321,7 +305,4 @@ Tool description: A powerful search tool built on ripgrep
   - Use Task tool for open-ended searches requiring multiple rounds
   - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\{\}` to find `interface{}` in Go code)
   - Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \{[\s\S]*?field`, use `multiline: true`
-
-Input schema: {'type': 'object', 'properties': {'pattern': {'type': 'string', 'description': 'The regular expression pattern to search for in file contents'}, 'path': {'type': 'string', 'description': 'File or directory to search in (rg PATH). Defaults to current working directory.'}, 'glob': {'type': 'string', 'description': 'Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}") - maps to rg --glob'}, 'output_mode': {'type': 'string', 'enum': ['content', 'files_with_matches', 'count'], 'description': 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".'}, '-B': {'type': 'number', 'description': 'Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.'}, '-A': {'type': 'number', 'description': 'Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.'}, '-C': {'type': 'number', 'description': 'Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.'}, '-n': {'type': 'boolean', 'description': 'Show line numbers in output (rg -n). Requires output_mode: "content", ignored otherwise.'}, '-i': {'type': 'boolean', 'description': 'Case insensitive search (rg -i)'}, 'type': {'type': 'string', 'description': 'File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.'}, 'head_limit': {'type': 'number', 'description': 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, shows all results from ripgrep.'}, 'multiline': {'type': 'boolean', 'description': 'Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.'}}, 'required': ['pattern'], 'additionalProperties': False, '$schema': 'http://json-schema.org/draft-07/schema#'}
-
 ---

@@ -387,6 +387,57 @@ export class ToolManager {
             return false;
         }
     }
+
+    getToolDefinitions() {
+        const toolDefinitions = [];
+        
+        for (const [name, toolInstance] of this.tools) {
+            const ToolClass = toolInstance.constructor;
+            
+            if (!ToolClass.description || !ToolClass.inputSchema) {
+                console.warn(`Tool ${name} missing description or inputSchema, skipping`);
+                continue;
+            }
+            
+            const definition = {
+                type: "function",
+                function: {
+                    name: name,
+                    description: ToolClass.description,
+                    parameters: ToolClass.inputSchema
+                }
+            };
+            
+            toolDefinitions.push(definition);
+        }
+        
+        console.log(`Generated ${toolDefinitions.length} tool definitions for native API`);
+        return toolDefinitions;
+    }
+
+    parseToolCalls(toolCalls) {
+        if (!Array.isArray(toolCalls)) {
+            console.warn('parseToolCalls: toolCalls is not an array');
+            return [];
+        }
+        
+        return toolCalls.map(toolCall => {
+            try {
+                const params = typeof toolCall.function.arguments === 'string' 
+                    ? JSON.parse(toolCall.function.arguments)
+                    : toolCall.function.arguments;
+                
+                // Convert to JSON tool format: { name: "ToolName", param1: value1, param2: value2 }
+                return {
+                    name: toolCall.function.name,
+                    ...params
+                };
+            } catch (error) {
+                console.error(`Failed to parse tool call ${toolCall.function.name}:`, error);
+                return null;
+            }
+        }).filter(tool => tool !== null);
+    }
 }
 
 const COLORS = {

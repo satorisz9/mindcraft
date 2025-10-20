@@ -10,7 +10,7 @@ import { LearnedSkillsManager } from '../library/learnedSkillsManager.js';
 
 // Regex patterns for stack trace parsing
 const StackTracePatterns = {
-    iife: /^\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)$/m,
+    iife: /^\s*\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)\s*$/,
     anonymous: /<anonymous>:(\d+):(\d+)/,
     filePath: /at.*?\(([^)]+\.(js|ts)):(\d+):(\d+)\)/,
     filePathAlt: /at.*?([^\s]+\.(js|ts)):(\d+):(\d+)/,
@@ -27,6 +27,22 @@ const StackTracePatterns = {
 
 //Execute Tool - Executes JavaScript code files in Minecraft bot context
 export class ExecuteTool {
+    static description = 'Execute JavaScript code file in the Minecraft bot environment with full access to skills and world APIs. Code MUST be in IIFE format: (async (bot) => { ... }) without trailing parentheses or semicolons';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the JavaScript file to execute. The file content MUST be in IIFE format: (async (bot) => { your code here }) - no trailing () or semicolon" 
+            },
+            description: { 
+                type: "string", 
+                description: "Description of what this code does" 
+            }
+        },
+        required: ["file_path"]
+    };
+
     constructor(agent = null) {
         this.name = 'Execute';
         this.agent = agent;
@@ -379,7 +395,14 @@ class FileContentCache {
         const now = Date.now();
         
         if (cached && (now - cached.timestamp) < this.ttlMs) {
-            return cached.data;
+            try {
+                const stats = await fs.promises.stat(filePath);
+                if (stats.mtime.getTime() === cached.data.mtime) {
+                    return cached.data;
+                }
+            } catch (error) {
+                this.cache.delete(filePath);
+            }
         }
         
         try {

@@ -6,6 +6,31 @@ import process from 'process';
  * TodoWrite Tool - Creates and manages structured task lists for coding sessions
  */
 export class TodoWriteTool {
+    static description = 'Create or update TODO list for task planning and tracking progress';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            todos: {
+                type: "array",
+                description: "Array of todo items with content, status, and id",
+                items: {
+                    type: "object",
+                    properties: {
+                        content: { type: "string", description: "Todo item description" },
+                        status: { 
+                            type: "string", 
+                            enum: ["pending", "in_progress", "completed"],
+                            description: "Current status of the todo item"
+                        },
+                        id: { type: "string", description: "Unique identifier for the todo item" }
+                    },
+                    required: ["content", "status", "id"]
+                }
+            }
+        },
+        required: ["todos"]
+    };
+
     constructor(agent = null) {
         this.name = 'TodoWrite';
         this.agent = agent;

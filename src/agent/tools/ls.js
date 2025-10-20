@@ -4,6 +4,23 @@ import { minimatch } from 'minimatch';
 
 //LS Tool - Lists directory contents with detailed metadata
 export class LSTool {
+    static description = 'List files and directories in a path with detailed metadata';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            path: { 
+                type: "string", 
+                description: "Absolute path to the directory to list" 
+            },
+            ignore: { 
+                type: "array", 
+                description: "Array of glob patterns to ignore",
+                items: { type: "string" }
+            }
+        },
+        required: ["path"]
+    };
+
     constructor(agent = null) {
         this.name = 'LS';
         this.agent = agent;

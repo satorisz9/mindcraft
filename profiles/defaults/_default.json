@@ -10,6 +10,8 @@
     "bot_responder": "profiles/defaults/prompts/bot_responder.md",
 
     "image_analysis": "profiles/defaults/prompts/image_analysis.md",
+
+    "tools_manual": "src/agent/tools/tools-prompt.md",
     
     "speak_model": "openai/tts-1/echo",
     

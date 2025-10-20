@@ -2,6 +2,26 @@ import fs from 'fs';
 import path from 'path';
 
 export class ReadTool {
+    static description = 'Read and display the contents of a file';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the file to read" 
+            },
+            offset: { 
+                type: "number", 
+                description: "Line number to start reading from (1-indexed, optional)" 
+            },
+            limit: { 
+                type: "number", 
+                description: "Number of lines to read (optional)" 
+            }
+        },
+        required: ["file_path"]
+    };
+
     constructor(agent = null) {
         this.name = 'Read';
         this.agent = agent;

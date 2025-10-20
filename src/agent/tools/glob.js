@@ -7,6 +7,22 @@ import { glob } from 'glob';
  * Glob Tool - Fast file pattern matching using glob syntax
  */
 export class GlobTool {
+    static description = 'Search for files matching a glob pattern';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            pattern: { 
+                type: "string", 
+                description: "Glob pattern to match files (e.g., '**/*.js')" 
+            },
+            path: { 
+                type: "string", 
+                description: "Directory to search in (optional)" 
+            }
+        },
+        required: ["pattern"]
+    };
+
     constructor(agent = null) {
         this.name = 'Glob';
         this.agent = agent;

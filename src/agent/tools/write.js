@@ -2,6 +2,22 @@ import fs from 'fs';
 import path from 'path';
 
 export class WriteTool {
+    static description = 'Write or overwrite content to a file at the specified workspace absolute path';
+    static inputSchema = {
+        type: "object",
+        properties: {
+            file_path: { 
+                type: "string", 
+                description: "Absolute path to the file" 
+            },
+            content: { 
+                type: "string", 
+                description: "Content to write to the file" 
+            }
+        },
+        required: ["file_path", "content"]
+    };
+
     constructor(agent = null) {
         this.name = 'Write';
         this.agent = agent;
