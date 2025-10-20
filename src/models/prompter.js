@@ -315,18 +315,46 @@ export class Prompter {
         try {
             await this.checkCooldown();
             while (messages.length > this.max_messages && messages.length > 1) {
-                messages.shift(); // Remove the oldest message
+                messages.shift();
                 console.log(`Trimmed oldest message, current length: ${messages.length}`);
             }
 
             let prompt = this.profile.coding;
             prompt = prompt.replaceAll('$CODING_GOAL', codingGoal);
             prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
-            const resp = await this.code_model.sendRequest(messages, prompt);
-            await this._saveLog(prompt, messages, resp, 'coding');
+            
+            let tools = null;
+            if (this.profile.use_native_tools === true) {
+                const toolManager = this.agent.coder?.codeToolsManager;
+                if (toolManager) {
+                    tools = toolManager.getToolDefinitions();
+                    console.log(`Native tools enabled: ${tools.length} tools available`);
+                } else {
+                    console.warn('use_native_tools enabled but ToolManager not available, falling back to prompt engineering');
+                }
+            }
+            
+            const resp = await this.code_model.sendRequest(messages, prompt, '<|EOT|>', tools);
+            
+            let finalResp = resp;
+            if (typeof resp === 'string' && resp.includes('_native_tool_calls')) {
+                try {
+                    const parsed = JSON.parse(resp);
+                    if (parsed._native_tool_calls && parsed.tool_calls) {
+                        const toolManager = this.agent.coder?.codeToolsManager;
+                        const tools = toolManager.parseToolCalls(parsed.tool_calls);
+                        finalResp = JSON.stringify({ tools }, null, 2);
+                        console.log(`Converted ${tools.length} native tool calls to JSON format`);
+                    }
+                } catch (e) {
+                    console.error('Failed to parse native tool calls:', e);
+                }
+            }
+            
+            await this._saveLog(prompt, messages, finalResp, 'coding');
             this.max_messages++;
             
-            return resp;
+            return finalResp;
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
             if (error.message?.includes('Range of input length should be')) {
@@ -338,9 +366,8 @@ export class Prompter {
                     console.log(`Adjusted max_messages to: ${this.max_messages}`);
                 } else {
                     console.log('Messages too few, clearing all messages and resetting max_messages to default');
-                    // Clear all messages and reset to default
                     messages.length = 0;
-                    this.max_messages = 15; // Reset to default value
+                    this.max_messages = 15;
                     console.log('Cleared messages and reset max_messages to 15');
                 }
             }
