@@ -1,12 +1,14 @@
 {
     "name": "qwen",
 
+    "use_native_tools": true,
+
     "cooldown": 5000,
 
     "model": {
         "api": "qwen",
         "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-max"
+        "model": "qwen-plus"
     },
 
     "embedding": {
