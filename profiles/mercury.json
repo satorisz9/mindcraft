@@ -1,9 +1,11 @@
 {
     "name": "Mercury",
 
+    "use_native_tools": true,
+
     "cooldown": 5000,
 
     "model": "mercury-coder",
 
-     "embedding": "openai"
+    "embedding": "openai"
 }
