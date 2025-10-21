@@ -1,5 +1,7 @@
 {
     "name": "deepseek",
+    
+    "use_native_tools": true,
 
     "model": "deepseek-chat",
 
