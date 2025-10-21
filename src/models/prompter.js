@@ -172,13 +172,13 @@ export class Prompter {
             const code_task_content = messages.slice().reverse().find(msg =>
                 msg.role !== 'system' && msg.content.includes('!newAction(')
             )?.content?.match(/!newAction\((.*?)\)/)?.[1] || '';
-            prompt = prompt.replaceAll(
-                '$CODE_DOCS',await this.skill_libary.getAllSkillDocs()
-            );
             // prompt = prompt.replaceAll(
-            //     '$CODE_DOCS',
-            //     await this.skill_libary.getRelevantSkillDocs(code_task_content, settings.relevant_docs_count)
+            //     '$CODE_DOCS',await this.skill_libary.getAllSkillDocs()
             // );
+            prompt = prompt.replaceAll(
+                '$CODE_DOCS',
+                await this.skill_libary.getRelevantSkillDocs(code_task_content, settings.relevant_docs_count)
+            );
             
         }
         if (prompt.includes('$EXAMPLES') && examples !== null)
@@ -330,11 +330,6 @@ export class Prompter {
                 if (toolManager) {
                     tools = toolManager.getToolDefinitions();
                     console.log(`Native tools enabled: ${tools.length} tools available`);
-                    // Create a copy and add a message to prompt the LLM to use tools
-                    requestMessages = [...messages, {
-                        role: 'user',
-                        content: 'You must use the available tools to complete this task. Call the appropriate tool functions with the required parameters.'
-                    }];
                 } else {
                     console.warn('use_native_tools enabled but ToolManager not available, falling back to prompt engineering');
                 }
