@@ -27,7 +27,8 @@ export class Cerebras {
         if (tools && Array.isArray(tools) && tools.length > 0) {
             console.log(`Using native tool calling with ${tools.length} tools`);
             pack.tools = tools;
-            pack.tool_choice = 'required';
+            // Cerebras only supports 'auto' or 'none', not 'required'
+            pack.tool_choice = 'auto';
         }
 
         try {
