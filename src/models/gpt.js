@@ -36,8 +36,8 @@ export class GPT {
             console.log(`Using native tool calling with ${tools.length} tools`);
             pack.tools = tools;
             pack.tool_choice = 'required';
-        } else {
-            pack.stop = stop_seq;
+        } else if (stop_seq) {
+            pack.stop = Array.isArray(stop_seq) ? stop_seq : [stop_seq];
         }
 
         let res = null;

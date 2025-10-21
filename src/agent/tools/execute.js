@@ -10,7 +10,7 @@ import { LearnedSkillsManager } from '../library/learnedSkillsManager.js';
 
 // Regex patterns for stack trace parsing
 const StackTracePatterns = {
-    iife: /^\s*\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)\s*$/,
+    iife: /^\s*\(async\s*\(\s*bot\s*\)\s*=>\s*\{[\s\S]*?\}\)\s*(\(\))?\s*$/,
     anonymous: /<anonymous>:(\d+):(\d+)/,
     filePath: /at.*?\(([^)]+\.(js|ts)):(\d+):(\d+)\)/,
     filePathAlt: /at.*?([^\s]+\.(js|ts)):(\d+):(\d+)/,

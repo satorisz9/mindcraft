@@ -218,8 +218,28 @@ export class ToolManager {
             const tools = this.extractToolsFromParsed(parsed);
             return { tools, strategy: 'direct parsing' };
         } catch {
-            return { tools: [], strategy: 'direct parsing' };
+            try {
+                const fixed = this._fixJSONNewlines(response.trim());
+                const tools = this.extractToolsFromParsed(JSON.parse(fixed));
+                return tools.length > 0 ? { tools, strategy: 'direct parsing' } : { tools: [], strategy: 'direct parsing' };
+            } catch {
+                return { tools: [], strategy: 'direct parsing' };
+            }
         }
+    }
+
+    _fixJSONNewlines(str) {
+        let result = '', inString = false, escape = false;
+        for (const char of str) {
+            if (escape) { result += char; escape = false; continue; }
+            if (char === '\\') { result += char; escape = true; continue; }
+            if (char === '"') { inString = !inString; result += char; continue; }
+            if (inString && char === '\n') { result += '\\n'; continue; }
+            if (inString && char === '\r') { result += '\\r'; continue; }
+            if (inString && char === '\t') { result += '\\t'; continue; }
+            result += char;
+        }
+        return result;
     }
 
     parseEmbeddedJSON(response) {

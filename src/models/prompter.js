@@ -324,17 +324,23 @@ export class Prompter {
             prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
             
             let tools = null;
+            let requestMessages = messages;
             if (this.profile.use_native_tools === true) {
                 const toolManager = this.agent.coder?.codeToolsManager;
                 if (toolManager) {
                     tools = toolManager.getToolDefinitions();
                     console.log(`Native tools enabled: ${tools.length} tools available`);
+                    // Create a copy and add a message to prompt the LLM to use tools
+                    requestMessages = [...messages, {
+                        role: 'user',
+                        content: 'You must use the available tools to complete this task. Call the appropriate tool functions with the required parameters.'
+                    }];
                 } else {
                     console.warn('use_native_tools enabled but ToolManager not available, falling back to prompt engineering');
                 }
             }
             
-            const resp = await this.code_model.sendRequest(messages, prompt, '<|EOT|>', tools);
+            const resp = await this.code_model.sendRequest(requestMessages, prompt, '<|EOT|>', tools);
             
             let finalResp = resp;
             if (typeof resp === 'string' && resp.includes('_native_tool_calls')) {
