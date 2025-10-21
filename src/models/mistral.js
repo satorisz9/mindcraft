@@ -61,6 +61,8 @@ export class Mistral {
                         parameters: tool.function.parameters
                     }
                 }));
+                // Force tool usage - Mistral requires this to actually use tools
+                requestConfig.tool_choice = 'any';
             }
 
             const logMessage = tools 

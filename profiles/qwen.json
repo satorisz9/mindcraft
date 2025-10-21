@@ -1,8 +1,5 @@
 {
     "name": "qwen",
-
-    "use_native_tools": true,
-
     "cooldown": 5000,
 
     "model": {

@@ -325,14 +325,13 @@ export class Prompter {
             
             let tools = null;
             let requestMessages = messages;
-            if (this.profile.use_native_tools === true) {
-                const toolManager = this.agent.coder?.codeToolsManager;
-                if (toolManager) {
-                    tools = toolManager.getToolDefinitions();
-                    console.log(`Native tools enabled: ${tools.length} tools available`);
-                } else {
-                    console.warn('use_native_tools enabled but ToolManager not available, falling back to prompt engineering');
-                }
+            // Native tools always enabled
+            const toolManager = this.agent.coder?.codeToolsManager;
+            if (toolManager) {
+                tools = toolManager.getToolDefinitions();
+                console.log(`Native tools enabled: ${tools.length} tools available`);
+            } else {
+                console.warn('ToolManager not available, falling back to prompt engineering');
             }
             
             const resp = await this.code_model.sendRequest(requestMessages, prompt, '<|EOT|>', tools);

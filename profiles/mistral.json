@@ -1,5 +1,7 @@
 {
     "name": "Mistral",
 
-    "model": "mistral/mistral-large-latest"
+    "model": "mistral/mistral-small-latest",
+
+    "embedding": "openai"
 }

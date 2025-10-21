@@ -1,0 +1,7 @@
+{
+    "name": "hyperbolic",
+
+    "model": "hyperbolic/meta-llama/Meta-Llama-3.1-70B-Instruct",
+
+    "embedding": "openai"
+}

@@ -1,7 +1,5 @@
 {
     "name": "gemini",
-    
-    "use_native_tools": true,
 
     "model": "gemini-2.5-flash",
 

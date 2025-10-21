@@ -1,7 +1,11 @@
 {
     "name": "Grok",
 
-    "model": "grok-3-mini-latest",
-    
+    "model": {
+        "api": "openai",
+        "url": "https://openrouter.ai/api/v1",
+        "model": "x-ai/grok-code-fast-1"
+    },
+
     "embedding": "openai"
 }
