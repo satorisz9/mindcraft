@@ -1,0 +1,9 @@
+{
+    "name": "huggingface",
+
+    "use_native_tools": true,
+    
+    "model": "huggingface/openai/gpt-oss-20b",
+    
+    "embedding": "openai"
+}
