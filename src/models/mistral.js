@@ -52,16 +52,9 @@ export class Mistral {
             };
 
             if (tools && Array.isArray(tools) && tools.length > 0) {
-                console.log(`Using native tool calling with ${tools.length} tools`);
-                requestConfig.tools = tools.map(tool => ({
-                    type: 'function',
-                    function: {
-                        name: tool.function.name,
-                        description: tool.function.description,
-                        parameters: tool.function.parameters
-                    }
-                }));
-                // Force tool usage - Mistral requires this to actually use tools
+                // Tools are already in correct format from ToolManager: { type: "function", function: {...} }
+                requestConfig.tools = tools;
+                // Force tool usage - 'any' requires at least one tool call per response
                 requestConfig.tool_choice = 'any';
             }
 
@@ -73,11 +66,10 @@ export class Mistral {
             const response = await this.#client.chat.complete(requestConfig);
 
             const message = response.choices[0].message;
-            if (message.tool_calls && message.tool_calls.length > 0) {
-                console.log(`Received ${message.tool_calls.length} tool call(s) from API`);
+            if (message.toolCalls && message.toolCalls.length > 0) {
                 return JSON.stringify({
                     _native_tool_calls: true,
-                    tool_calls: message.tool_calls
+                    tool_calls: message.toolCalls
                 });
             }
 
