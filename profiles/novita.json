@@ -1,0 +1,9 @@
+{
+    "name": "novita",
+
+    "cooldown": 5000,
+
+    "model": "novita/openai/gpt-oss-120b",
+
+    "embedding": "openai"
+}
