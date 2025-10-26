@@ -16,7 +16,9 @@ export class Grok extends GPT {
     }
 
     async sendRequest(turns, systemMessage, stop_seq='<|EOT|>', tools=null) {
-        const res = await super.sendRequest(turns, systemMessage, stop_seq, tools);
+        // Grok doesn't support stop parameter, pass null to disable it
+        // Official docs: "stop parameters are not supported by reasoning models"
+        const res = await super.sendRequest(turns, systemMessage, null, tools);
         
         // If it's a tool calling response, return directly without processing
         if (res.startsWith('{') && res.includes('_native_tool_calls')) {
