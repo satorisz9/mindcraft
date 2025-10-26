@@ -1,0 +1,15 @@
+{
+    "name": "ollama",
+
+    "model": {
+        "api": "ollama",
+        "url": "http://127.0.0.1:11434",
+        "model": "gpt-oss:20b"
+    },
+    
+    "embedding": {
+        "api": "ollama",
+        "url": "http://127.0.0.1:11434",
+        "model": "nomic-embed-text"
+    }
+}
