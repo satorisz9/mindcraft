@@ -1,5 +1,5 @@
 const settings = {
-    "minecraft_version": "1.21.1", // or specific version like "1.21.6"
+    "minecraft_version": "auto", // or specific version like "1.21.6"
     "host": "127.0.0.1", // or "localhost", "your.ip.address.here"
     "port": 55916, // set to -1 to automatically scan for open ports
     "auth": "offline", // or "microsoft"
@@ -17,7 +17,7 @@ const settings = {
         // "./profiles/llama.json",
         // "./profiles/groq.json",
         // "./profiles/cerebras.json",
-        // "./profiles/hyperbolic.json",//hyperbolic
+        // "./profiles/hyperbolic.json",
         // "./profiles/qwen.json",
         // "./profiles/grok.json",
         // "./profiles/mistral.json",
@@ -27,6 +27,11 @@ const settings = {
         // "./profiles/openrouter.json",
         // "./profiles/mercury.json"
         // "./profiles/huggingface.json"
+        // "./profiles/replicate.json"
+        // "./profiles/glhf.json"
+        // "./profiles/novita.json"
+        // "./profiles/ollama.json"
+        // "./profiles/azure.json"
 
         // using more than 1 profile requires you to /msg each bot indivually
         // individual profiles override values from the base profile
@@ -46,7 +51,7 @@ const settings = {
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
     "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
 
-    "allow_insecure_coding": true, // allows newAction command and model can write/run code on your computer. enable at own risk
+    "allow_insecure_coding": false, // allows newAction command and model can write/run code on your computer. enable at own risk
     "allow_vision": false, // allows vision model to interpret screenshots as inputs
     "blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"] , // commands to disable and remove from docs. Ex: ["!setMode"]
     "code_timeout_mins": -1, // minutes code is allowed to run. -1 for no timeout
@@ -69,7 +74,7 @@ const settings = {
     "spawn_timeout": 30, // num seconds allowed for the bot to spawn before throwing error. Increase when spawning takes a while.
     "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
   
-    "log_all_prompts": true, // log ALL prompts to file
+    "log_all_prompts": false, // log ALL prompts to file
 
 };
 
