@@ -40,20 +40,16 @@ export class GlobTool {
         try {
             const { pattern, path: searchPath } = params;
 
-            // Validate required parameters
             if (!pattern) {
                 throw new Error('Missing required parameter: pattern');
             }
 
-            // Use current working directory if no path specified
             const cwd = searchPath || process.cwd();
 
-            // Check if search directory exists
             if (!fs.existsSync(cwd)) {
                 throw new Error(`Directory does not exist: ${cwd}`);
             }
 
-            // Perform glob search
             const matches = await glob(pattern, {
                 cwd,
                 absolute: true,
@@ -61,7 +57,6 @@ export class GlobTool {
                 ignore: ['node_modules/**', '.git/**', '**/.DS_Store'] // Common ignore patterns
             });
 
-            // Sort by modification time (newest first)
             const filesWithStats = await Promise.all(
                 matches.map(async (filePath) => {
                     try {
@@ -74,13 +69,11 @@ export class GlobTool {
                             isDirectory: stats.isDirectory()
                         };
                     } catch (error) {
-                        // File might have been deleted between glob and stat
                         return null;
                     }
                 })
             );
 
-            // Filter out null entries and sort by modification time
             const sortedFiles = filesWithStats
                 .filter(file => file !== null)
                 .sort((a, b) => b.modified - a.modified);
