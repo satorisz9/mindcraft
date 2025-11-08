@@ -111,6 +111,13 @@ export class Hyperbolic {
             if (hasOpenTag && hasCloseTag) {
                 completionContent = completionContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
             }
+            // Extract content from <|channel|>final<|message|>...
+            const finalChannelMatch = completionContent.match(/.*<\|channel\|>final<\|message\|>([\s\S]*)$/);
+            if (finalChannelMatch) {
+                completionContent = finalChannelMatch[1].trim();
+            } else {
+                completionContent = completionContent.replace(/<\|channel\|>[\s\S]*?<\|message\|>[\s\S]*?(?:<\|end\|>|$)/g, '').trim();
+            }
 
             finalRes = completionContent.replace(/<\|separator\|>/g, '*no response*');
             break;
