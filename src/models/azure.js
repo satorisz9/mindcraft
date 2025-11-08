@@ -29,4 +29,9 @@ export class AzureGPT extends GPT {
 
         this.openai = new AzureOpenAI(config)
     }
+    // Override sendRequest to set stop_seq default to null
+    // Some Azure models (e.g., gpt-5-nano) do not support the 'stop' parameter
+    async sendRequest(turns, systemMessage, stop_seq=null, tools=null) {
+        return super.sendRequest(turns, systemMessage, stop_seq, tools);
+    }
 }
