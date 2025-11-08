@@ -1,0 +1,8 @@
+{
+    "name": "glhf",
+
+    "cooldown": 5000,
+
+    "model": "glhf/hf:zai-org/GLM-4.6"
+
+}
