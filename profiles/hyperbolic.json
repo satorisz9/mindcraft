@@ -3,11 +3,7 @@
 
     "model": "hyperbolic/meta-llama/Meta-Llama-3.1-70B-Instruct",
 
-    "embedding": {
-        "api": "qwen",
-        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "text-embedding-v3"
-    },
+    "embedding": "openai",
 
     "use_native_tools": false
 }

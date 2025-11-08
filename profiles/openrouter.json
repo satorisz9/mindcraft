@@ -9,11 +9,7 @@
         "model": "x-ai/grok-code-fast-1"
     },
 
-    "embedding": {
-        "api": "qwen",
-        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "text-embedding-v3"
-    },
+    "embedding": "openai",
 
     "use_native_tools": true
 }
