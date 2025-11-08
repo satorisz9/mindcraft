@@ -1,5 +1,6 @@
 import pf from 'mineflayer-pathfinder';
 import * as mc from '../../utils/mcdata.js';
+import { Vec3 } from 'vec3';
 
 
 export function getNearestFreeSpace(bot, size=1, distance=8) {
@@ -473,4 +474,91 @@ export function getBiomeName(bot) {
      **/
     const biomeId = bot.world.getBiome(bot.entity.position);
     return mc.getAllBiomes()[biomeId].name;
+}
+
+export function getBuildingStructure(bot, corner1, corner2) {
+    /**
+     * Extract building structure in a compact JSON format with material palette and layer-by-layer ASCII representation.
+     * Perfect for AI to understand and recreate buildings. Uses single-character symbols for each material.
+     * @param {MinecraftBot} bot - The minecraft bot
+     * @param {Vec3} corner1 - First corner of the building area (absolute coordinates)
+     * @param {Vec3} corner2 - Opposite corner of the building area (absolute coordinates)
+     * @returns {Object} Building structure in JSON format with materials palette and ASCII layers
+     * @example
+     * // Scan a 10x10x3 building
+     * const structure = world.getBuildingStructure(bot, new Vec3(0,0,0), new Vec3(10,3,10));
+     * log(bot, JSON.stringify(structure, null, 2));
+     * 
+     * // Output format (can have ANY number of floors - 1, 2, 3, 5, 10, etc.):
+     * // {
+     * //   "materials": ["A: minecraft:stone", "B: minecraft:air", ...],
+     * //   "structures": [
+     * //     {"floor": 0, "structure": "AAA\nAAA\nAAA"},  // Ground (Y=0), each floor = 1 block height
+     * //     {"floor": 1, "structure": "ABA\nBBB\nABA"},  // Level 1 (Y=1)
+     * //     ... // add more floors as needed
+     * //     {"floor": n, "structure": "AAA\nAAA\nAAA"}   // Level n (Y=n) - no limit on number of floors
+     * //   ],
+     * //   "size": {"x": width, "y": height, "z": depth},  // y = number of floors (can be any number)
+     * //   "offset": {"x": minX, "y": minY, "z": minZ},
+     * //   "corner1": {"x": minX, "y": minY, "z": minZ},
+     * //   "corner2": {"x": maxX, "y": maxY, "z": maxZ},
+     * //   "coordinateSystem": {
+     * //     "description": "Top-down view (looking down at XZ plane)",
+     * //     "xAxis": "Each \\n separates X lines, from X=minX to X=maxX",
+     * //     "zAxis": "Each character in a line represents Z, from Z=minZ to Z=maxZ",
+     * //     "yAxis": "Each floor = 1 block height, can have unlimited floors",
+     * //     "readingOrder": "First line = minX row, first character in line = minZ column"
+     * //   }
+     * // }
+     **/
+    const minX = Math.min(corner1.x, corner2.x), maxX = Math.max(corner1.x, corner2.x);
+    const minY = Math.min(corner1.y, corner2.y), maxY = Math.max(corner1.y, corner2.y);
+    const minZ = Math.min(corner1.z, corner2.z), maxZ = Math.max(corner1.z, corner2.z);
+    
+    const blockTypes = new Map();
+    const symbolChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz@#$%&*+-=';
+    const layers = [];
+    
+    for (let y = minY; y <= maxY; y++) {
+        const layer = [];
+        for (let x = minX; x <= maxX; x++) {
+            const row = [];
+            for (let z = minZ; z <= maxZ; z++) {
+                const block = bot.blockAt(new Vec3(x, y, z));
+                const name = block?.name || 'air';
+                
+                if (!blockTypes.has(name)) {
+                    const idx = blockTypes.size;
+                    blockTypes.set(name, idx < symbolChars.length 
+                        ? symbolChars[idx] 
+                        : `${symbolChars[0]}${symbolChars[idx - symbolChars.length]}`);
+                }
+                row.push(name);
+            }
+            layer.push(row);
+        }
+        layers.push(layer);
+    }
+    
+    const materials = Array.from(blockTypes, ([name, symbol]) => `${symbol}: minecraft:${name}`);
+    const structures = layers.map((layer, i) => ({
+        floor: minY + i,
+        structure: layer.map(row => row.map(name => blockTypes.get(name)).join('')).join('\n')
+    }));
+    
+    return {
+        materials,
+        structures,
+        size: { x: maxX - minX + 1, y: maxY - minY + 1, z: maxZ - minZ + 1 },
+        offset: { x: minX, y: minY, z: minZ },
+        corner1: { x: minX, y: minY, z: minZ },
+        corner2: { x: maxX, y: maxY, z: maxZ },
+        coordinateSystem: {
+            description: "Top-down view (looking down at XZ plane)",
+            xAxis: `Each \\n separates X lines, from X=${minX} to X=${maxX}`,
+            zAxis: `Each character in a line represents Z, from Z=${minZ} to Z=${maxZ}`,
+            yAxis: `Each floor in structures array represents Y, from Y=${minY} to Y=${maxY}`,
+            readingOrder: "First line = minX row, first character in line = minZ column"
+        }
+    };
 }
