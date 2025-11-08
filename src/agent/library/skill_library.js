@@ -39,24 +39,20 @@ export class SkillLibrary {
         // Get core skill docs
         const coreSkillDocs = this.skill_docs || [];
         
-        // Get learned skills docs if agent is available
         let learnedSkillDocs = [];
         if (this.agent && this.agent.name) {
             learnedSkillDocs = await this.learnedSkillsManager.getSkillDocs(this.agent.name);
         }
         
-        // Combine both types of docs
         return [...learnedSkillDocs,...coreSkillDocs];
     }
 
     async getRelevantSkillDocs(message, select_num) {
-        if(!message) // use filler message if none is provided
+        if(!message) 
             message = '(no message)';
         
-        // Get all skill docs including learned skills
         const allSkillDocs = await this.getAllSkillDocs();
         
-        // Build embeddings for all docs if not already done
         for (const doc of allSkillDocs) {
             if (!this.skill_docs_embeddings[doc] && this.embedding_model) {
                 try {
@@ -99,7 +95,6 @@ export class SkillLibrary {
         if (select_num === -1 || select_num > length) {
             select_num = length;
         }
-        // Get initial docs from similarity scores
         let selected_docs = new Set(skill_doc_similarities.slice(0, select_num).map(doc => doc.doc_key));
         
         // Add always show docs
