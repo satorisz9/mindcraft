@@ -11,5 +11,7 @@
         "api": "ollama",
         "url": "http://127.0.0.1:11434",
         "model": "nomic-embed-text"
-    }
+    },
+
+    "use_native_tools": true   
 }

@@ -3,6 +3,7 @@
 
     "cooldown": 5000,
 
-    "model": "glhf/hf:zai-org/GLM-4.6"
+    "model": "glhf/hf:zai-org/GLM-4.6",
 
+    "use_native_tools": true
 }

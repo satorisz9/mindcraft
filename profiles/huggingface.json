@@ -3,5 +3,7 @@
 
     "model": "huggingface/openai/gpt-oss-20b",
     
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

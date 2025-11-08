@@ -4,13 +4,15 @@
 
     "model": {
         "api": "qwen",
-        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-plus"
     },
 
     "embedding": {
         "api": "qwen",
-        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "text-embedding-v3"
-    }
+    },
+
+    "use_native_tools": false
 }

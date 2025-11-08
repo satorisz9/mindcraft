@@ -5,6 +5,8 @@
 
     "max_tokens": 4000,
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
     
 }

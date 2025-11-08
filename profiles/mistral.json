@@ -3,5 +3,7 @@
 
     "model": "mistral/mistral-large-latest",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

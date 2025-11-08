@@ -3,5 +3,7 @@
 
     "model": "deepseek-chat",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

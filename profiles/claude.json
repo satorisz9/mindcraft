@@ -3,5 +3,7 @@
 
     "model": "claude-sonnet-4-20250514",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

@@ -3,6 +3,8 @@
 
     "model": "groq/llama-3.3-70b-versatile",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 
 }

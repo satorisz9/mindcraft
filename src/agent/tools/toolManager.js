@@ -431,7 +431,7 @@ export class ToolManager {
             toolDefinitions.push(definition);
         }
         
-        console.log(`Generated ${toolDefinitions.length} tool definitions for native API`);
+        console.log(`Generated ${toolDefinitions.length} tool definitions`);
         return toolDefinitions;
     }
 
@@ -457,6 +457,33 @@ export class ToolManager {
                 return null;
             }
         }).filter(tool => tool !== null);
+    }
+
+    buildToolsPrompt(toolsUsageManual = '') {
+        const toolDefinitions = this.getToolDefinitions();
+        const toolsContent = toolDefinitions
+            .map(tool => JSON.stringify(tool, null, 2))
+            .join('\n');
+        
+        return [
+            '',
+            'You are provided with function signatures within <function_signatures></function_signatures> XML tags:',
+            '<function_signatures>',
+            toolsContent,
+            '</function_signatures>',
+            '',
+            'For your response, return a JSON object with a tools array within <tools></tools> XML tags:',
+            '<tools>',
+            '{"tools": [',
+            '  {"name": "ToolName", "param1": "value1", "param2": "value2"},',
+            '  {"name": "AnotherTool", "param1": "value1"}',
+            ']}',
+            '</tools>',
+            '',
+            '# Tool Usage Guidelines',
+            '',
+            toolsUsageManual
+        ].join('\n');
     }
 }
 

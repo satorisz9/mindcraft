@@ -38,9 +38,10 @@ export async function craftRecipe(bot, itemName, num=1) {
      * Attempt to craft the given item name from a recipe. May craft many items.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
      * @param {string} itemName, the item name to craft.
+     * @param {number} num, the number of items to craft. Defaults to 1.
      * @returns {Promise<boolean>} true if the recipe was crafted, false otherwise.
      * @example
-     * await skills.craftRecipe(bot, "stick");
+     * await skills.craftRecipe(bot, "stick", 4);
      **/
     
     // Cheat mode: use /give command to instantly get crafted items
@@ -396,7 +397,7 @@ export async function defendSelf(bot, range=9) {
      * @returns {Promise<boolean>} true if the bot found any enemies and has killed them, false if no entities were found.
      * @example
      * await skills.defendSelf(bot);
-     * **/
+     **/
     bot.modes.pause('self_defense');
     bot.modes.pause('cowardice');
     let attacked = false;
@@ -598,14 +599,21 @@ export async function pickupNearbyItems(bot) {
 export async function breakBlockAt(bot, x, y, z) {
     /**
      * Break the block at the given position. Will use the bot's equipped item.
+     * Automatically clears obstructing blocks in line of sight before breaking target block.
+     * IMPORTANT: This function only breaks the block. Items will drop on the ground.
+     * To collect the dropped items, use skills.pickupNearbyItems(bot) after breaking.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
      * @param {number} x, the x coordinate of the block to break.
      * @param {number} y, the y coordinate of the block to break.
      * @param {number} z, the z coordinate of the block to break.
      * @returns {Promise<boolean>} true if the block was broken, false otherwise.
      * @example
-     * let position = world.getPosition(bot);
-     * await skills.breakBlockAt(bot, position.x, position.y - 1, position.x);
+     * // Break block and pickup dropped items
+     * let block = world.getNearestBlock(bot, "oak_log", 32);
+     * if (block) {
+     *     await skills.breakBlockAt(bot, block.position.x, block.position.y, block.position.z);
+     *     await skills.pickupNearbyItems(bot); // Collect the drops
+     * }
      **/
     if (x == null || y == null || z == null) throw new Error('Invalid position to break block at.');
     let block = bot.blockAt(Vec3(x, y, z));
@@ -626,6 +634,37 @@ export async function breakBlockAt(bot, x, y, z) {
             bot.pathfinder.setMovements(movements);
             await goToGoal(bot, new pf.goals.GoalNear(pos.x, pos.y, pos.z, 4));
         }
+        
+        // Clear obstructing blocks in line of sight
+        for (let attempts = 0; attempts < 10 && !bot.interrupt_code; attempts++) {
+            if (bot.canSeeBlock(block)) break;
+            
+            const eyePos = bot.entity.position.offset(0, 1.6, 0);
+            const direction = block.position.offset(0.5, 0.5, 0.5).minus(eyePos).normalize();
+            const maxDistance = eyePos.distanceTo(block.position);
+            
+            let obstructingBlock = null;
+            for (let d = 0.1; d < maxDistance; d += 0.1) {
+                const checkBlock = bot.blockAt(eyePos.offset(direction.x * d, direction.y * d, direction.z * d).floor());
+                if (checkBlock && checkBlock.name !== 'air' && !checkBlock.position.equals(block.position)) {
+                    obstructingBlock = checkBlock;
+                    break;
+                }
+            }
+            
+            if (!obstructingBlock?.diggable) break;
+            
+            log(bot, `Clearing obstruction: ${obstructingBlock.name}`);
+            if (bot.game.gameMode !== 'creative') await bot.tool.equipForBlock(obstructingBlock);
+            try {
+                await bot.dig(obstructingBlock, true);
+                await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (err) {
+                log(bot, `Failed to clear obstruction: ${err.message}`);
+                break;
+            }
+        }
+        
         if (bot.game.gameMode !== 'creative') {
             await bot.tool.equipForBlock(block);
             const itemId = bot.heldItem ? bot.heldItem.type : null
@@ -947,7 +986,7 @@ export async function takeFromChest(bot, itemName, num=-1) {
      * @returns {Promise<boolean>} true if the item was taken from the chest, false otherwise.
      * @example
      * await skills.takeFromChest(bot, "oak_log");
-     * **/
+     **/
     let chest = world.getNearestBlock(bot, 'chest', 32);
     if (!chest) {
         log(bot, `Could not find a chest nearby.`);
@@ -994,7 +1033,7 @@ export async function viewChest(bot) {
      * @returns {Promise<boolean>} true if the chest was viewed, false otherwise.
      * @example
      * await skills.viewChest(bot);
-     * **/
+     **/
     let chest = world.getNearestBlock(bot, 'chest', 32);
     if (!chest) {
         log(bot, `Could not find a chest nearby.`);
@@ -1246,11 +1285,12 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
      * @param {number} x, the x coordinate to navigate to. If null, the bot's current x coordinate will be used.
      * @param {number} y, the y coordinate to navigate to. If null, the bot's current y coordinate will be used.
      * @param {number} z, the z coordinate to navigate to. If null, the bot's current z coordinate will be used.
-     * @param {number} distance, the distance to keep from the position. Defaults to 2.
+     * @param {number} min_distance, the distance to keep from the position. Defaults to 2.
      * @returns {Promise<boolean>} true if the position was reached, false otherwise.
      * @example
-     * let position = world.world.getNearestBlock(bot, "oak_log", 64).position;
-     * await skills.goToPosition(bot, position.x, position.y, position.x + 20);
+     * // getNearestBlock returns a Block object, use .position to get coordinates
+     * let block = world.getNearestBlock(bot, "oak_log", 64);
+     * await skills.goToPosition(bot, block.position.x, block.position.y, block.position.z, 3);
      **/
     if (x == null || y == null || z == null) {
         log(bot, `Missing coordinates, given x:${x} y:${y} z:${z}`);
@@ -1312,7 +1352,7 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
      * @returns {Promise<boolean>} true if the block was reached, false otherwise.
      * @example
      * await skills.goToNearestBlock(bot, "oak_log", 64, 2);
-     * **/
+     **/
     const MAX_RANGE = 512;
     if (range > MAX_RANGE) {
         log(bot, `Maximum search range capped at ${MAX_RANGE}. `);
@@ -1401,9 +1441,10 @@ export async function followPlayer(bot, username, distance=4) {
      * Follow the given player endlessly. Will not return until the code is manually stopped.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
      * @param {string} username, the username of the player to follow.
+     * @param {number} distance, the distance to keep from the player. Defaults to 4.
      * @returns {Promise<boolean>} true if the player was found, false otherwise.
      * @example
-     * await skills.followPlayer(bot, "player");
+     * await skills.followPlayer(bot, "player", 3);
      **/
     let player = bot.players[username].entity
     if (!player)
@@ -1653,11 +1694,11 @@ export async function tillAndSow(bot, x, y, z, seedType=null) {
      * @param {number} x, the x coordinate to till.
      * @param {number} y, the y coordinate to till.
      * @param {number} z, the z coordinate to till.
-     * @param {string} plantType, the type of plant to plant. Defaults to none, which will only till the ground.
+     * @param {string} seedType, the type of seed to plant. Defaults to null, which will only till the ground.
      * @returns {Promise<boolean>} true if the ground was tilled, false otherwise.
      * @example
      * let position = world.getPosition(bot);
-     * await skills.tillAndSow(bot, position.x, position.y - 1, position.x, "wheat");
+     * await skills.tillAndSow(bot, position.x, position.y - 1, position.z, "wheat_seeds");
      **/
     let pos = new Vec3(Math.floor(x), Math.floor(y), Math.floor(z));
     let block = bot.blockAt(pos);
@@ -1735,7 +1776,7 @@ export async function activateNearestBlock(bot, type) {
      * @returns {Promise<boolean>} true if the block was activated, false otherwise.
      * @example
      * await skills.activateNearestBlock(bot, "lever");
-     * **/
+     **/
     let block = world.getNearestBlock(bot, type, 16);
     if (!block) {
         log(bot, `Could not find any ${type} to activate.`);
@@ -1751,13 +1792,14 @@ export async function activateNearestBlock(bot, type) {
     return true;
 }
 
-/**
- * Helper function to find and navigate to a villager for trading
- * @param {MinecraftBot} bot - reference to the minecraft bot
- * @param {number} id - the entity id of the villager
- * @returns {Promise<Object|null>} the villager entity if found and reachable, null otherwise
- */
+
 async function findAndGoToVillager(bot, id) {
+    /**
+     * Helper function to find and navigate to a villager for trading
+     * @param {MinecraftBot} bot - reference to the minecraft bot
+     * @param {number} id - the entity id of the villager
+     * @returns {Promise<Object|null>} the villager entity if found and reachable, null otherwise
+     **/
     id = id+"";
     const entity = bot.entities[id];
     
@@ -1819,15 +1861,16 @@ async function findAndGoToVillager(bot, id) {
     return entity;
 }
 
-/**
- * Show available trades for a specified villager
- * @param {MinecraftBot} bot - reference to the minecraft bot
- * @param {number} id - the entity id of the villager to show trades for
- * @returns {Promise<boolean>} true if trades were shown successfully, false otherwise
- * @example
- * await skills.showVillagerTrades(bot, "123");
- */
+
 export async function showVillagerTrades(bot, id) {
+    /**
+    * Show available trades for a specified villager
+    * @param {MinecraftBot} bot - reference to the minecraft bot
+    * @param {number} id - the entity id of the villager to show trades for
+    * @returns {Promise<boolean>} true if trades were shown successfully, false otherwise
+    * @example
+    * await skills.showVillagerTrades(bot, "123");
+    **/
     const villagerEntity = await findAndGoToVillager(bot, id);
     if (!villagerEntity) {
         return false;
@@ -1858,17 +1901,18 @@ export async function showVillagerTrades(bot, id) {
     }
 }
 
-/**
- * Trade with a specified villager
- * @param {MinecraftBot} bot - reference to the minecraft bot
- * @param {number} id - the entity id of the villager to trade with
- * @param {number} index - the index (1-based) of the trade to execute
- * @param {number} count - how many times to execute the trade (optional)
- * @returns {Promise<boolean>} true if trade was successful, false otherwise
- * @example
- * await skills.tradeWithVillager(bot, "123", "1", "2");
- */
+
 export async function tradeWithVillager(bot, id, index, count) {
+    /**
+     * Trade with a specified villager
+     * @param {MinecraftBot} bot - reference to the minecraft bot
+     * @param {number} id - the entity id of the villager to trade with
+     * @param {number} index - the index (1-based) of the trade to execute
+     * @param {number} count - how many times to execute the trade (optional)
+     * @returns {Promise<boolean>} true if trade was successful, false otherwise
+     * @example
+     * await skills.tradeWithVillager(bot, "123", "1", "2");
+     **/
     const villagerEntity = await findAndGoToVillager(bot, id);
     if (!villagerEntity) {
         return false;
@@ -2080,7 +2124,10 @@ export async function useToolOn(bot, toolName, targetName) {
      * @param {string} toolName - item name of the tool to equip, or "hand" for no tool.
      * @param {string} targetName - entity type, block type, or "nothing" for no target
      * @returns {Promise<boolean>} true if action succeeded
-     */
+     * @example
+     * await skills.useToolOn(bot, "water_bucket", "lava");
+     * await skills.useToolOn(bot, "shears", "sheep");
+     **/
     if (!bot.inventory.slots.find(slot => slot && slot.name === toolName) && !bot.game.gameMode === 'creative') {
         log(bot, `You do not have any ${toolName} to use.`);
         return false;
@@ -2142,7 +2189,10 @@ export async function useToolOn(bot, toolName, targetName) {
      * @param {string} toolName - item name of the tool to equip, or "hand" for no tool.
      * @param {Block} block - the block reference to use the tool on.
      * @returns {Promise<boolean>} true if action succeeded
-     */
+     * @example
+     * let lavaBlock = world.getNearestBlock(bot, "lava", 32);
+     * await skills.useToolOnBlock(bot, "bucket", lavaBlock);
+     **/
 
     const distance = toolName === 'water_bucket' && block.name !== 'lava' ? 1.5 : 2;
     await goToPosition(bot, block.position.x, block.position.y, block.position.z, distance);

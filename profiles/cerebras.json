@@ -3,5 +3,7 @@
 
     "model": "cerebras/gpt-oss-120b",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

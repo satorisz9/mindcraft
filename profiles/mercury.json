@@ -5,5 +5,7 @@
 
     "model": "mercury-coder",
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

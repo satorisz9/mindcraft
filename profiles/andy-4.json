@@ -3,5 +3,7 @@
 
     "model": "ollama/sweaterdog/andy-4:micro-q8_0",
 
-    "embedding": "ollama"
+    "embedding": "ollama",
+
+    "use_native_tools": false
 }

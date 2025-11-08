@@ -16,5 +16,7 @@
         "params": { 
             "apiVersion": "2024-08-01-preview" 
         }
-    }
+    },
+
+    "use_native_tools": true
   }

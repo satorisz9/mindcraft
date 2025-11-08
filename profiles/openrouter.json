@@ -13,5 +13,7 @@
         "api": "qwen",
         "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "text-embedding-v3"
-    }
+    },
+
+    "use_native_tools": true
 }

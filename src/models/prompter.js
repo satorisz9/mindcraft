@@ -311,50 +311,63 @@ export class Prompter {
             console.warn('Already awaiting coding response, returning no response.');
             return '```//no response```';
         }
+        
         this.awaiting_coding = true;
         try {
             await this.checkCooldown();
+            
             while (messages.length > this.max_messages && messages.length > 1) {
                 messages.shift();
                 console.log(`Trimmed oldest message, current length: ${messages.length}`);
             }
 
+            const toolManager = this.agent.coder?.codeToolsManager;
+            const useNativeTools = this.profile.use_native_tools !== false;
+            
             let prompt = this.profile.coding;
+            let toolsForAPI = null;
+            
+            if (useNativeTools) {
+                toolsForAPI = toolManager.getToolDefinitions();
+                prompt = prompt.replace('$TOOLS', this.profile.tools_manual || '');
+                console.log(`Native tools enabled: ${toolsForAPI.length} tools available`);
+            } else {
+                const toolsPrompt = toolManager.buildToolsPrompt(this.profile.tools_manual || '');
+                prompt = prompt.replace('$TOOLS', toolsPrompt);
+                console.log(`Prompt-based tools enabled: ${toolManager.getToolDefinitions().length} tools available`);
+            }
+            
             prompt = prompt.replaceAll('$CODING_GOAL', codingGoal);
             prompt = await this.replaceStrings(prompt, messages, this.coding_examples);
             
-            let tools = null;
-            let requestMessages = messages;
-            // Native tools always enabled
-            const toolManager = this.agent.coder?.codeToolsManager;
-            if (toolManager) {
-                tools = toolManager.getToolDefinitions();
-                console.log(`Native tools enabled: ${tools.length} tools available`);
-            } else {
-                console.warn('ToolManager not available, falling back to prompt engineering');
-            }
+            const apiResponse = await this.code_model.sendRequest(messages, prompt, '<|EOT|>', toolsForAPI);
             
-            const resp = await this.code_model.sendRequest(requestMessages, prompt, '<|EOT|>', tools);
+            let finalResponse = apiResponse;
             
-            let finalResp = resp;
-            if (typeof resp === 'string' && resp.includes('_native_tool_calls')) {
+            if (useNativeTools && typeof apiResponse === 'string' && apiResponse.includes('_native_tool_calls')) {
                 try {
-                    const parsed = JSON.parse(resp);
+                    const parsed = JSON.parse(apiResponse);
                     if (parsed._native_tool_calls && parsed.tool_calls) {
-                        const toolManager = this.agent.coder?.codeToolsManager;
-                        const tools = toolManager.parseToolCalls(parsed.tool_calls);
-                        finalResp = JSON.stringify({ tools }, null, 2);
-                        console.log(`Converted ${tools.length} native tool calls to JSON format`);
+                        const convertedTools = toolManager.parseToolCalls(parsed.tool_calls);
+                        finalResponse = JSON.stringify({ tools: convertedTools }, null, 2);
+                        console.log(`Converted ${convertedTools.length} native tool calls to JSON format`);
                     }
                 } catch (e) {
                     console.error('Failed to parse native tool calls:', e);
                 }
             }
             
-            await this._saveLog(prompt, messages, finalResp, 'coding');
+            if (!useNativeTools) {
+                const toolsMatch = apiResponse.match(/<tools>([\s\S]*?)<\/tools>/);
+                if (toolsMatch) {
+                    finalResponse = toolsMatch[1].trim();
+                }
+            }
+            
+            await this._saveLog(prompt, messages, finalResponse, 'coding');
             this.max_messages++;
             
-            return finalResp;
+            return finalResponse;
         } catch (error) {
             console.error('Error in promptCoding:', error.message);
             if (error.message?.includes('Range of input length should be')) {

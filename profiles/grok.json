@@ -7,5 +7,7 @@
         "model": "xai/grok-4-fast-non-reasoning"
     },
 
-    "embedding": "openai"
+    "embedding": "openai",
+
+    "use_native_tools": true
 }

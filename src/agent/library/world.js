@@ -42,15 +42,21 @@ export function getNearestFreeSpace(bot, size=1, distance=8) {
 
 export function getBlockAtPosition(bot, x=0, y=0, z=0) {
      /**
-     * Get a block from the bot's relative position 
+     * Get a block at a RELATIVE position offset from the bot.
+     * IMPORTANT: Parameters are RELATIVE offsets, NOT absolute world coordinates!
+     * For absolute coordinates, use bot.blockAt(Vec3(x, y, z)) instead.
      * @param {Bot} bot - The bot to get the block for.
-     * @param {number} x - The relative x offset to serach, default 0.
-     * @param {number} y - The relative y offset to serach, default 0.
-     * @param {number} y - The relative z offset to serach, default 0. 
-     * @returns {Block} - The nearest block.
+     * @param {number} x - The RELATIVE x offset from bot's position, default 0.
+     * @param {number} y - The RELATIVE y offset from bot's position, default 0.
+     * @param {number} z - The RELATIVE z offset from bot's position, default 0.
+     * @returns {Block} - The block at the relative position.
      * @example
+     * // Get block directly below the bot (relative position)
      * let blockBelow = world.getBlockAtPosition(bot, 0, -1, 0);
-     * let blockAbove = world.getBlockAtPosition(bot, 0, 2, 0); since minecraft position is at the feet
+     * // Get block 2 blocks above bot's feet (relative position)
+     * let blockAbove = world.getBlockAtPosition(bot, 0, 2, 0);
+     * // For absolute world coordinates, use bot.blockAt instead:
+     * // let block = bot.blockAt(Vec3(100, 64, 200));
      **/
     let block = bot.blockAt(bot.entity.position.offset(x, y, z));
     if (!block) block = {name: 'air'};
@@ -178,9 +184,12 @@ export function getNearestBlock(bot, block_type, distance=16) {
      * @param {Bot} bot - The bot to get the nearest block for.
      * @param {string} block_type - The name of the block to search for.
      * @param {number} distance - The maximum distance to search, default 16.
-     * @returns {Block} - The nearest block of the given type.
+     * @returns {Block|null} - The nearest Block object, or null if not found. Use block.position.x/y/z to get coordinates.
      * @example
-     * let coalBlock = world.getNearestBlock(bot, 'coal_ore', 16);
+     * let oakLog = world.getNearestBlock(bot, 'oak_log', 32);
+     * if (oakLog) {
+     *     await skills.breakBlockAt(bot, oakLog.position.x, oakLog.position.y, oakLog.position.z);
+     * }
      **/
     let blocks = getNearestBlocks(bot, block_type, distance, 1);
     if (blocks.length > 0) {
@@ -379,7 +388,7 @@ export function isEntityType(name) {
      * Check if a given name is a valid entity type.
      * @param {string} name - The name of the entity type to check.
      * @returns {boolean} - True if the name is a valid entity type, false otherwise.
-     */
+     **/
     return mc.getEntityId(name) !== null;
 }
 

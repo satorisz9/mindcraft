@@ -8,5 +8,7 @@
                 "effort": "low"
             }
         }
-    }
+    },
+
+    "use_native_tools": true
 }

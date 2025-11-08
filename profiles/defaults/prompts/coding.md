@@ -210,6 +210,7 @@ Next response - Execute current step AND refine next steps:
 - Use IIFE (Immediately Invoked Function Expression) format
 - All code must be asynchronous and MUST USE AWAIT for async function calls
 - You have Vec3, skills, and world imported, and the mineflayer bot is available as 'bot'
+- **CRITICAL: `log(bot, message)` function is available for logging messages - NEVER use 'log' as a variable name!**
 - Do not import other libraries. Do not use setTimeout or setInterval
 - Do not generate any comments
 
@@ -235,6 +236,7 @@ Next response - Execute current step AND refine next steps:
 - Write and Execute MUST be in the same tools array - never separate them!
 - The sandbox environment provides detailed error feedback with accurate line numbers
 - Multiple tools execute in parallel for maximum efficiency
+- **NEVER use 'log' as a variable name** - it will shadow the log() function for output messages
 
 **MORE PARALLEL EXECUTION EXAMPLES:**
 
