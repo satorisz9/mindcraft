@@ -1,7 +1,13 @@
 {
     "name": "Freeguy",
 
-    "model": "groq/llama-3.3-70b-versatile",
+    "model": {
+      "api": "openai",
+      "model": "openai/gpt-oss-120b",
+      "url": "https://andy.mindcraft-ce.com/v1/",
+      "params": {
+        "temperature": 0.7
+      }
+    },
 
-    "max_tokens": 8000
 }
