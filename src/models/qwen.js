@@ -6,11 +6,12 @@ export class Qwen extends GPT {
     static prefix = 'qwen';
     constructor(model_name, url, params) {
         super(model_name, url, params);
+    }
 
+    initClient() {
         let config = {};
-        config.baseURL = url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+        config.baseURL = this.url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
         config.apiKey = getKey('QWEN_API_KEY');
-
         this.openai = new OpenAIApi(config);
     }
 

@@ -6,14 +6,16 @@ export class GLHF extends GPT {
     static prefix = 'glhf';
     constructor(model_name, url, params) {
         super(model_name, url, params);
+    }
 
+    initClient() {
         const apiKey = getKey('GHLF_API_KEY');
         if (!apiKey) {
             throw new Error('API key not found. Please check keys.json and ensure GHLF_API_KEY is defined.');
         }
         this.openai = new OpenAIApi({
             apiKey,
-            baseURL: url || "https://glhf.chat/api/openai/v1"
+            baseURL: this.url || "https://glhf.chat/api/openai/v1"
         });
     }
 

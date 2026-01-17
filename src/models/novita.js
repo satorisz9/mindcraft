@@ -7,12 +7,13 @@ export class Novita extends GPT {
 	static prefix = 'novita';
 	constructor(model_name, url, params) {
 		super(model_name, url, params);
+	}
 
+	initClient() {
 		let config = {
-			baseURL: url || 'https://api.novita.ai/v3/openai'
+			baseURL: this.url || 'https://api.novita.ai/v3/openai'
 		};
 		config.apiKey = getKey('NOVITA_API_KEY');
-
 		this.openai = new OpenAIApi(config);
 	}
 

@@ -6,15 +6,15 @@ export class OpenRouter extends GPT {
     static prefix = 'openrouter';
     constructor(model_name, url, params) {
         super(model_name, url, params);
+    }
 
+    initClient() {
         let config = {};
-        config.baseURL = url || 'https://openrouter.ai/api/v1';
-
+        config.baseURL = this.url || 'https://openrouter.ai/api/v1';
         const apiKey = getKey('OPENROUTER_API_KEY');
         if (!apiKey) {
             console.error('Error: OPENROUTER_API_KEY not found. Make sure it is set properly.');
         }
-
         config.apiKey = apiKey;
         this.openai = new OpenAIApi(config);
     }

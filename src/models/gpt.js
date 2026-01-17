@@ -9,10 +9,16 @@ export class GPT {
         this.model_name = model_name;
         this.params = params;
         this.url = url; // store so that we know whether a custom URL has been set
-        
+
+        // Template method pattern: subclasses can override initClient()
+        this.initClient();
+    }
+
+    // Initialize OpenAI client - subclasses can override this method
+    initClient() {
         let config = {};
-        if (url)
-            config.baseURL = url;
+        if (this.url)
+            config.baseURL = this.url;
 
         if (hasKey('OPENAI_ORG_ID'))
             config.organization = getKey('OPENAI_ORG_ID');

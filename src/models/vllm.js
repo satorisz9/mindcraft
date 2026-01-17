@@ -8,12 +8,12 @@ export class VLLM extends GPT {
     static prefix = 'vllm';
     constructor(model_name, url, params) {
         super(model_name, url, params);
+    }
 
-        // Currently use self-hosted SGLang API for text generation
+    initClient() {
         let vllm_config = {};
-        vllm_config.baseURL = url || 'http://0.0.0.0:8000/v1';
+        vllm_config.baseURL = this.url || 'http://0.0.0.0:8000/v1';
         vllm_config.apiKey = "";
-
         this.openai = new OpenAIApi(vllm_config);
     }
 

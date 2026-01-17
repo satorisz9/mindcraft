@@ -7,11 +7,12 @@ export class Grok extends GPT {
     static prefix = 'xai';
     constructor(model_name, url, params) {
         super(model_name, url, params);
+    }
 
+    initClient() {
         let config = {};
-        config.baseURL = url || 'https://api.x.ai/v1';
+        config.baseURL = this.url || 'https://api.x.ai/v1';
         config.apiKey = getKey('XAI_API_KEY');
-
         this.openai = new OpenAIApi(config);
     }
 
