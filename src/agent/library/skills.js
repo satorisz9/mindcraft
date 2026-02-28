@@ -3660,10 +3660,11 @@ export async function goToSurface(bot) {
             if (_pfShore) {
                 console.log('[swim] Phase 1: pathfinder to shore (' + _pfShore.x + ',' + _pfShore.y + ',' + _pfShore.z + ')');
                 try {
-                    const _pfTimeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('pf-timeout')), 15000));
+                    // [mindaxis-patch:shore-pf-near0] radius=0 で正確な陸地座標を指定（水中でgoal達成しない）
+                    const _pfTimeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('pf-timeout')), 30000));
                     const _pfMoves = new pf.Movements(bot);
                     bot.pathfinder.setMovements(_pfMoves);
-                    const _pfGoal = new pf.goals.GoalNear(_pfShore.x + 0.5, _pfShore.y, _pfShore.z + 0.5, 2);
+                    const _pfGoal = new pf.goals.GoalNear(_pfShore.x, _pfShore.y, _pfShore.z, 0);
                     await Promise.race([bot.pathfinder.goto(_pfGoal), _pfTimeoutP]);
                     const _pfPos = bot.entity.position;
                     const _pfFeet = bot.blockAt(new Vec3(Math.floor(_pfPos.x), Math.floor(_pfPos.y), Math.floor(_pfPos.z)));
