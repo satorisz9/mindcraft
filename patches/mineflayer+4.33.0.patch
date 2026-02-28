@@ -52,3 +52,19 @@ index fdaec6b..08983b6 100644
          // Condition to wait to receive block update actually changing the block type, in case the bot receives block updates with no changes
          // oldBlock and newBlock will both be null when the world unloads
          checkCondition: (oldBlock, newBlock) => !oldBlock || !newBlock || oldBlock.type !== newBlock.type
+
+diff --git a/node_modules/mineflayer/lib/plugins/place_entity.js b/node_modules/mineflayer/lib/plugins/place_entity.js
+index 2e2fa42..b1c3e85 100644
+--- a/node_modules/mineflayer/lib/plugins/place_entity.js
++++ b/node_modules/mineflayer/lib/plugins/place_entity.js
+@@ -36,9 +36,7 @@
+ 
+     if (type === 'boat') {
+       if (bot.supportFeature('useItemWithOwnPacket')) {
+-        bot._client.write('use_item', {
+-          hand: options.offhand ? 1 : 0
+-        })
++        bot.activateItem(options.offhand)
+       } else {
+         bot._client.write('block_place', {
+           location: { x: -1, y: -1, z: -1 },
