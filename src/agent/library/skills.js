@@ -2825,18 +2825,23 @@ export async function moveAway(bot, distance) {
     // [mindaxis-patch:moveaway-concrete-goal] GoalInvert → 8方向の具体座標 GoalNear に変更
     // GoalInvert は A* 探索空間が無限大になりタイムアウトしやすい。
     // 具体的なゴール座標を 8方向で順番に試し、8s で次方向へ切り替える。
-    // 地形キャッシュがあれば水域の少ない方向を優先する。
-    const _maAngles = Array.from({length: 8}, (_, i) => (Math.random() * Math.PI * 2) + (i / 8) * Math.PI * 2);
-    // Sort: prefer directions with fewer known water tiles
-    if (bot._terrainCache && bot._terrainAnalyzeDir) {
-        _maAngles.sort((a, b) => {
-            const _stepSz = Math.floor(distance / 5);
-            const _da = bot._terrainAnalyzeDir(pos.x, pos.z, a * 180 / Math.PI, 5, _stepSz);
-            const _db = bot._terrainAnalyzeDir(pos.x, pos.z, b * 180 / Math.PI, 5, _stepSz);
-            return _da.water - _db.water;
-        });
+    // 共有ワールドマップ(terrainSuggestExplore)で未探索方向を優先、次に水域回避。
+    let _maAngles;
+    if (bot._terrainSuggestExplore) {
+        // 未探索タイル数が少ない方向を優先（共有ワールドマップ参照）
+        const _maSuggested = bot._terrainSuggestExplore(pos.x, pos.z, Math.max(distance * 2, 500));
+        _maAngles = _maSuggested.map(d => Math.atan2(d.dz, d.dx));
+    } else {
+        _maAngles = Array.from({length: 8}, (_, i) => (Math.random() * Math.PI * 2) + (i / 8) * Math.PI * 2);
+        if (bot._terrainCache && bot._terrainAnalyzeDir) {
+            _maAngles.sort((a, b) => {
+                const _stepSz = Math.floor(distance / 5);
+                const _da = bot._terrainAnalyzeDir(pos.x, pos.z, a * 180 / Math.PI, 5, _stepSz);
+                const _db = bot._terrainAnalyzeDir(pos.x, pos.z, b * 180 / Math.PI, 5, _stepSz);
+                return _da.water - _db.water;
+            });
+        }
     }
-    const _maStartAngle = 0; // unused, kept for structure
     // 最初の方向（最も水域が少ない）は十分なタイムアウトを与える。残りは短め。
     const _maMainTimeout = Math.min(distance * 300, 90000); // 200→60s, 300→90s
     const _maFallbackTimeout = 8000;
