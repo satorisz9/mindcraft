@@ -34,6 +34,12 @@ export const actionsList = [
         description: 'Detect and repair missing wall blocks in your house. Use when !scanHouse shows the structure is not enclosed or when your house walls are damaged.',
         params: {},
         perform: runAsAction(async (agent) => {
+            // Don't repair if house is cramped — expandHouse should run instead
+            const hs = agent.bot._houseStructure;
+            if (hs && hs.cramped) {
+                skills.log(agent.bot, 'House is cramped — run !expandHouse instead of !repairHouse.');
+                return;
+            }
             agent.bot._allowHouseDig = true;
             try {
             const result = await skills.repairStructure(agent.bot);
@@ -608,12 +614,12 @@ export const actionsList = [
                 const count = inv.filter(i => i.name === m).reduce((s, i) => s + i.count, 0);
                 if (count > 0) {
                     if (!availMat) { availMat = m; availCount = count; }
-                    else { availCount += count; }
                 }
             }
 
-            if (!availMat || availCount < 10) {
-                skills.log(bot, 'Need ~' + blocksNeeded + ' blocks to expand. Have ' + availCount + '. Collect more building materials first!');
+            const minNeeded = Math.max(20, Math.floor(blocksNeeded * 0.5));
+            if (!availMat || availCount < minNeeded) {
+                skills.log(bot, 'Need ~' + minNeeded + ' ' + (availMat || mat) + ' to expand (est. ' + blocksNeeded + ' total). Have ' + availCount + '. Collect more building materials first!');
                 return;
             }
 
@@ -621,6 +627,11 @@ export const actionsList = [
             bot._allowHouseDig = true;
             bot._repairMode = true;
             try {
+            // Helper: check if a position already has a solid block (skip placing there)
+            const hasSolid = (x, y, z) => {
+                const bl = bot.blockAt(new Vec3(x, y, z));
+                return bl && bl.name !== 'air' && bl.name !== 'cave_air' && bl.name !== 'void_air';
+            };
 
             let newX1 = b.x1, newZ1 = b.z1, newX2 = b.x2, newZ2 = b.z2;
             if (direction === 'north') { newZ1 = b.z1 - amount; }
@@ -677,6 +688,7 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 - 1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
+                        if (hasSolid(fx, floorY, fz)) continue; // already has floor block
                         await skills.placeBlock(bot, useMat, fx, floorY, fz);
                     }
                 }
@@ -698,8 +710,8 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 - 1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let wy = floorY + 1; wy < roofY; wy++) {
-                        await skills.placeBlock(bot, useMat, fx, wy, b.z1);
-                        await skills.placeBlock(bot, useMat, fx, wy, b.z2);
+                        if (!hasSolid(fx, wy, b.z1)) await skills.placeBlock(bot, useMat, fx, wy, b.z1);
+                        if (!hasSolid(fx, wy, b.z2)) await skills.placeBlock(bot, useMat, fx, wy, b.z2);
                     }
                 }
             }
@@ -745,6 +757,7 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
+                        if (hasSolid(fx, roofY, fz)) continue; // already has roof block
                         await skills.placeBlock(bot, useMat, fx, roofY, fz);
                     }
                 }
@@ -773,7 +786,7 @@ export const actionsList = [
             }
 
             } finally { bot._allowHouseDig = false; bot._repairMode = false; }
-        }, false, 300)
+        }, false, 600)
     },
     {
         name: '!newAction',
