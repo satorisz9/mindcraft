@@ -3629,8 +3629,21 @@ export async function goToSurface(bot) {
         }
         // [mindaxis-patch:shore-swim-v9] 水中脱出: pathfinder優先 + 水路振動検出 + バックトラック
         bot._goToSurfaceActive = true;
+        // [mindaxis-patch:underground-water-skip-pf] 地下水路の場合 Phase 1 をスキップ → pillar-dig に直行
+        // 頭上 20 ブロック以内に solid ブロックがあれば地下と判定
+        let _isUnderground = false;
+        for (let _scanDy = 2; _scanDy <= 20; _scanDy++) {
+            const _scanBlk = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y) + _scanDy, Math.floor(pos.z)));
+            if (_scanBlk && _scanBlk.name !== 'air' && _scanBlk.name !== 'cave_air'
+                && _scanBlk.name !== 'water' && _scanBlk.name !== 'flowing_water') {
+                _isUnderground = true; break;
+            }
+        }
+        if (_isUnderground) {
+            console.log('[swim] Underground water detected (solid block at y+' + (Math.floor(pos.y)) + ') — skipping Phase 1, using pillar-dig');
+        }
         // --- Phase 1: pathfinder で岸に移動（水中でもA*が使える） ---
-        {
+        if (!_isUnderground) {
             let _pfShore = null; let _pfBestScore = 999;
             const _pfCp = bot.entity.position;
             const _pfBx = Math.floor(_pfCp.x), _pfBz = Math.floor(_pfCp.z);
@@ -3688,7 +3701,7 @@ export async function goToSurface(bot) {
             } else {
                 console.log('[swim] No shore found within 25 blocks for pathfinder');
             }
-        }
+        } // end if (!_isUnderground)
         // --- Phase 2: 手動 swim ループ（pathfinder 失敗時フォールバック） ---
         const _blacklistedShores = [];
         let _lastSwimPos = bot.entity.position.clone();
