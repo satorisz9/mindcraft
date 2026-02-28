@@ -164,6 +164,19 @@ export class SelfPrompter {
                                         ? 'This step requires EXPLORATION — keep moving and searching! !searchForEntity only detects entities in already-loaded chunks (~250 block radius). If it returns nothing: use !moveAway(300) to travel to new unexplored chunks, then search again. Repeat: !searchForEntity → nothing → !moveAway(300) → !searchForEntity → keep going. If surrounded by water, craft a boat: !craftRecipe("oak_boat", 1), then swim across. NOTE: !searchForEntity max range is 512 — do NOT exceed it. Only use !planSkip after 5+ move+search cycles with no results.'
                                         : 'If you cannot find what the step requires after 2-3 attempts, use !planSkip to skip it and move on — do NOT keep searching for the same thing or get sidetracked collecting other resources.';
                                     planHint += ' CURRENT PLAN: 「' + _plan.goal + '」(Step ' + (_currentStep+1) + '/' + _totalSteps + ': ' + _steps[_currentStep].step + '). PLAN RULE: Follow the current step. When done, use !planDone to mark complete and advance. ' + _skipRule + ' IMPORTANT: Do NOT build a new house — you already have one. ONLY build structures if the current plan step explicitly requires it.';
+                                    // [mindaxis-patch:saved-place-hint] 探索ステップで保存済み場所がある場合は直接案内
+                                    if (_isExploreStep) {
+                                        const _placeKws = { village: ['village','villag','villager','交易','村'], nether_portal: ['nether','ネザー'], stronghold: ['stronghold','end portal','エンド'] };
+                                        const _goalText = ((_plan.goal||'') + ' ' + _stepDesc).toLowerCase();
+                                        for (const [_place, _kws] of Object.entries(_placeKws)) {
+                                            if (_kws.some(kw => _goalText.includes(kw.toLowerCase()))) {
+                                                const _savedPos = this.agent.memory_bank.recallPlace(_place);
+                                                if (_savedPos) {
+                                                    planHint += ` ALREADY FOUND: "${_place}" is saved at (${Math.round(_savedPos[0])}, ${Math.round(_savedPos[1])}, ${Math.round(_savedPos[2])}). Use !goToRememberedPlace("${_place}") to go there directly — do NOT search blindly!`;
+                                                }
+                                            }
+                                        }
+                                    }
                                 } else {
                                     planHint += ' PLAN 「' + _plan.goal + '」is all steps done. Use !planNext to move to next plan.';
                                 }
