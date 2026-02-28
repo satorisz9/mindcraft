@@ -82,6 +82,19 @@ export class SelfPrompter {
                         }
                     } catch(_e) {}
                 }
+                // [mindaxis-patch:door-front-coord] ドア外側座標を帰宅座標として使う（家の内部中心ではなく）
+                // pathfinder が壁に阻まれず、ドア前に直接到達できる
+                let _homeX, _homeY, _homeZ;
+                if (hs && hs.bounds) {
+                    _homeX = Math.floor((hs.bounds.x1+hs.bounds.x2)/2);
+                    _homeY = (hs.bounds.y||69)+1;
+                    _homeZ = Math.floor((hs.bounds.z1+hs.bounds.z2)/2);
+                    if (hs.door) {
+                        const _f = hs.door.facing;
+                        _homeX = hs.door.x + (_f==='east'?1:_f==='west'?-1:0);
+                        _homeZ = hs.door.z + (_f==='south'?1:_f==='north'?-1:0);
+                    }
+                }
                 if (hs && hs.enclosed && hs.cramped) {
                     const _expandSuggest = hs.description && hs.description.match(/!expandHouse\([^)]+\)/);
                     houseHint = ' YOUR HOUSE IS TOO SMALL: Interior has only ' + (hs.interiorArea || '?') + ' blocks with ' + (hs.furniture ? hs.furniture.length : '?') + ' furniture items. Use !expandHouse to make it bigger BEFORE adding more furniture. Suggested: ' + (_expandSuggest ? _expandSuggest[0] : '!expandHouse("east", 3)') + '. After expanding, run !scanHouse to update.';
@@ -91,11 +104,11 @@ export class SelfPrompter {
                         const _furnitureNames = [...new Set(hs.furniture.map(f => f.split('@')[0]))];
                         _furnitureNote = ' Your house already has: ' + _furnitureNames.join(', ') + '. Do NOT craft items you already have placed (e.g. if you have a bed, use !goToBed instead of crafting a new one).';
                     }
-                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home. Place furniture INSIDE interior bounds (x=' + hs.interior.x1 + '-' + hs.interior.x2 + ', z=' + hs.interior.z1 + '-' + hs.interior.z2 + ').' + _furnitureNote;
+                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! HOME DOOR FRONT: !goToCoordinates(' + _homeX + ', ' + _homeY + ', ' + _homeZ + ', 1) to go home (this is the door front — walk through to enter). Place furniture INSIDE interior bounds (x=' + hs.interior.x1 + '-' + hs.interior.x2 + ', z=' + hs.interior.z1 + '-' + hs.interior.z2 + ').' + _furnitureNote;
                 } else if (hs && hs.bounds && !hs.enclosed) {
-                    houseHint = ' YOU HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + ' that may need repair. Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home, then !scanHouse to check it.';
+                    houseHint = ' YOU HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + ' that may need repair. HOME DOOR FRONT: !goToCoordinates(' + _homeX + ', ' + _homeY + ', ' + _homeZ + ', 1) to go home, then !scanHouse to check it.';
                 } else if (hs && hs.bounds) {
-                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home.';
+                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! HOME DOOR FRONT: !goToCoordinates(' + _homeX + ', ' + _homeY + ', ' + _homeZ + ', 1) to go home (this is the door front — walk through to enter).';
                 }
             }
             // [mindaxis-patch:plan-hint-v2] プランヒント + 死亡タイマー（critical対応）

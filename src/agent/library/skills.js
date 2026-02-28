@@ -2407,6 +2407,48 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         clearInterval(progressInterval);
         const finalDist = bot.entity.position.distanceTo(target);
         if (finalDist <= min_distance + 1) {
+            // [mindaxis-patch:door-front-auto-enter] ドア外側到達 → 自動入室
+            try {
+                const _deHs = bot._houseStructure;
+                if (_deHs && _deHs.bounds && _deHs.door && !bot._doorEntryInProgress) {
+                    const _dePos = bot.entity.position;
+                    const _deB = _deHs.bounds;
+                    const _deInside = _dePos.x > _deB.x1 && _dePos.x < _deB.x2 && _dePos.z > _deB.z1 && _dePos.z < _deB.z2;
+                    if (!_deInside) {
+                        const _deF = _deHs.door.facing;
+                        const _deFx = _deHs.door.x + (_deF==='east'?1:_deF==='west'?-1:0);
+                        const _deFz = _deHs.door.z + (_deF==='south'?1:_deF==='north'?-1:0);
+                        const _deDist = Math.sqrt((_dePos.x-_deFx)**2 + (_dePos.z-_deFz)**2);
+                        if (_deDist <= 3) {
+                            bot._doorEntryInProgress = true;
+                            try {
+                                const _doorBlk = bot.blockAt(new Vec3(_deHs.door.x, _deB.y+1, _deHs.door.z));
+                                if (_doorBlk && _doorBlk.name.includes('door')) {
+                                    const _props = _doorBlk.getProperties ? _doorBlk.getProperties() : {};
+                                    if (_props.open === false || _props.open === 'false') {
+                                        await bot.activateBlock(_doorBlk);
+                                        await new Promise(r => setTimeout(r, 300));
+                                    }
+                                }
+                                let _insX = _deHs.door.x + 0.5, _insZ = _deHs.door.z + 0.5;
+                                if (_deF === 'west') _insX += 2; else if (_deF === 'east') _insX -= 2;
+                                else if (_deF === 'north') _insZ += 2; else if (_deF === 'south') _insZ -= 2;
+                                await bot.lookAt(new Vec3(_insX, _deB.y+1, _insZ));
+                                bot.setControlState('forward', true);
+                                for (let _ei = 0; _ei < 12; _ei++) {
+                                    await new Promise(r => setTimeout(r, 200));
+                                    if (bot.interrupt_code) break;
+                                    const _cp = bot.entity.position;
+                                    if (_cp.x > _deB.x1 && _cp.x < _deB.x2 && _cp.z > _deB.z1 && _cp.z < _deB.z2) break;
+                                }
+                                bot.setControlState('forward', false);
+                                log(bot, 'Entered house through door (auto).');
+                            } catch(_e) { bot.setControlState('forward', false); }
+                            bot._doorEntryInProgress = false;
+                        }
+                    }
+                }
+            } catch(_dee) {}
             log(bot, `You have reached at ${x}, ${y}, ${z}.`);
             return true;
         } else {
