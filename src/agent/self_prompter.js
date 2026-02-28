@@ -76,6 +76,11 @@ export class SelfPrompter {
                         if (_fs.existsSync(_housePath)) {
                             const _hd = JSON.parse(_fs.readFileSync(_housePath, 'utf8'));
                             if (_hd && _hd.bounds) {
+                                // cramped が未保存の場合は freeTiles で再計算
+                                if (_hd.cramped === undefined || _hd.cramped === null) {
+                                    const _freeTiles = (_hd.interiorArea || 0) - (_hd.furniture ? _hd.furniture.length : 0);
+                                    _hd.cramped = _freeTiles <= 12 && (_hd.furniture ? _hd.furniture.length : 0) >= 2;
+                                }
                                 this.agent.bot._houseStructure = _hd;
                                 hs = _hd;
                             }
