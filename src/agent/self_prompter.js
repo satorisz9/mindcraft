@@ -263,13 +263,16 @@ export class SelfPrompter {
             }
             const msg = `You are self-prompting with the goal: '${this.prompt}'.${houseHint}${planHint} Your next response MUST contain a command with this syntax: !commandName. /* [mindaxis-patch:chest-management-v2] */ CHEST RULE: NEVER place chests outside your home base. RESOURCE RULE: Only use !takeFromChest when you are at home preparing to go out. When exploring far from home (50+ blocks away), do NOT return just to deposit items — keep exploring until (a) inventory has 12+ item types, (b) food runs out, or (c) it is night without a bed. Do NOT take furniture (furnace, crafting_table) from chests. A BED is OK to carry for exploration — !goToBed places it, sleeps, then picks it back up. BUILDING RULE: NEVER place cobblestone, stone, dirt, oak_planks, or other building blocks inside your house. Only place furniture (bed, chest, furnace, crafting_table, torch). FURNITURE PLACEMENT: Place furniture against the back and side walls, away from the door entrance. Keep the area near the door clear for easy entry/exit. Respond:`;
             
-            // [mindaxis-patch:cmd-watchdog] コマンド90秒ウォッチドッグ — ハングするコマンドを強制中断
+            // [mindaxis-patch:cmd-watchdog-v2] コマンドウォッチドッグ — ハングするコマンドを強制中断
+            // 建築コマンドは複数フェーズあるので 300s、それ以外は 90s
             const _wdBot = this.agent.bot;
+            const _wdLong = /!expandHouse|!repairHouse|!buildHouse/.test(msg);
+            const _wdTimeoutMs = _wdLong ? 300000 : 90000;
             const _watchdog = setTimeout(() => {
                 try { _wdBot.interrupt_code = true; } catch(_we) {}
                 try { _wdBot.pathfinder.stop(); } catch(_we) {}
-                console.log('[mindaxis] Watchdog: command force-interrupted after 90s');
-            }, 90000);
+                console.log(`[mindaxis] Watchdog: command force-interrupted after ${_wdTimeoutMs/1000}s`);
+            }, _wdTimeoutMs);
             let used_command;
             try {
                 used_command = await this.agent.handleMessage('system', msg, -1);
