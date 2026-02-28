@@ -1,3 +1,6 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
 diff --git a/node_modules/mineflayer/lib/plugins/digging.js b/node_modules/mineflayer/lib/plugins/digging.js
 index 496cf63..813a667 100644
 --- a/node_modules/mineflayer/lib/plugins/digging.js
@@ -80,3 +83,25 @@ index c7b750a..3abdfad 100644
        } else {
          bot._client.write('block_place', {
            location: { x: -1, y: -1, z: -1 },
+diff --git a/node_modules/mineflayer/lib/plugins/villager.js b/node_modules/mineflayer/lib/plugins/villager.js
+index e20e34a..59a949a 100644
+--- a/node_modules/mineflayer/lib/plugins/villager.js
++++ b/node_modules/mineflayer/lib/plugins/villager.js
+@@ -76,8 +76,16 @@ function inject (bot, { version }) {
+ 
+     const villagerPromise = bot.openEntity(villagerEntity)
+     bot._client.on(tradeListPacket, gotTrades)
+-    const villager = await villagerPromise
++    // [mindaxis-patch:villager-listener-cleanup] Clean up trade_list listener on error
++    let villager
++    try {
++      villager = await villagerPromise
++    } catch (err) {
++      bot._client.removeListener(tradeListPacket, gotTrades)
++      throw err
++    }
+     if (villager.type !== 'minecraft:villager' && villager.type !== 'minecraft:merchant') {
++      bot._client.removeListener(tradeListPacket, gotTrades)
+       throw new Error('Expected minecraft:villager or minecraft:mechant type, but got ' + villager.type)
+     }
+ 
