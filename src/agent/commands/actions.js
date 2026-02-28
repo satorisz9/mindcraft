@@ -90,7 +90,7 @@ export const actionsList = [
             try {
                 const _fs = await import('fs');
                 const _housePath = './bots/' + bot.username + '/house.json';
-                _fs.writeFileSync(_housePath, JSON.stringify({ bounds: result.bounds, door: result.door, wallMaterial: result.wallMaterial, enclosed: !!result.enclosed, interior: result.interior, interiorArea: result.interiorArea, furniture: result.furniture || [] }, null, 2));
+                _fs.writeFileSync(_housePath, JSON.stringify({ bounds: result.bounds, door: result.door, wallMaterial: result.wallMaterial, enclosed: !!result.enclosed, interior: result.interior, interiorArea: result.interiorArea, furniture: result.furniture || [], cramped: !!result.cramped }, null, 2));
             } catch(_e) {}
             skills.log(agent.bot, result.description);
         })
