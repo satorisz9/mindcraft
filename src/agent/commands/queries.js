@@ -11,6 +11,61 @@ const pad = (str) => {
 
 // queries are commands that just return strings and don't affect anything in the world
 export const queryList = [
+
+    // [mindaxis-patch:recall-memory] MindAxis DB から記憶を取得
+    {
+        name: '!recallMemory',
+        description: 'Recall important memories from MindAxis database. Use this to remember base locations, past events, or important information.',
+        params: {
+            'topic': { type: 'string', description: 'What to recall: "base", "locations", "deaths", "builds", or any keyword' }
+        },
+        perform: async function(agent, topic) {
+            const MINDAXIS_BASE_URL = process.env.MINDAXIS_BASE_URL || 'https://mindaxis.me';
+            const MINECRAFT_SERVER_KEY = process.env.MINECRAFT_SERVER_KEY || '';
+            const connectionId = process.env.MINDAXIS_CONNECTION_ID || '';
+
+            if (!MINECRAFT_SERVER_KEY || !connectionId) {
+                return 'Memory system not configured.';
+            }
+
+            try {
+                // locations を取得
+                if (topic === 'base' || topic === 'locations' || topic === '拠点') {
+                    const res = await fetch(
+                        `${MINDAXIS_BASE_URL}/api/open/minecraft/locations?connectionId=${encodeURIComponent(connectionId)}`,
+                        { headers: { 'Authorization': `Bearer ${MINECRAFT_SERVER_KEY}` } }
+                    );
+                    if (!res.ok) return 'Failed to fetch locations.';
+                    const data = await res.json();
+                    if (!data.locations?.length) return 'No saved locations found.';
+                    return 'Saved locations: ' + data.locations.map(l =>
+                        `${l.name} at (${l.x}, ${l.y}, ${l.z})${l.note ? ' - ' + l.note : ''}`
+                    ).join('; ');
+                }
+
+                // 汎用メモリ検索
+                const res = await fetch(
+                    `${MINDAXIS_BASE_URL}/api/open/minecraft/memory/${connectionId}?type=memory&limit=10`,
+                    { headers: { 'Authorization': `Bearer ${MINECRAFT_SERVER_KEY}` } }
+                );
+                if (!res.ok) return 'Failed to fetch memories.';
+                const data = await res.json();
+                if (!data.memories?.length) return 'No memories found for: ' + topic;
+
+                // topic でフィルタ
+                const relevant = data.memories.filter(m =>
+                    JSON.stringify(m.content).toLowerCase().includes(topic.toLowerCase())
+                );
+                if (!relevant.length) return 'No memories found for: ' + topic;
+
+                return 'Memories: ' + relevant.slice(0, 5).map(m =>
+                    typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+                ).join('; ');
+            } catch (err) {
+                return 'Error recalling memory: ' + err.message;
+            }
+        }
+    },
     {
         name: "!stats",
         description: "Get your bot's location, health, hunger, and time of day.", 
@@ -109,7 +164,12 @@ export const queryList = [
             let blocks = world.getNearestBlocks(bot);
             let block_details = new Set();
             
+            // [mindaxis-patch:leaf-filter] 近くにログがなければ葉ブロックを非表示
+            const hasNearbyLogs = blocks.some(b => b.name.endsWith('_log'));
+
             for (let block of blocks) {
+                if (!hasNearbyLogs && block.name.endsWith('_leaves')) continue;
+
                 let details = block.name;
                 if (block.name === 'water' || block.name === 'lava') {
                     details += block.metadata === 0 ? ' (source)' : ' (flowing)';

@@ -121,6 +121,51 @@ export class Agent {
               
                 this._setupEventHandlers(save_data, init_message);
                 this.startEvents();
+
+                // [mindaxis-patch:twin-map-server] 2Dマップサーバー起動
+                try {
+                    const { createRequire } = await import('module');
+                    const _require = createRequire(import.meta.url);
+                    const mapServer = _require('../../../scripts/twin-map-server.cjs');
+                    mapServer.start(this.bot, this.name);
+                } catch (_mapErr) { console.error('[MapServer] Failed to start:', _mapErr.message); }
+
+                // [mindaxis-patch:vision-unstuck-loader] vision-unstuck モジュール読み込み
+                try {
+                    const { createRequire: _cr2 } = await import('module');
+                    const _req2 = _cr2(import.meta.url);
+                    const _vu = _req2('../../../scripts/vision-unstuck.cjs');
+                    _vu.start(this.bot, this.name);
+                } catch (_vuErr) { console.error('[vision-unstuck] Failed to load:', _vuErr.message); }
+
+                // [mindaxis-patch:water-watchdog] 水中ウォッチドッグ — 頭が5秒以上水没なら現在のコマンドを中断
+                (() => {
+                    let _waterTicks = 0;
+                    const _bot = this.bot;
+                    setInterval(() => {
+                        try {
+                            if (!_bot.entity) return;
+                            // 頭（目の高さ y+1.62）のブロックが水かチェック
+                            const _eyePos = _bot.entity.position.offset(0, 1.62, 0);
+                            const _eyeBlock = _bot.blockAt(_eyePos);
+                            const _headSubmerged = _eyeBlock && (_eyeBlock.name === 'water' || _eyeBlock.name === 'flowing_water');
+                            if (_headSubmerged) {
+                                _waterTicks++;
+                                // 5秒水没で中断
+                                if (_waterTicks >= 5 && !_bot.interrupt_code) {
+                                    // goToSurface 実行中は中断しない
+                                    if (_bot._goToSurfaceActive) { _waterTicks = 3; return; }
+                                    console.log('[water-watchdog] Head submerged for ' + _waterTicks + 's, interrupting current command');
+                                    _bot.interrupt_code = true;
+                                    _waterTicks = 0;
+                                }
+                            } else {
+                                _waterTicks = 0;
+                            }
+                        } catch(_wwe) {}
+                    }, 1000);
+                    console.log('[water-watchdog] Started');
+                })();
               
                 if (!load_mem) {
                     if (settings.task) {
@@ -320,6 +365,8 @@ export class Agent {
             let res = await this.prompter.promptConvo(history);
 
             console.log(`${this.name} full response to ${source}: ""${res}""`);
+            // [mindaxis-patch:bot-response-event] LLM応答をマップサーバーに通知
+            try { this.bot.emit('botResponse', this.name, res, source); } catch(_e) {}
 
             if (res.trim().length === 0) {
                 console.warn('no response')
@@ -463,6 +510,7 @@ export class Agent {
             }
         });
         this.bot.on('death', () => {
+            this.bot._lastDeathTime = Date.now(); // [mindaxis-patch:death-timer]
             this.actions.cancelResume();
             this.actions.stop();
         });
@@ -479,7 +527,7 @@ export class Agent {
                 this.memory_bank.rememberPlace('last_death_position', death_pos.x, death_pos.y, death_pos.z);
                 let death_pos_text = null;
                 if (death_pos) {
-                    death_pos_text = `x: ${death_pos.x.toFixed(2)}, y: ${death_pos.y.toFixed(2)}, z: ${death_pos.x.toFixed(2)}`;
+                    death_pos_text = `x: ${death_pos.x.toFixed(0)}, y: ${death_pos.y.toFixed(0)}, z: ${death_pos.z.toFixed(0)}`; // [mindaxis-patch:death-coords-fix]
                 }
                 let dimention = this.bot.game.dimension;
                 this.handleMessage('system', `You died at position ${death_pos_text || "unknown"} in the ${dimention} dimension with the final message: '${message}'. Your place of death is saved as 'last_death_position' if you want to return. Previous actions were stopped and you have respawned.`);

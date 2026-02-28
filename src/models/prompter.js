@@ -225,7 +225,7 @@ export class Prompter {
             let generation;
 
             try {
-                generation = await this.chat_model.sendRequest(messages, prompt);
+                generation = await this.chat_model.sendRequest(messages, prompt, '***', true); // [mindaxis-patch] stateful conversation
                 if (typeof generation !== 'string') {
                     console.error('Error: Generated response is not a string', generation);
                     throw new Error('Generated response is not a string');

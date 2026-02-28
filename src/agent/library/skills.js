@@ -100,9 +100,14 @@ export async function craftRecipe(bot, itemName, num=1) {
     const requiredIngredients = mc.ingredientsFromPrismarineRecipe(recipe); //Items required to use the recipe once.
     const craftLimit = mc.calculateLimitingResource(inventory, requiredIngredients);
     
+    // [mindaxis-patch:craft-partial-success] 材料不足で全量作れない場合も成功として扱う（ループ防止）
+    if (craftLimit.num === 0) {
+        log(bot, `You do not have enough materials to craft ${itemName}. Need: ${craftLimit.limitingResource}.`);
+        if (placedTable) await collectBlock(bot, 'crafting_table', 1);
+        return false;
+    }
     await bot.craft(recipe, Math.min(craftLimit.num, num), craftingTable);
-    if(craftLimit.num<num) log(bot, `Not enough ${craftLimit.limitingResource} to craft ${num}, crafted ${craftLimit.num}. You now have ${world.getInventoryCounts(bot)[itemName]} ${itemName}.`);
-    else log(bot, `Successfully crafted ${itemName}, you now have ${world.getInventoryCounts(bot)[itemName]} ${itemName}.`);
+    log(bot, `Successfully crafted ${itemName}, you now have ${world.getInventoryCounts(bot)[itemName]} ${itemName}.`);
     if (placedTable) {
         await collectBlock(bot, 'crafting_table', 1);
     }
@@ -177,7 +182,7 @@ export async function smeltItem(bot, itemName, num=1) {
     if (bot.entity.position.distanceTo(furnaceBlock.position) > 4) {
         await goToNearestBlock(bot, 'furnace', 4, furnaceRange);
     }
-    bot.modes.pause('unstuck');
+    /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
     await bot.lookAt(furnaceBlock.position);
 
     console.log('smelting...');
@@ -201,7 +206,8 @@ export async function smeltItem(bot, itemName, num=1) {
         return false;
     }
 
-    // fuel the furnace
+    // fuel the furnace /* [mindaxis-patch:smelt-fuel-overlap] */
+    let fuelUsed = 0;
     if (!furnace.fuelItem()) {
         let fuel = mc.getSmeltingFuel(bot);
         if (!fuel) {
@@ -212,20 +218,58 @@ export async function smeltItem(bot, itemName, num=1) {
         }
         log(bot, `Using ${fuel.name} as fuel.`);
 
-        const put_fuel = Math.ceil(num / mc.getFuelSmeltOutput(fuel.name));
+        let put_fuel = Math.ceil(num / mc.getFuelSmeltOutput(fuel.name));
 
-        if (fuel.count < put_fuel) {
+        // When fuel and input are the same item, we need enough for both
+        if (fuel.name === itemName) {
+            const totalNeeded = put_fuel + num;
+            if (fuel.count < totalNeeded) {
+                // Reduce num to fit available items: available = fuel.count, need put_fuel + num
+                // Solve: put_fuel = ceil(num / output), so num + ceil(num/output) <= fuel.count
+                // Approximate: num <= fuel.count / (1 + 1/output)
+                const output = mc.getFuelSmeltOutput(fuel.name);
+                let maxNum = Math.floor(fuel.count / (1 + 1/output));
+                if (maxNum < 1) {
+                    log(bot, `You don't have enough ${fuel.name} to smelt and fuel. Need at least ${totalNeeded}, have ${fuel.count}.`);
+                    if (placedFurnace)
+                        await collectBlock(bot, 'furnace', 1);
+                    return false;
+                }
+                log(bot, `Not enough ${fuel.name} for both fuel and smelting ${num}. Reducing to ${maxNum}.`);
+                num = maxNum;
+                put_fuel = Math.ceil(num / output);
+            }
+        } else if (fuel.count < put_fuel) {
             log(bot, `You don't have enough ${fuel.name} to smelt ${num} ${itemName}; you need ${put_fuel}.`);
             if (placedFurnace)
                 await collectBlock(bot, 'furnace', 1);
             return false;
         }
-        await furnace.putFuel(fuel.type, null, put_fuel);
+        try {
+            await furnace.putFuel(fuel.type, null, put_fuel);
+            fuelUsed = put_fuel;
+        } catch (e) {
+            log(bot, `Failed to add fuel: ${e.message}`);
+            if (placedFurnace)
+                await collectBlock(bot, 'furnace', 1);
+            return false;
+        }
         log(bot, `Added ${put_fuel} ${mc.getItemName(fuel.type)} to furnace fuel.`);
         console.log(`Added ${put_fuel} ${mc.getItemName(fuel.type)} to furnace fuel.`)
     }
     // put the items in the furnace
-    await furnace.putInput(mc.getItemId(itemName), null, num);
+    try {
+        await furnace.putInput(mc.getItemId(itemName), null, num);
+    } catch (e) {
+        log(bot, `Failed to add input to furnace: ${e.message}`);
+        // Try to recover fuel
+        if (furnace.fuelItem()) {
+            try { await furnace.takeFuel(); } catch(_) {}
+        }
+        if (placedFurnace)
+            await collectBlock(bot, 'furnace', 1);
+        return false;
+    }
     // wait for the items to smelt
     let total = 0;
     let smelted_item = null;
@@ -415,6 +459,10 @@ export async function defendSelf(bot, range=9) {
 
 
 export async function collectBlock(bot, blockType, num=1, exclude=null) {
+    // [mindaxis-patch:collect-timeout] 収集開始時のインベントリを記録
+    const _startInvCount = bot.inventory.items().filter(i => i.name === blockType || i.name.includes(blockType.replace('_log', '_planks'))).reduce((s, i) => s + i.count, 0);
+    const _collectStartTime = Date.now();
+    const _collectTimeout = 60000; // 60秒タイムアウト
     /**
      * Collect one of the given block type.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
@@ -444,7 +492,9 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
 
     const movements = new pf.Movements(bot);
     movements.dontMineUnderFallingBlock = false;
-    movements.dontCreateFlow = true;
+    // [mindaxis-patch:collect-wood-flow] 木の採集時は dontCreateFlow を無効化（水辺の木が取れなくなるため）
+    const _woodTypes = ['oak_log','birch_log','spruce_log','jungle_log','acacia_log','dark_oak_log','mangrove_log','cherry_log'];
+    movements.dontCreateFlow = !_woodTypes.some(w => blocktypes.includes(w));
 
     // Blocks to ignore safety for, usually next to lava/water
     const unsafeBlocks = ['obsidian'];
@@ -466,7 +516,24 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 return block.metadata === 0;
             }
             
-            return movements.safeToBreak(block) || unsafeBlocks.includes(block.name);
+            // [mindaxis-patch:collect-no-submerged-v5] 水没ブロック除外 + デバッグログ
+            if (!block.position) return blocktypes.includes(block.name); // パレットチェック時は名前のみ確認
+            const _cbIsWater = n => n && (n.name === 'water' || n.name === 'flowing_water');
+            const _cbAbove1 = bot.blockAt(block.position.offset(0, 1, 0));
+            const _cbAbove2 = bot.blockAt(block.position.offset(0, 2, 0));
+            if (_cbIsWater(_cbAbove1) && _cbIsWater(_cbAbove2)) { console.log('[collect-dbg] SKIP submerged: ' + block.name + ' ' + block.position); return false; }
+            const _cbBelow = bot.blockAt(block.position.offset(0, -1, 0));
+            if (_cbIsWater(_cbBelow)) { console.log('[collect-dbg] SKIP water-below: ' + block.name + ' ' + block.position); return false; }
+            const _cbAdj = [
+                bot.blockAt(block.position.offset(1, 1, 0)),
+                bot.blockAt(block.position.offset(-1, 1, 0)),
+                bot.blockAt(block.position.offset(0, 1, 1)),
+                bot.blockAt(block.position.offset(0, 1, -1)),
+            ].filter(_cbIsWater).length;
+            if (_cbIsWater(_cbAbove1) && _cbAdj >= 2) { console.log('[collect-dbg] SKIP water-adj: ' + block.name + ' ' + block.position); return false; }
+            const _stbOk = movements.safeToBreak(block) || unsafeBlocks.includes(block.name);
+            if (!_stbOk) { console.log('[collect-dbg] SKIP safeToBreak: ' + block.name + ' ' + block.position); }
+            return _stbOk;
         }, 64, 1);
 
         if (blocks.length === 0) {
@@ -503,7 +570,15 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 success = true;
             }
             else {
-                await bot.collectBlock.collect(block);
+                // [mindaxis-patch:collect-direct-dig] 到達範囲内なら直接掘る（GoalLookAtBlock振動回避）
+                const _blockCenter = block.position.offset(0.5, 0.5, 0.5);
+                const _digDist = bot.entity.position.distanceTo(_blockCenter);
+                if (_digDist <= 4.5) {
+                    await bot.dig(block);
+                    await pickupNearbyItems(bot);
+                } else {
+                    await bot.collectBlock.collect(block);
+                }
                 success = true;
             }
             if (success)
@@ -525,6 +600,34 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             break;  
     }
     log(bot, `Collected ${collected} ${blockType}.`);
+    // [mindaxis-patch:location-memory-record] 資源の群生地を記録
+    if (collected > 0) {
+        try {
+            const _fs2 = await import('fs');
+            const _memPath2 = './bots/' + bot.username + '/location_memory.json';
+            let _lm2 = {};
+            try { _lm2 = JSON.parse(_fs2.readFileSync(_memPath2, 'utf8')); } catch(_) {}
+            if (!_lm2.resources) _lm2.resources = {};
+            const _rem = world.getNearestBlocks(bot, blockType, 64, 30);
+            const _bp = bot.entity.position;
+            if (_rem.length >= 3) {
+                const _cx = Math.round(_rem.reduce((s,b)=>s+b.position.x,0)/_rem.length);
+                const _cy = Math.round(_rem.reduce((s,b)=>s+b.position.y,0)/_rem.length);
+                const _cz = Math.round(_rem.reduce((s,b)=>s+b.position.z,0)/_rem.length);
+                if (!_lm2.resources[blockType]) _lm2.resources[blockType] = [];
+                const _exLoc = _lm2.resources[blockType].find(l => Math.abs(l.x-_cx)<40 && Math.abs(l.z-_cz)<40);
+                if (_exLoc) { _exLoc.count = _rem.length; _exLoc.lastSeen = Date.now(); }
+                else _lm2.resources[blockType].push({x:_cx, y:_cy, z:_cz, count:_rem.length, lastSeen:Date.now()});
+                log(bot, `Memorized: ${blockType} at (${_cx},${_cz}), ${_rem.length} remaining.`);
+            } else {
+                if (_lm2.resources[blockType]) {
+                    _lm2.resources[blockType] = _lm2.resources[blockType].filter(l => Math.abs(l.x-_bp.x)>=40 || Math.abs(l.z-_bp.z)>=40);
+                    if (_lm2.resources[blockType].length === 0) delete _lm2.resources[blockType];
+                }
+            }
+            _fs2.writeFileSync(_memPath2, JSON.stringify(_lm2, null, 2), 'utf8');
+        } catch(_lmErr2) {}
+    }
     return collected > 0;
 }
 
@@ -876,7 +979,19 @@ export async function putInChest(bot, itemName, num=-1) {
      * @example
      * await skills.putInChest(bot, "oak_log");
      **/
-    let chest = world.getNearestBlock(bot, 'chest', 32);
+    // [mindaxis-patch:chest-house-priority] 家レベルのチェストを優先
+    let chest = null;
+    {
+        const _allChests = world.getNearestBlocks(bot, 'chest', 32, 10);
+        const _hs = bot._houseStructure;
+        if (_hs && _hs.bounds && _allChests.length > 1) {
+            const _fy = _hs.bounds.y || 69;
+            const _houseChests = _allChests.filter(c => c.position.y >= _fy && c.position.y <= _fy + 2);
+            chest = _houseChests.length > 0 ? _houseChests[0] : _allChests[0];
+        } else {
+            chest = _allChests.length > 0 ? _allChests[0] : null;
+        }
+    }
     if (!chest) {
         log(bot, `Could not find a chest nearby.`);
         return false;
@@ -890,6 +1005,18 @@ export async function putInChest(bot, itemName, num=-1) {
     await goToPosition(bot, chest.position.x, chest.position.y, chest.position.z, 2);
     const chestContainer = await bot.openContainer(chest);
     await chestContainer.deposit(item.type, null, to_put);
+    // [mindaxis-patch:chest-snapshot] 家のチェスト操作後に中身を記録（上書き同期）
+    try {
+        const _hs = bot._houseStructure;
+        const _isHomeChest = _hs && _hs.bounds && chest.position.y >= (_hs.bounds.y || 69) && chest.position.y <= (_hs.bounds.y || 69) + 2;
+        if (_isHomeChest) {
+            const _chestItems = chestContainer.containerItems();
+            const _chestNames = [...new Set(_chestItems.map(i => i.name))];
+            bot._chestSummary = _chestNames;
+            const _fs = await import('fs');
+            _fs.writeFileSync('./bots/' + bot.username + '/chest_summary.json', JSON.stringify({ items: _chestNames, updatedAt: new Date().toISOString() }, null, 2));
+        }
+    } catch(_cse) {}
     await chestContainer.close();
     log(bot, `Successfully put ${to_put} ${itemName} in the chest.`);
     return true;
@@ -905,7 +1032,19 @@ export async function takeFromChest(bot, itemName, num=-1) {
      * @example
      * await skills.takeFromChest(bot, "oak_log");
      * **/
-    let chest = world.getNearestBlock(bot, 'chest', 32);
+    // [mindaxis-patch:chest-take-house-priority] 家レベルのチェストを優先（地下チェスト除外）
+    let chest = null;
+    {
+        const _allChests = world.getNearestBlocks(bot, 'chest', 32, 10);
+        const _hs = bot._houseStructure;
+        if (_hs && _hs.bounds) {
+            const _fy = _hs.bounds.y || 69;
+            const _houseChests = _allChests.filter(c => c.position.y >= _fy - 2 && c.position.y <= _fy + 3);
+            chest = _houseChests.length > 0 ? _houseChests[0] : null;
+        } else {
+            chest = _allChests.length > 0 ? _allChests[0] : null;
+        }
+    }
     if (!chest) {
         log(bot, `Could not find a chest nearby.`);
         return false;
@@ -936,6 +1075,18 @@ export async function takeFromChest(bot, itemName, num=-1) {
         remaining -= toTakeFromSlot;
     }
     
+    // [mindaxis-patch:chest-take-snapshot] 家のチェスト操作後に中身を記録
+    try {
+        const _hs2 = bot._houseStructure;
+        const _isHome2 = _hs2 && _hs2.bounds && chest.position.y >= (_hs2.bounds.y || 69) && chest.position.y <= (_hs2.bounds.y || 69) + 2;
+        if (_isHome2) {
+            const _ci2 = chestContainer.containerItems();
+            const _cn2 = [...new Set(_ci2.map(i => i.name))];
+            bot._chestSummary = _cn2;
+            const _fs2 = await import('fs');
+            _fs2.writeFileSync('./bots/' + bot.username + '/chest_summary.json', JSON.stringify({ items: _cn2, updatedAt: new Date().toISOString() }, null, 2));
+        }
+    } catch(_cs2) {}
     await chestContainer.close();
     log(bot, `Successfully took ${totalTaken} ${itemName} from the chest.`);
     return totalTaken > 0;
@@ -1067,7 +1218,106 @@ export async function giveToPlayer(bot, itemType, username, num=1) {
     return false;
 }
 
+
+// [mindaxis-patch:unified-door-exit] — 全ナビゲーション経路で使う統一ドア脱出関数
+async function _exitHouseIfNeeded(bot) {
+    if (bot._doorExitInProgress || bot._doorEntryInProgress) return true; // 再帰防止 + 入室中は脱出しない
+    if (!bot._houseStructure) {
+        try {
+            const _fs = await import('fs');
+            const _hp = './bots/' + bot.username + '/house.json';
+            if (_fs.existsSync(_hp)) {
+                const _hd = JSON.parse(_fs.readFileSync(_hp, 'utf8'));
+                if (_hd && _hd.bounds) bot._houseStructure = _hd;
+            }
+        } catch(_) {}
+    }
+    const _hs = bot._houseStructure;
+    if (!_hs || !_hs.bounds || !_hs.door) return true;
+    const _pos = bot.entity.position;
+    const _hb = _hs.bounds;
+    const _inside = _pos.x > _hb.x1 && _pos.x < _hb.x2 && _pos.z > _hb.z1 && _pos.z < _hb.z2
+                 && _pos.y >= _hb.y && _pos.y <= (_hb.roofY || _hb.y + 4);
+    if (!_inside) return true;
+    bot._doorExitInProgress = true;
+    try {
+        log(bot, 'Exiting house through door...');
+        const _doorX = _hs.door.x, _doorZ = _hs.door.z;
+        const _doorY = _hb.y + 1;
+        const _facing = _hs.door.facing;
+        const Vec3 = (await import('vec3')).default || (await import('vec3'));
+        const _Vec3 = typeof Vec3 === 'function' ? Vec3 : Vec3.Vec3 || Vec3;
+        let _innerX = _doorX, _innerZ = _doorZ;
+        if (_facing === 'west') _innerX += 1.5;
+        else if (_facing === 'east') _innerX -= 1.5;
+        else if (_facing === 'north') _innerZ += 1.5;
+        else if (_facing === 'south') _innerZ -= 1.5;
+        const _moves = new pf.Movements(bot);
+        _moves.allow1by1towers = false;
+        _moves.canPlaceOn = false;
+        bot.pathfinder.setMovements(_moves);
+        try {
+            await bot.pathfinder.goto(new pf.goals.GoalNear(_innerX, _doorY, _innerZ, 1));
+        } catch(_e) {
+            log(bot, 'Could not pathfind to door interior: ' + _e.message);
+        }
+        if (bot.interrupt_code) { bot._doorExitInProgress = false; return false; }
+        const _doorBlock = bot.blockAt(new _Vec3(_doorX, _doorY, _doorZ));
+        if (_doorBlock && _doorBlock.name.includes('door')) {
+            const _props = _doorBlock.getProperties ? _doorBlock.getProperties() : {};
+            if (_props.open === false || _props.open === 'false') {
+                await bot.activateBlock(_doorBlock);
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+        let _exitX = _doorX + 0.5, _exitZ = _doorZ + 0.5;
+        if (_facing === 'west') _exitX -= 2;
+        else if (_facing === 'east') _exitX += 2;
+        else if (_facing === 'north') _exitZ -= 2;
+        else if (_facing === 'south') _exitZ += 2;
+        await bot.lookAt(new _Vec3(_exitX, _doorY, _exitZ));
+        bot.setControlState('forward', true);
+        for (let _wi = 0; _wi < 20; _wi++) {
+            await new Promise(r => setTimeout(r, 200));
+            if (bot.interrupt_code) break;
+            const _cp = bot.entity.position;
+            const _nowInside = _cp.x > _hb.x1 && _cp.x < _hb.x2 && _cp.z > _hb.z1 && _cp.z < _hb.z2;
+            if (!_nowInside) break;
+        }
+        bot.setControlState('forward', false);
+        const _fp = bot.entity.position;
+        const _stillInside = _fp.x > _hb.x1 && _fp.x < _hb.x2 && _fp.z > _hb.z1 && _fp.z < _hb.z2;
+        if (_stillInside) {
+            log(bot, 'Door exit FAILED - still inside house at ' + _fp.floored());
+            bot._doorExitInProgress = false;
+            return false;
+        }
+        log(bot, 'Exited house through door at ' + _fp.floored());
+        bot._doorExitInProgress = false;
+        return true;
+    } catch (e) {
+        log(bot, 'Door exit error: ' + e.message);
+        bot.setControlState('forward', false);
+        bot._doorExitInProgress = false;
+        return false;
+    }
+}
+
 export async function goToGoal(bot, goal) {
+    // [mindaxis-patch:goToGoal-door-exit]
+    // 目標が家の中ならドア脱出しない（GoalInvert=移動離れ→常に脱出）
+    {
+        let _skipDoorExit = false;
+        const _hs0 = bot._houseStructure;
+        if (_hs0 && _hs0.bounds && goal && goal.x !== undefined && goal.z !== undefined && !goal.goal) {
+            const _hb0 = _hs0.bounds;
+            _skipDoorExit = goal.x > _hb0.x1 && goal.x < _hb0.x2 && goal.z > _hb0.z1 && goal.z < _hb0.z2;
+        }
+        if (!_skipDoorExit) {
+            await _exitHouseIfNeeded(bot);
+            if (bot.interrupt_code) return;
+        }
+    }
     /**
      * Navigate to the given goal. Use doors and attempt minimally destructive movements.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
@@ -1083,6 +1333,157 @@ export async function goToGoal(bot, goal) {
     nonDestructiveMovements.digCost = 10;
 
     const destructiveMovements = new pf.Movements(bot);
+
+    // [mindaxis-patch:house-wall-protect] 家の壁を pathfinder の破壊対象から保護
+    // house.json から家の bounds を復元
+    if (!bot._houseStructure) {
+        try {
+            const _fs = await import('fs');
+            const _housePath = './bots/' + bot.username + '/house.json';
+            if (_fs.existsSync(_housePath)) {
+                const _hd = JSON.parse(_fs.readFileSync(_housePath, 'utf8'));
+                if (_hd && _hd.bounds) {
+                    bot._houseStructure = _hd;
+                }
+            }
+        } catch(_e) {}
+    }
+    // 家具が未記録なら起動時に自動スキャン
+    if (bot._houseStructure && bot._houseStructure.bounds && (!bot._houseStructure.furniture || bot._houseStructure.furniture.length === 0)) {
+        try {
+            const _hsb = bot._houseStructure.bounds;
+            const _furniture = [];
+            for (let _fx = _hsb.x1 + 1; _fx < _hsb.x2; _fx++) {
+                for (let _fz = _hsb.z1 + 1; _fz < _hsb.z2; _fz++) {
+                    for (let _fdy = 1; _fdy <= 3; _fdy++) {
+                        const _fb = bot.blockAt(new Vec3(_fx, (_hsb.y || 69) + _fdy, _fz));
+                        if (!_fb) continue;
+                        if (_fb.name.includes('chest')) _furniture.push('chest@' + _fx + ',' + ((_hsb.y||69)+_fdy) + ',' + _fz);
+                        if (_fb.name.includes('bed')) _furniture.push('bed@' + _fx + ',' + ((_hsb.y||69)+_fdy) + ',' + _fz);
+                        if (_fb.name === 'furnace') _furniture.push('furnace@' + _fx + ',' + ((_hsb.y||69)+_fdy) + ',' + _fz);
+                        if (_fb.name === 'crafting_table') _furniture.push('crafting_table@' + _fx + ',' + ((_hsb.y||69)+_fdy) + ',' + _fz);
+                    }
+                }
+            }
+            if (_furniture.length > 0) {
+                bot._houseStructure.furniture = _furniture;
+                console.log('[house] Auto-scanned furniture:', _furniture.join(', '));
+                // house.json にも保存
+                const _fs2 = await import('fs');
+                const _hp2 = './bots/' + bot.username + '/house.json';
+                const _hd2 = JSON.parse(_fs2.readFileSync(_hp2, 'utf8'));
+                _hd2.furniture = _furniture;
+                _fs2.writeFileSync(_hp2, JSON.stringify(_hd2, null, 2));
+            }
+        } catch(_fe) { console.log('[house] Furniture auto-scan failed:', _fe.message); }
+    }
+    if (bot._houseStructure && bot._houseStructure.bounds) {
+        const _b = bot._houseStructure.bounds;
+        const _d = bot._houseStructure.door;
+        const _roofY = _b.roofY || (_b.y + 4);
+        const _protect = (block) => {
+            const p = block.position;
+            if (!p) return 0;
+            if (p.y <= _b.y || p.y > _roofY) return 0;
+            if (_d && p.x === _d.x && p.z === _d.z && (p.y - _b.y) <= 2) return 0;
+            const onNorthSouth = (p.z === _b.z1 || p.z === _b.z2) && p.x >= _b.x1 && p.x <= _b.x2;
+            const onEastWest = (p.x === _b.x1 || p.x === _b.x2) && p.z >= _b.z1 && p.z <= _b.z2;
+            const onRoof = p.y === _roofY && p.x >= _b.x1 && p.x <= _b.x2 && p.z >= _b.z1 && p.z <= _b.z2;
+            return (onNorthSouth || onEastWest || onRoof) ? Infinity : 0;
+        };
+        nonDestructiveMovements.exclusionAreasBreak.push(_protect);
+        destructiveMovements.exclusionAreasBreak.push(_protect);
+        // monkey-patch: どの movements が使われても壁保護を自動適用
+        if (!bot._wallProtectPatched) {
+            bot._wallProtectFn = _protect;
+            const _origSetMovements = bot.pathfinder.setMovements.bind(bot.pathfinder);
+            bot.pathfinder.setMovements = function(moves) {
+                if (moves && moves.exclusionAreasBreak && bot._wallProtectFn) {
+                    if (!moves.exclusionAreasBreak.includes(bot._wallProtectFn)) {
+                        moves.exclusionAreasBreak.push(bot._wallProtectFn);
+                    }
+                }
+                // [water-surface-walkable] 水面を陸地と同じコストにする
+                if (moves) moves.liquidCost = 0;
+                return _origSetMovements(moves);
+            };
+            bot._wallProtectPatched = true;
+        }
+        // bot.dig() ラッパー: 全コードパスで家の壁/屋根/床の破壊を禁止
+        if (!bot._digWrapped) {
+            const _origDig = bot.dig.bind(bot);
+            bot.dig = async function(_blk, ..._dArgs) {
+                if (bot._allowHouseDig) return _origDig(_blk, ..._dArgs);
+                const _hs = bot._houseStructure;
+                if (_hs && _hs.bounds) {
+                    const _hb = _hs.bounds, _p = _blk.position;
+                    if (_p) {
+                        const _ry = _hb.roofY || (_hb.y + 4);
+                        const _fy = _hb.y || 69;
+                        if (_p.y >= _fy && _p.y <= _ry && _p.x >= _hb.x1 && _p.x <= _hb.x2 && _p.z >= _hb.z1 && _p.z <= _hb.z2) {
+                            const _isWall = _p.x === _hb.x1 || _p.x === _hb.x2 || _p.z === _hb.z1 || _p.z === _hb.z2;
+                            const _isRoofOrFloor = _p.y === _ry || _p.y === _fy;
+                            // ドア位置も壁として保護（pathfinder の canOpenDoors で開く）
+                            if (_isWall || _isRoofOrFloor) return;
+                        }
+                    }
+                }
+                return _origDig(_blk, ..._dArgs);
+            };
+            bot._digWrapped = true;
+        }
+        // [#18/#23 fix] bot.pathfinder.goto ラッパー: 全コードパスで interrupt_code に応答
+        if (!bot._gotoWrapped) {
+            const _origGoto = bot.pathfinder.goto.bind(bot.pathfinder);
+            bot.pathfinder.goto = function(_goal, _dynamic) {
+                const _intCheck = setInterval(() => {
+                    if (bot.interrupt_code) {
+                        clearInterval(_intCheck);
+                        try { bot.pathfinder.stop(); } catch(_) {}
+                    }
+                }, 500);
+                return _origGoto(_goal, _dynamic).finally(() => {
+                    clearInterval(_intCheck);
+                });
+            };
+            bot._gotoWrapped = true;
+        }
+        // [no-place-in-house] bot.placeBlock ラッパー: 家内部+ドア前の建材配置を完全禁止
+        // pathfinder の allow1by1towers / canPlaceOn が使う bot.placeBlock を直接ラップ
+        // skills.placeBlock() も内部で bot.placeBlock() を呼ぶため、全経路をカバー
+        if (!bot._placeBlockWrapped) {
+            const _origPlaceBlock = bot.placeBlock.bind(bot);
+            const _buildSet = new Set(['cobblestone','stone','dirt','oak_planks','oak_log','birch_planks','birch_log',
+                'spruce_planks','spruce_log','jungle_planks','jungle_log','acacia_planks','acacia_log',
+                'dark_oak_planks','dark_oak_log','oak_stairs','cobblestone_stairs','stone_bricks',
+                'bricks','sandstone','sand','gravel','glass','oak_slab','cobblestone_slab',
+                'cobbled_deepslate','deepslate_bricks','mossy_cobblestone','andesite','diorite','granite']);
+            bot.placeBlock = async function(_refBlock, _faceVec, ..._pArgs) {
+                const _hs = bot._houseStructure;
+                if (_hs && _hs.bounds && _refBlock && _faceVec) {
+                    const _hb = _hs.bounds;
+                    const _ry = _hb.roofY || (_hb.y + 4);
+                    const _pp = _refBlock.position.offset(_faceVec.x, _faceVec.y, _faceVec.z);
+                    const _px = Math.floor(_pp.x), _py = Math.floor(_pp.y), _pz = Math.floor(_pp.z);
+                    // 家内部チェック
+                    const _inside = _px >= _hb.x1 && _px <= _hb.x2 && _pz >= _hb.z1 && _pz <= _hb.z2
+                        && _py >= _hb.y && _py <= _ry;
+                    // ドア前チェック（ドアの外側1ブロック）
+                    const _d = _hs.door;
+                    const _nearDoor = _d && Math.abs(_px - _d.x) <= 1 && Math.abs(_pz - _d.z) <= 1
+                        && _py >= _hb.y && _py <= _ry;
+                    if ((_inside || _nearDoor) && !bot._repairMode) {
+                        const _held = bot.heldItem;
+                        if (_held && _buildSet.has(_held.name)) {
+                            return; // 建材ブロック配置を拒否
+                        }
+                    }
+                }
+                return _origPlaceBlock(_refBlock, _faceVec, ..._pArgs);
+            };
+            bot._placeBlockWrapped = true;
+        }
+    }
 
     let final_movements = destructiveMovements;
 
@@ -1178,7 +1579,392 @@ function startDoorInterval(bot) {
     return doorCheckInterval;
 }
 
+// [mindaxis-patch:location-discovery] 移動中に周囲の特徴的な場所を自動発見・記録
+async function _discoverLocations(bot) {
+    try {
+        const _fs = await import('fs');
+        const _memPath = './bots/' + bot.username + '/location_memory.json';
+        let _lm = {};
+        try { _lm = JSON.parse(_fs.readFileSync(_memPath, 'utf8')); } catch(_) {}
+        if (!_lm.places) _lm.places = {};
+        const _pos = bot.entity.position;
+        let _changed = false;
+        // 村の検出（村人がいれば村）
+        const _villagers = Object.values(bot.entities).filter(e => e.name === 'villager' && e.position.distanceTo(_pos) < 48);
+        if (_villagers.length >= 2) {
+            if (!_lm.places.village) _lm.places.village = [];
+            const _vx = Math.round(_villagers.reduce((s,v)=>s+v.position.x,0)/_villagers.length);
+            const _vz = Math.round(_villagers.reduce((s,v)=>s+v.position.z,0)/_villagers.length);
+            if (!_lm.places.village.some(v => Math.abs(v.x-_vx)<60 && Math.abs(v.z-_vz)<60)) {
+                _lm.places.village.push({x:_vx, z:_vz, y:Math.round(_pos.y), villagers:_villagers.length, discoveredAt:Date.now()});
+                log(bot, `Discovered village at (${_vx}, ${_vz}) with ${_villagers.length} villagers!`);
+                _changed = true;
+            }
+        }
+        // 危険地帯の検出（溶岩源が近くに3つ以上）
+        const _lavaBlocks = world.getNearestBlocks(bot, 'lava', 16, 5);
+        if (_lavaBlocks.length >= 3) {
+            if (!_lm.places.danger) _lm.places.danger = [];
+            const _lx = Math.round(_pos.x), _lz = Math.round(_pos.z);
+            if (!_lm.places.danger.some(d => Math.abs(d.x-_lx)<30 && Math.abs(d.z-_lz)<30)) {
+                _lm.places.danger.push({x:_lx, z:_lz, y:Math.round(_pos.y), type:'lava', discoveredAt:Date.now()});
+                log(bot, `Danger zone: lava at (${_lx}, ${_lz}). Will avoid this area.`);
+                _changed = true;
+            }
+        }
+        if (_changed) _fs.writeFileSync(_memPath, JSON.stringify(_lm, null, 2), 'utf8');
+    } catch(_) {}
+}
+
+
+
+// [mindaxis-patch:manual-nav] 手動ナビゲーション：pathfinder が詰まった時のフォールバック
+// 地形を読んで jump + forward で目標方向に移動する
+// 優先順位: 階段地形を利用 → ピラージャンプで強引に移動 → 救出モード
+async function manualWalkToward(bot, targetX, targetZ, maxSeconds) {
+    const startPos = bot.entity.position.clone();
+    const startTime = Date.now();
+    const timeoutMs = maxSeconds * 1000;
+
+    function isPassable(name) {
+        return !name || name === 'air' || name === 'cave_air' || name === 'water'
+            || name === 'flowing_water' || name === 'short_grass' || name === 'tall_grass'
+            || name === 'snow_layer' || name.includes('flower') || name === 'poppy' || name === 'dandelion'
+            || name === 'seagrass' || name === 'tall_seagrass' || name === 'kelp' || name === 'kelp_plant';
+    }
+
+    function isSolid(name) {
+        return name && !isPassable(name) && name !== 'lava' && name !== 'flowing_lava';
+    }
+
+    // 8方向×最大5ブロック先まで地形をトレースして歩ける経路を見つける
+    function findBestDirection(cp, cy) {
+        const dx = targetX - cp.x;
+        const dz = targetZ - cp.z;
+        const targetAngle = Math.atan2(dz, dx);
+        const SCAN_DIST = 5;
+
+        const dirs = [];
+        for (let i = 0; i < 8; i++) {
+            const angle = (i * Math.PI / 4);
+            const ax = Math.cos(angle);
+            const az = Math.sin(angle);
+
+            let curY = cy;
+            let walkableSteps = 0;
+            let totalClimb = 0;
+            let firstStepUp = false;
+
+            for (let dist = 1; dist <= SCAN_DIST; dist++) {
+                const nx = Math.floor(cp.x + ax * dist);
+                const nz = Math.floor(cp.z + az * dist);
+
+                const body = bot.blockAt(new Vec3(nx, curY + 1, nz));
+                const head = bot.blockAt(new Vec3(nx, curY + 2, nz));
+
+                if (isPassable(body?.name) && isPassable(head?.name)) {
+                    let groundY = curY;
+                    for (let dy = 0; dy >= -3; dy--) {
+                        const below = bot.blockAt(new Vec3(nx, curY + dy, nz));
+                        if (below && isSolid(below.name)) { groundY = curY + dy; break; }
+                    }
+                    curY = groundY + 1;
+                    walkableSteps++;
+                    continue;
+                }
+
+                const stepBody = bot.blockAt(new Vec3(nx, curY + 2, nz));
+                const stepHead = bot.blockAt(new Vec3(nx, curY + 3, nz));
+                const stepGround = bot.blockAt(new Vec3(nx, curY + 1, nz));
+
+                if (isSolid(stepGround?.name) && isPassable(stepBody?.name) && isPassable(stepHead?.name)) {
+                    curY = curY + 1;
+                    walkableSteps++;
+                    totalClimb++;
+                    if (dist === 1) firstStepUp = true;
+                    continue;
+                }
+                break;
+            }
+
+            if (walkableSteps >= 1) {
+                let angleDiff = Math.abs(angle - targetAngle);
+                if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                const score = walkableSteps * 2 + totalClimb * 3 - angleDiff * 2;
+                dirs.push({ angle, ax, az, angleDiff, stepUp: firstStepUp, walkableSteps, totalClimb, score });
+            }
+        }
+        dirs.sort((a, b) => b.score - a.score);
+        return dirs.length > 0 ? dirs[0] : null;
+    }
+
+    let lastY = Math.floor(startPos.y);
+    let stuckSteps = 0;
+
+    for (let step = 0; step < maxSeconds * 4; step++) {
+        if (Date.now() - startTime > timeoutMs) break;
+        if (bot.interrupt_code) break;
+
+        const cp = bot.entity.position;
+        const dx = targetX - cp.x;
+        const dz = targetZ - cp.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < 3) { log(bot, '[manual-nav] Close enough to waypoint.'); break; }
+
+        const cx = Math.floor(cp.x), cy = Math.floor(cp.y), cz = Math.floor(cp.z);
+
+        const feetBlock = bot.blockAt(new Vec3(cx, cy, cz));
+        const _isWaterLike = (n) => n === 'water' || n === 'flowing_water' || n === 'bubble_column';
+        const inWater = feetBlock && _isWaterLike(feetBlock.name);
+
+        if (inWater) {
+            // [mindaxis-patch:shore-detect] 水中で岸（水→陸の遷移）を検出
+            // クールダウン: 同じ場所で30秒以内は再発動しない
+            const _sdNow = Date.now();
+            if (bot._lastShoreDetectTime && _sdNow - bot._lastShoreDetectTime < 30000) {
+                // クールダウン中 → shore-detect スキップ、pathfinder に任せる
+            } else {
+            bot._lastShoreDetectTime = _sdNow;
+            // 失敗した岸の方向を記憶してブラックリスト
+            if (!bot._shoreBlacklist) bot._shoreBlacklist = {};
+            // 30秒経過したブラックリストを解除
+            const now = Date.now();
+            for (const k of Object.keys(bot._shoreBlacklist)) {
+                if (now - bot._shoreBlacklist[k] > 120000) delete bot._shoreBlacklist[k];
+            }
+
+            // 経路上の bubble_column チェック関数
+            function hasBubbleInPath(fromX, fromZ, toX, toZ, checkY) {
+                const steps = Math.max(Math.abs(toX - fromX), Math.abs(toZ - fromZ));
+                if (steps === 0) return false;
+                for (let i = 1; i < steps; i++) {
+                    const px = Math.floor(fromX + (toX - fromX) * i / steps);
+                    const pz = Math.floor(fromZ + (toZ - fromZ) * i / steps);
+                    for (let py = checkY - 1; py <= checkY + 1; py++) {
+                        const b = bot.blockAt(new Vec3(px, py, pz));
+                        if (b && (b.name === 'bubble_column' || b.name === 'magma_block')) return true;
+                    }
+                }
+                return false;
+            }
+
+            let shoreX = null, shoreZ = null, shoreY = null;
+            let shoreDist = 999;
+            // 全候補を集めて最適を選択（bubble_column 回避）
+            let shoreCandidates = [];
+            for (let sr = 1; sr <= 12; sr++) {
+                for (let sdx = -sr; sdx <= sr; sdx++) {
+                    for (let sdz = -sr; sdz <= sr; sdz++) {
+                        if (Math.abs(sdx) !== sr && Math.abs(sdz) !== sr) continue;
+                        const sx = cx + sdx, sz = cz + sdz;
+                        for (let sy = cy - 2; sy <= cy + 3; sy++) {
+                            const ground = bot.blockAt(new Vec3(sx, sy, sz));
+                            if (!ground || !isSolid(ground.name)) continue;
+                            const above1 = bot.blockAt(new Vec3(sx, sy + 1, sz));
+                            const above2 = bot.blockAt(new Vec3(sx, sy + 2, sz));
+                            if (!isPassable(above1?.name) || !isPassable(above2?.name)) continue;
+                            // 水中の地面は「岸」ではない — 足元が水なら無視
+                            if (above1?.name === 'water' || above1?.name === 'flowing_water') continue;
+                            if (above1?.name === 'bubble_column') continue;
+                            // [mindaxis-patch:shore-seagrass] seagrass/tall_seagrass は水中海底 → 岸ではない
+                            if (above1?.name === 'seagrass' || above1?.name === 'tall_seagrass') continue;
+                            let adjacentWater = false;
+                            for (let adj of [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}]) {
+                                const nb = bot.blockAt(new Vec3(sx + adj.x, sy, sz + adj.z));
+                                const nb2 = bot.blockAt(new Vec3(sx + adj.x, sy + 1, sz + adj.z));
+                                if ((nb && (nb.name === 'water' || nb.name === 'flowing_water'))
+                                 || (nb2 && (nb2.name === 'water' || nb2.name === 'flowing_water'))) {
+                                    adjacentWater = true; break;
+                                }
+                            }
+                            if (!adjacentWater) continue;
+                            // [mindaxis-patch:shore-min-y] 地下洞窟（y<60）の壁を岸として誤認識しないようフィルタ
+                            if (sy < 60) continue;
+                            const d = Math.sqrt(sdx * sdx + sdz * sdz);
+                            const key = sx + ',' + sz;
+                            const blacklisted = !!bot._shoreBlacklist[key];
+                            const hasBubble = hasBubbleInPath(cx, cz, sx, sz, cy);
+                            // 優先順位: bubble無し+BL無し > bubble無し+BL有り > bubble有り
+                            const penalty = (hasBubble ? 100 : 0) + (blacklisted ? 50 : 0);
+                            shoreCandidates.push({ sx, sy, sz, d, penalty, key, groundName: ground.name });
+                        }
+                    }
+                }
+            }
+            // ペナルティ→距離でソート
+            shoreCandidates.sort((a, b) => (a.penalty + a.d) - (b.penalty + b.d));
+            if (shoreCandidates.length > 0) {
+                const best = shoreCandidates[0];
+                shoreX = best.sx + 0.5; shoreZ = best.sz + 0.5; shoreY = best.sy + 1;
+                shoreDist = best.d;
+                if (shoreCandidates.length <= 3 || best.penalty === 0) {
+                    console.log('[shore-detect] Found shore at', best.sx, best.sy, best.sz, best.groundName, 'dist=', Math.round(best.d), best.penalty > 0 ? '(penalty=' + best.penalty + ')' : '');
+                }
+            }
+
+            if (shoreX && shoreDist <= 8) {
+                // pathfinder を止めてから手動スプリント（pathfinder と引っ張り合い防止）
+                try { bot.pathfinder.stop(); } catch(_) {}
+                await bot.lookAt(new Vec3(shoreX, shoreY, shoreZ));
+                bot.setControlState('forward', true);
+                bot.setControlState('jump', true);
+                bot.setControlState('sprint', true);
+                let landedOnShore = false;
+                for (let sw = 0; sw < 60; sw++) {
+                    if (bot.interrupt_code) break;
+                    await new Promise(r => setTimeout(r, 100));
+                    const nowPos = bot.entity.position;
+                    const nowFx = Math.floor(nowPos.x), nowFy = Math.floor(nowPos.y), nowFz = Math.floor(nowPos.z);
+                    const nowBelow = bot.blockAt(new Vec3(nowFx, nowFy - 1, nowFz));
+                    const nowFeet = bot.blockAt(new Vec3(nowFx, nowFy, nowFz));
+                    const feetWater = nowFeet && _isWaterLike(nowFeet.name);
+                    if (!feetWater && nowBelow && isSolid(nowBelow.name) && nowBelow.name !== 'magma_block') {
+                        console.log('[shore-detect] Landed on', nowBelow.name, 'at', nowFx, nowFy, nowFz);
+                        landedOnShore = true; break;
+                    }
+                    // 毎tick lookAt を更新（方向ずれ防止）
+                    await bot.lookAt(new Vec3(shoreX, shoreY, shoreZ));
+                }
+                bot.setControlState('forward', false);
+                bot.setControlState('jump', false);
+                bot.setControlState('sprint', false);
+                if (landedOnShore) {
+                    // [mindaxis-patch:shore-detect-surface] 陸に上がったら即goToSurfaceで地上へ（水際に戻るループ防止）
+                    log(bot, '[shore-detect] Reached shore, calling goToSurface before pathfinder.');
+                    bot._shoreBlacklist = {}; // 成功したらブラックリストクリア
+                    await goToSurface(bot);
+                    break;
+                }
+                // 失敗: この岸をブラックリストに追加
+                const failKey = Math.floor(shoreX) + ',' + Math.floor(shoreZ);
+                bot._shoreBlacklist[failKey] = Date.now();
+                console.log('[shore-detect] Failed to reach shore, blacklisting', failKey);
+
+                // 全候補がブラックリスト済みなら、足元にブロックを置いて脱出
+                if (!bot._shoreEscapeAttempts) bot._shoreEscapeAttempts = 0;
+                bot._shoreEscapeAttempts++;
+                if (bot._shoreEscapeAttempts >= 4) {
+                    console.log('[shore-detect] All shores failed, attempting block placement escape');
+                    const escapeBlocks = ['cobblestone', 'dirt', 'stone', 'sand', 'netherrack', 'oak_planks', 'cobbled_deepslate'];
+                    let placed = false;
+                    for (const bName of escapeBlocks) {
+                        const item = bot.inventory.items().find(i => i.name === bName);
+                        if (item) {
+                            try {
+                                await bot.equip(item, 'hand');
+                                bot.setControlState('jump', true);
+                                await new Promise(r => setTimeout(r, 400));
+                                const belowPos = bot.entity.position.offset(0, -1, 0).floored();
+                                const refBlock = bot.blockAt(belowPos.offset(0, -1, 0));
+                                if (refBlock) {
+                                    await bot.placeBlock(refBlock, new Vec3(0, 1, 0));
+                                    console.log('[shore-detect] Placed', bName, 'to escape water');
+                                    placed = true;
+                                }
+                                bot.setControlState('jump', false);
+                            } catch (e) { bot.setControlState('jump', false); }
+                            if (placed) break;
+                        }
+                    }
+                    bot._shoreEscapeAttempts = 0;
+                    if (placed) continue;
+                }
+
+                await new Promise(r => setTimeout(r, 100));
+                continue;
+            } // end else (cooldown)
+            } // end if (inWater)
+            await bot.lookAt(new Vec3(targetX, cp.y + 1.5, targetZ));
+            bot.setControlState('forward', true);
+            bot.setControlState('jump', true);
+            bot.setControlState('sprint', true);
+            await new Promise(r => setTimeout(r, 300));
+            if (bot.interrupt_code) { bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false); break; }
+            await new Promise(r => setTimeout(r, 300));
+            bot.setControlState('forward', false);
+            bot.setControlState('jump', false);
+            bot.setControlState('sprint', false);
+            await new Promise(r => setTimeout(r, 100));
+            continue;
+        }
+
+        const best = findBestDirection(cp, cy);
+        if (best) {
+            const lookX = cp.x + best.ax * 5;
+            const lookZ = cp.z + best.az * 5;
+            await bot.lookAt(new Vec3(lookX, cp.y + (best.stepUp ? 1.5 : 1), lookZ));
+            bot.setControlState('forward', true);
+            if (best.stepUp) {
+                bot.setControlState('jump', true);
+                bot.setControlState('sprint', true);
+                await new Promise(r => setTimeout(r, 350));
+                bot.setControlState('jump', false);
+                bot.setControlState('sprint', false);
+            } else {
+                bot.setControlState('jump', true);
+                await new Promise(r => setTimeout(r, 250));
+                bot.setControlState('jump', false);
+            }
+            bot.setControlState('forward', false);
+            await new Promise(r => setTimeout(r, 50));
+        } else {
+            log(bot, '[manual-nav] No walkable path, pillar jumping...');
+            const pillarItem = bot.inventory.items().find(i => i.name === 'dirt')
+                || bot.inventory.items().find(i => i.name === 'cobblestone')
+                || bot.inventory.items().find(i => i.name.includes('planks'))
+                || bot.inventory.items().find(i => i.name.includes('stone') || i.name.includes('deepslate'));
+            if (pillarItem) {
+                await bot.equip(pillarItem, 'hand');
+                let standBlock = null;
+                for (let dy = 0; dy <= 3; dy++) {
+                    let b = bot.blockAt(new Vec3(cx, cy - dy, cz));
+                    if (b && isSolid(b.name)) { standBlock = b; break; }
+                }
+                if (standBlock) {
+                    await bot.lookAt(new Vec3(cp.x, cp.y - 2, cp.z));
+                    bot.setControlState('jump', true);
+                    await new Promise(r => setTimeout(r, 300));
+                    try {
+                        await bot.placeBlock(standBlock, new Vec3(0, 1, 0));
+                    } catch(e) {
+                        for (let dir of [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}]) {
+                            let sideB = bot.blockAt(new Vec3(cx + dir.x, cy, cz + dir.z));
+                            if (sideB && isSolid(sideB.name)) {
+                                try { await bot.placeBlock(sideB, new Vec3(-dir.x, 0, -dir.z)); break; } catch(e2) {}
+                            }
+                        }
+                    }
+                    bot.setControlState('jump', false);
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            } else {
+                await bot.lookAt(new Vec3(targetX, cp.y + 1, targetZ));
+                bot.setControlState('forward', true);
+                bot.setControlState('jump', true);
+                await new Promise(r => setTimeout(r, 500));
+                bot.setControlState('forward', false);
+                bot.setControlState('jump', false);
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+
+        const newY = Math.floor(bot.entity.position.y);
+        if (newY === lastY) { stuckSteps++; } else { stuckSteps = 0; lastY = newY; }
+        if (stuckSteps > 12) { log(bot, '[manual-nav] Stuck for too long, giving up.'); break; }
+    }
+
+    bot.setControlState('forward', false);
+    bot.setControlState('jump', false);
+    bot.setControlState('sprint', false);
+
+    const moved = bot.entity.position.distanceTo(startPos);
+    log(bot, '[manual-nav] Moved ' + Math.round(moved) + ' blocks manually.');
+    return moved > 2;
+}
+
 export async function goToPosition(bot, x, y, z, min_distance=2) {
+    // [mindaxis-patch:location-discover-call] 移動開始時に周囲の場所を自動発見
+    await _discoverLocations(bot);
     /**
      * Navigate to the given position.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
@@ -1201,6 +1987,271 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         return true;
     }
     
+    // [mindaxis-patch:goto-comprehensive] door-exit + precheck-surface + progress-timeout + nav upgrade
+
+    console.log('[goto-trace] goToPosition START target=(' + x + ',' + y + ',' + z + ') pos=(' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.y) + ',' + Math.round(bot.entity.position.z) + ')');
+    // house.json から _houseStructure を早期ロード（door-entry/exit で必要）
+    if (!bot._houseStructure) {
+        try {
+            const _fs2 = await import('fs');
+            const _hp = './bots/' + bot.username + '/house.json';
+            if (_fs2.existsSync(_hp)) {
+                const _hd2 = JSON.parse(_fs2.readFileSync(_hp, 'utf8'));
+                if (_hd2 && _hd2.bounds) bot._houseStructure = _hd2;
+            }
+        } catch(_e2) {}
+    }
+    console.log('[goto-trace] house loaded=' + !!bot._houseStructure);
+
+    // door-exit-route: _exitHouseIfNeeded で統一処理 /* [mindaxis-patch:goto-door-exit-unified] */
+    {
+        const _hs = bot._houseStructure;
+        if (_hs && _hs.bounds && _hs.door) {
+            const _pos = bot.entity.position;
+            const _hb = _hs.bounds;
+            const _inside = _pos.x > _hb.x1 && _pos.x < _hb.x2 && _pos.z > _hb.z1 && _pos.z < _hb.z2
+                         && _pos.y >= _hb.y && _pos.y <= (_hb.roofY || _hb.y + 4);
+            const _targetInside = x > _hb.x1 && x < _hb.x2 && z > _hb.z1 && z < _hb.z2;
+            if (_inside && !_targetInside) {
+                bot._doorExitInProgress = true;
+                try {
+                    log(bot, 'Exiting house through door (manual)...');
+                    const _doorX = _hs.door.x, _doorZ = _hs.door.z;
+                    const _doorY = _hb.y + 1;
+                    const _facing = _hs.door.facing;
+                    // ドアブロックを取得して開ける
+                    const Vec3 = (await import('vec3')).default || (await import('vec3'));
+                    const _Vec3 = typeof Vec3 === 'function' ? Vec3 : Vec3.Vec3 || Vec3;
+                    const _doorBlock = bot.blockAt(new _Vec3(_doorX, _doorY, _doorZ));
+                    if (_doorBlock && _doorBlock.name.includes('door')) {
+                        const _props = _doorBlock.getProperties ? _doorBlock.getProperties() : {};
+                        if (_props.open === false || _props.open === 'false') {
+                            await bot.activateBlock(_doorBlock);
+                            await new Promise(r => setTimeout(r, 300));
+                        }
+                    }
+                    // ドアの外側の座標を計算（2ブロック先）
+                    let _exitX = _doorX + 0.5, _exitZ = _doorZ + 0.5;
+                    if (_facing === 'west') _exitX -= 2;
+                    else if (_facing === 'east') _exitX += 2;
+                    else if (_facing === 'north') _exitZ -= 2;
+                    else if (_facing === 'south') _exitZ += 2;
+                    // ドア方向を向いて歩く
+                    await bot.lookAt(new _Vec3(_exitX, _doorY, _exitZ));
+                    bot.setControlState('forward', true);
+                    // 最大3秒歩く（家の外に出たら停止）
+                    for (let _wi = 0; _wi < 15; _wi++) {
+                        await new Promise(r => setTimeout(r, 200));
+                        if (bot.interrupt_code) break;
+                        const _cp = bot.entity.position;
+                        const _nowInside = _cp.x > _hb.x1 && _cp.x < _hb.x2 && _cp.z > _hb.z1 && _cp.z < _hb.z2;
+                        if (!_nowInside) break;
+                    }
+                    bot.setControlState('forward', false);
+                    log(bot, 'Exited house through door.');
+                } catch (e) {
+                    log(bot, 'Door exit failed: ' + e.message);
+                    bot.setControlState('forward', false);
+                }
+                bot._doorExitInProgress = false;
+            }
+        }
+    }
+
+    console.log('[goto-trace] door-exit done');
+    // door-entry-route: 外から家の中へドアを手動で開けて入る（pathfinder 不使用）
+    {
+        const _hs2 = bot._houseStructure;
+        if (_hs2 && _hs2.bounds && _hs2.door && !bot._doorEntryInProgress) {
+            const _pos2 = bot.entity.position;
+            const _hb2 = _hs2.bounds;
+            const _inside2 = _pos2.x > _hb2.x1 && _pos2.x < _hb2.x2 && _pos2.z > _hb2.z1 && _pos2.z < _hb2.z2
+                           && _pos2.y >= _hb2.y && _pos2.y <= (_hb2.roofY || _hb2.y + 4);
+            const _targetInside2 = x > _hb2.x1 && x < _hb2.x2 && z > _hb2.z1 && z < _hb2.z2
+                                 && y >= _hb2.y && y <= (_hb2.roofY || _hb2.y + 4);
+            // ボットが外にいて目標が家の中の場合 → ドア経由（近距離のみ）
+            const _distToHouse = Math.sqrt((_pos2.x - (_hb2.x1 + _hb2.x2) / 2) ** 2 + (_pos2.z - (_hb2.z1 + _hb2.z2) / 2) ** 2);
+            if (!_inside2 && _targetInside2 && _distToHouse >= 50) {
+                console.log('[goto-trace] door-entry SKIP: too far from house (' + Math.round(_distToHouse) + ' blocks)');
+            }
+            if (!_inside2 && _targetInside2 && _distToHouse < 50) {
+                    bot._doorEntryInProgress = true;
+                    try {
+                        log(bot, 'Target is inside house. Navigating to door first...');
+                        const _doorX2 = _hs2.door.x, _doorZ2 = _hs2.door.z;
+                        const _doorY2 = _hb2.y + 1;
+                        const _facing2 = _hs2.door.facing;
+                        const Vec3e = (await import('vec3')).default || (await import('vec3'));
+                        const _Vec3e = typeof Vec3e === 'function' ? Vec3e : Vec3e.Vec3 || Vec3e;
+                        // ドアの外側座標を計算（地上レベル）
+                        let _outsideX = _doorX2, _outsideZ = _doorZ2;
+                        if (_facing2 === 'west') _outsideX -= 1;
+                        else if (_facing2 === 'east') _outsideX += 1;
+                        else if (_facing2 === 'north') _outsideZ -= 1;
+                        else if (_facing2 === 'south') _outsideZ += 1;
+                        // ドアの外側に pathfinder で移動（家の外なので地下に行かない）
+                        await goToPosition(bot, _outsideX, _doorY2, _outsideZ, 1);
+                        if (bot.interrupt_code) { bot._doorEntryInProgress = false; return false; }
+                        log(bot, 'Reached door exterior. Walking through...');
+                        // ドアを開ける
+                        const _doorBlock2 = bot.blockAt(new _Vec3e(_doorX2, _doorY2, _doorZ2));
+                        if (_doorBlock2 && _doorBlock2.name.includes('door')) {
+                            const _props2 = _doorBlock2.getProperties ? _doorBlock2.getProperties() : {};
+                            if (_props2.open === false || _props2.open === 'false') {
+                                await bot.activateBlock(_doorBlock2);
+                                await new Promise(r => setTimeout(r, 300));
+                            }
+                        }
+                        // 家の中へ歩く
+                        let _insideX = _doorX2 + 0.5, _insideZ = _doorZ2 + 0.5;
+                        if (_facing2 === 'west') _insideX += 2;
+                        else if (_facing2 === 'east') _insideX -= 2;
+                        else if (_facing2 === 'north') _insideZ += 2;
+                        else if (_facing2 === 'south') _insideZ -= 2;
+                        await bot.lookAt(new _Vec3e(_insideX, _doorY2, _insideZ));
+                        bot.setControlState('forward', true);
+                        for (let _ei = 0; _ei < 15; _ei++) {
+                            await new Promise(r => setTimeout(r, 200));
+                            if (bot.interrupt_code) break;
+                            const _cp2 = bot.entity.position;
+                            const _nowIn = _cp2.x > _hb2.x1 && _cp2.x < _hb2.x2 && _cp2.z > _hb2.z1 && _cp2.z < _hb2.z2;
+                            if (_nowIn) break;
+                        }
+                        bot.setControlState('forward', false);
+                        log(bot, 'Entered house through door.');
+                    } catch (e) {
+                        log(bot, 'Door entry failed: ' + e.message);
+                        bot.setControlState('forward', false);
+                    }
+                    bot._doorEntryInProgress = false;
+            }
+        }
+    }
+
+    console.log('[goto-trace] door-entry done');
+    // precheck-surface: 地下にいて目標が上方なら先に地上へ出る
+    {
+        const curPos = bot.entity.position;
+        const yDiff = y - curPos.y;
+        let headBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 2, Math.floor(curPos.z)));
+        // 家の中・近くにいる場合は「地下」判定を無効化（ドアを使うべき）
+        let _nearHouse = false;
+        if (bot._houseStructure && bot._houseStructure.bounds) {
+            const _nhb = bot._houseStructure.bounds;
+            const _cx = Math.floor(curPos.x), _cz = Math.floor(curPos.z);
+            _nearHouse = _cx >= _nhb.x1 - 2 && _cx <= _nhb.x2 + 2 && _cz >= _nhb.z1 - 2 && _cz <= _nhb.z2 + 2
+                       && curPos.y >= _nhb.y - 2;
+        }
+        // [mindaxis-patch:underwater-is-underground] 水中は pathfinder に任せる（goToSurface を先に呼ばない）
+        const isUnderground = !_nearHouse && headBlock && headBlock.name !== 'air' && headBlock.name !== 'cave_air' && headBlock.name !== 'water' && headBlock.name !== 'flowing_water' && headBlock.name !== 'lava';
+        // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
+        let _underHouse = false;
+        if (bot._houseStructure && bot._houseStructure.bounds) {
+            const _uhb = bot._houseStructure.bounds;
+            const _cx = Math.floor(curPos.x), _cz = Math.floor(curPos.z);
+            _underHouse = _cx >= _uhb.x1 && _cx <= _uhb.x2 && _cz >= _uhb.z1 && _cz <= _uhb.z2
+                       && curPos.y >= (_uhb.y - 5) && curPos.y < _uhb.y;
+        }
+        if (isUnderground && yDiff > 2 && !bot._pillarPreUsed) {
+            bot._pillarPreUsed = true;
+            try {
+                if (_underHouse) {
+                    // 家の直下: まず横に移動して家の外に出る
+                    log(bot, 'Under house detected. Moving out horizontally before surface...');
+                    const _uhb = bot._houseStructure.bounds;
+                    // 家の端から最も近い方向に5ブロック外へ
+                    const _cx = curPos.x, _cz = curPos.z;
+                    const _dists = [
+                        { dir: 'west',  x: _uhb.x1 - 3, z: _cz, d: _cx - _uhb.x1 },
+                        { dir: 'east',  x: _uhb.x2 + 3, z: _cz, d: _uhb.x2 - _cx },
+                        { dir: 'north', x: _cx, z: _uhb.z1 - 3, d: _cz - _uhb.z1 },
+                        { dir: 'south', x: _cx, z: _uhb.z2 + 3, d: _uhb.z2 - _cz },
+                    ];
+                    _dists.sort((a, b) => a.d - b.d);
+                    const _exit = _dists[0];
+                    log(bot, `Moving ${_exit.dir} to exit house area...`);
+                    try {
+                        await goToPosition(bot, _exit.x, curPos.y, _exit.z, 2);
+                    } catch(_me) {
+                        log(bot, `Horizontal escape failed: ${_me.message}`);
+                    }
+                    if (bot.interrupt_code) { bot._pillarPreUsed = false; return false; }
+                }
+                log(bot, 'Underground detected. Going to surface before navigation...');
+                const reached = await goToSurface(bot);
+                if (reached) {
+                    log(bot, 'Reached surface, now navigating to target...');
+                }
+            } catch (e) {
+                log(bot, `Pre-navigation surface failed: ${e.message}`);
+            }
+            bot._pillarPreUsed = false;
+        }
+    }
+
+    const target = new Vec3(x, y, z);
+    const WAYPOINT_DIST = 30;
+    const MAX_STUCK = 4;
+    const SEGMENT_TIMEOUT_MS = 25000; // [mindaxis-patch:long-distance-nav]
+    const DIRECT_TIMEOUT_MS = 30000;
+    console.log('[goto-trace] precheck done, starting nav');
+
+    // progress-timeout: 進捗ベースのタイムアウト（移動していなければスタック判定）
+    async function goWithTimeout(goal, timeoutMs) {
+        // [#18 fix] 既に中断要求が出ている場合は即 throw
+        if (bot.interrupt_code) throw new Error('interrupted');
+
+        let hardTimer, progressTimer;
+        let lastPos = bot.entity.position.clone();
+        let stuckTicks = 0;
+        const STUCK_CHECK_MS = 3000; // [mindaxis-patch:stuck-tolerance]
+        const STUCK_MAX = 4;
+
+        const stuckPromise = new Promise((_, reject) => {
+            hardTimer = setTimeout(() => {
+                try { bot.pathfinder.stop(); } catch(_) {}
+                try { bot.pathfinder.setGoal(null); } catch(_) {}
+                reject(new Error('navigation_timeout'));
+            }, timeoutMs);
+
+            progressTimer = setInterval(() => {
+                // [#18 fix] interrupt_code チェック — モード割り込みに即応答
+                if (bot.interrupt_code) {
+                    try { bot.pathfinder.stop(); } catch(_) {}
+                    try { bot.pathfinder.setGoal(null); } catch(_) {}
+                    clearInterval(progressTimer);
+                    reject(new Error('interrupted'));
+                    return;
+                }
+                const curPos = bot.entity.position;
+                const movedXZ = Math.sqrt((curPos.x - lastPos.x) ** 2 + (curPos.z - lastPos.z) ** 2);
+                if (movedXZ < 0.5) {
+                    stuckTicks++;
+                    if (stuckTicks >= STUCK_MAX) {
+                        try { bot.pathfinder.stop(); } catch(_) {}
+                        try { bot.pathfinder.setGoal(null); } catch(_) {}
+                        clearInterval(progressTimer);
+                        reject(new Error('navigation_stuck'));
+                    }
+                } else {
+                    stuckTicks = 0;
+                }
+                lastPos = curPos.clone();
+            }, STUCK_CHECK_MS);
+        });
+
+        try {
+            const result = await Promise.race([goToGoal(bot, goal), stuckPromise]);
+            clearTimeout(hardTimer);
+            clearInterval(progressTimer);
+            return result;
+        } catch (err) {
+            clearTimeout(hardTimer);
+            clearInterval(progressTimer);
+            throw err;
+        }
+    }
+
     const checkDigProgress = () => {
         if (bot.targetDigBlock) {
             const targetBlock = bot.targetDigBlock;
@@ -1216,15 +2267,188 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     const progressInterval = setInterval(checkDigProgress, 1000);
     
     try {
-        await goToGoal(bot, new pf.goals.GoalNear(x, y, z, min_distance));
+        // [mindaxis-patch:goto-nav-upgrade] water-pre-nav + waypoint nav + manual/pillar fallbacks
+        // [#18 fix] interrupt helper — 全 await 後にチェック
+        const _ic = () => bot.interrupt_code;
+        // [#18 fix] 冒頭で即チェック — 既に中断済みなら一切の処理をスキップ
+        if (_ic()) return false;
+        // [mindaxis-patch:goto-total-timeout] 全体タイムアウト（90秒）— コマンドが返らないと self-prompter が回らない
+        const _gotoStartTime = Date.now();
+        const _GOTO_TOTAL_TIMEOUT = 90000;
+        // [mindaxis-patch:goto-timeout-outer-scope] var でブロック外からもアクセス可能に
+        var _checkTotalTimeout = () => {
+            if (Date.now() - _gotoStartTime > _GOTO_TOTAL_TIMEOUT) {
+                log(bot, 'goToPosition total timeout (90s). Aborting navigation.');
+                try { bot.pathfinder.stop(); } catch(_e) {}
+                return true;
+            }
+            return false;
+        };
+        // [mindaxis-patch:no-water-prewalk] 水中でも pathfinder に直接任せる
+        // [water-preswim] 水中なら手動で岸まで泳いでから pathfinder
+        if (_ic()) { clearInterval(progressInterval); return false; }
+        {
+            const _wpFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+            if (_wpFeet && (_wpFeet.name === 'water' || _wpFeet.name === 'flowing_water')) {
+                console.log('[goto-trace] in water, swimming to shore first');
+                for (let _swimI = 0; _swimI < 40; _swimI++) {
+                    if (_ic() || _checkTotalTimeout()) break;
+                    const _scp = bot.entity.position;
+                    const _sfb = bot.blockAt(new Vec3(Math.floor(_scp.x), Math.floor(_scp.y), Math.floor(_scp.z)));
+                    if (!_sfb || (_sfb.name !== 'water' && _sfb.name !== 'flowing_water')) {
+                        console.log('[goto-trace] reached land after ' + _swimI + ' swim ticks');
+                        break;
+                    }
+                    await bot.lookAt(new Vec3(x, _scp.y + 0.5, z));
+                    bot.setControlState('forward', true);
+                    bot.setControlState('jump', true);
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                bot.setControlState('forward', false);
+                bot.setControlState('jump', false);
+            }
+        }
+        if (_ic()) { clearInterval(progressInterval); return false; }
+        let totalDist = bot.entity.position.distanceTo(target);
+        console.log('[goto-trace] totalDist=' + Math.round(totalDist) + ' WAYPOINT_DIST=' + WAYPOINT_DIST);
+        if (totalDist <= WAYPOINT_DIST * 1.5) {
+            let directOk = false;
+            try {
+                await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
+                directOk = true;
+            } catch (e) {
+                if (_ic()) { clearInterval(progressInterval); return false; }
+                log(bot, `Direct navigation failed: ${e.message}, trying manual nav...`);
+            }
+            if (!directOk && !_ic()) {
+                const beforeFallback = bot.entity.position.clone();
+                await manualWalkToward(bot, x, z, 10);
+                if (_ic()) { clearInterval(progressInterval); return false; }
+                const movedDist = bot.entity.position.distanceTo(beforeFallback);
+                if (movedDist > 3) {
+                    log(bot, `Manual nav moved ${Math.round(movedDist)} blocks, retrying pathfinder...`);
+                    try {
+                        await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
+                    } catch (e2) {
+                        if (_ic()) { clearInterval(progressInterval); return false; }
+                        log(bot, `Retry also failed: ${e2.message}`);
+                    }
+                }
+            }
+        } else {
+            console.log('[goto-trace] Long distance ' + Math.round(totalDist) + ' blocks');
+            log(bot, `Long distance (${Math.round(totalDist)} blocks), using waypoints.`);
+            let stuckCount = 0;
+            while (true) {
+                if (_ic()) break;
+                if (_checkTotalTimeout()) break;
+                const pos = bot.entity.position;
+                const remaining = pos.distanceTo(target);
+                console.log('[goto-trace] waypoint loop: remaining=' + Math.round(remaining) + ' pos=(' + Math.round(pos.x) + ',' + Math.round(pos.y) + ',' + Math.round(pos.z) + ')');
+                if (remaining <= min_distance + 1) break;
+                if (remaining <= WAYPOINT_DIST * 1.5) {
+                    console.log('[goto-trace] final approach');
+                    try {
+                        await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
+                    } catch (e) {
+                        if (_ic()) break;
+                        console.log('[goto-trace] final approach failed: ' + e.message);
+                        log(bot, `Final approach failed: ${e.message}`);
+                    }
+                    break;
+                }
+                const dx = x - pos.x;
+                const dz = z - pos.z;
+                const dist2d = Math.sqrt(dx * dx + dz * dz);
+                const wpX = pos.x + (dx / dist2d) * WAYPOINT_DIST;
+                const wpZ = pos.z + (dz / dist2d) * WAYPOINT_DIST;
+                console.log('[goto-trace] segment to (' + Math.round(wpX) + ',' + Math.round(wpZ) + ') timeout=' + SEGMENT_TIMEOUT_MS);
+                log(bot, `Waypoint: (${Math.round(wpX)}, ${Math.round(wpZ)}), ${Math.round(remaining)} blocks left.`);
+                const prevPos = pos.clone();
+                try {
+                    await goWithTimeout(new pf.goals.GoalXZ(wpX, wpZ), SEGMENT_TIMEOUT_MS); // [mindaxis-patch:waypoint-goalxz] Y不問
+                    console.log('[goto-trace] segment OK, moved to (' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.z) + ')');
+                    stuckCount = 0;
+                } catch (e) {
+                    console.log('[goto-trace] segment FAILED: ' + e.message);
+                    if (_ic()) break;
+                    const cur = bot.entity.position;
+                    const movedXZ = Math.sqrt((cur.x - prevPos.x) ** 2 + (cur.z - prevPos.z) ** 2);
+                    if (movedXZ < 5) {
+                        stuckCount++;
+                        log(bot, `Stuck at waypoint (${stuckCount}/${MAX_STUCK}), trying detour...`);
+                        if (stuckCount >= MAX_STUCK) {
+                            log(bot, `Cannot navigate after ${stuckCount} failed segments.`);
+                            clearInterval(progressInterval);
+                            return false;
+                        }
+                        log(bot, '[detour] Trying manual navigation...');
+                        await manualWalkToward(bot, x, z, 5);
+                        if (_ic()) break;
+                    } else {
+                        stuckCount = 0;
+                    }
+                    continue;
+                }
+                // [#13 fix] オーバーシュート検出: 目標から離れたらループ中断
+                const afterDist = bot.entity.position.distanceTo(target);
+                if (afterDist > remaining + 5) {
+                    log(bot, `Overshoot detected (${Math.round(remaining)} → ${Math.round(afterDist)}). Switching to final approach.`);
+                    break;
+                }
+            }
+        }
+        if (_ic()) { clearInterval(progressInterval); return false; }
         clearInterval(progressInterval);
-        const distance = bot.entity.position.distanceTo(new Vec3(x, y, z));
-        if (distance <= min_distance+1) {
+        const finalDist = bot.entity.position.distanceTo(target);
+        if (finalDist <= min_distance + 1) {
             log(bot, `You have reached at ${x}, ${y}, ${z}.`);
             return true;
-        }
-        else {
-            log(bot, `Unable to reach ${x}, ${y}, ${z}, you are ${Math.round(distance)} blocks away.`);
+        } else {
+            if (_ic() || _checkTotalTimeout()) return false;
+            if (!bot._manualFallbackUsed) {
+                bot._manualFallbackUsed = true;
+                log(bot, 'Pathfinder failed. Trying manual navigation toward target...');
+                const manualOk = await manualWalkToward(bot, x, z, 8);
+                bot._manualFallbackUsed = false;
+                if (_ic()) return false;
+                if (manualOk) {
+                    const afterManual = bot.entity.position.distanceTo(target);
+                    if (afterManual <= min_distance + 1) {
+                        log(bot, 'Reached target via manual navigation!');
+                        return true;
+                    }
+                    log(bot, 'Manual nav moved closer, retrying pathfinder...');
+                    try {
+                        await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
+                        const d = bot.entity.position.distanceTo(target);
+                        if (d <= min_distance + 1) {
+                            log(bot, 'Reached target after manual+pathfinder!');
+                            return true;
+                        }
+                    } catch(e) {}
+                    if (_ic()) return false;
+                }
+            }
+            const yDiff = y - bot.entity.position.y;
+            const _fbFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+            const _fbInWater = _fbFeet && (_fbFeet.name === 'water' || _fbFeet.name === 'flowing_water');
+            if ((yDiff > 2 || _fbInWater) && !bot._pillarFallbackUsed && !_ic()) {
+                log(bot, `${_fbInWater ? 'In water' : 'Target is ' + Math.round(yDiff) + ' blocks above'}. Attempting to reach surface...`);
+                bot._pillarFallbackUsed = true;
+                try {
+                    const surfaceReached = await goToSurface(bot);
+                    if (surfaceReached && !_ic()) {
+                        log(bot, 'Reached surface, retrying navigation...');
+                        bot._pillarFallbackUsed = false;
+                        return await goToPosition(bot, x, y, z, min_distance);
+                    }
+                } catch (e) {
+                    log(bot, `Pillar fallback failed: ${e.message}`);
+                }
+                bot._pillarFallbackUsed = false;
+            }
+            log(bot, `Unable to reach ${x}, ${y}, ${z}, you are ${Math.round(finalDist)} blocks away.`);
             return false;
         }
     } catch (err) {
@@ -1251,6 +2475,27 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         range = MAX_RANGE;
     }
     let block = null;
+    // [mindaxis-patch:location-memory-first] 記憶がある場合はまずそこへ移動（200ブロック以内）
+    if (blockType !== 'water' && blockType !== 'lava') {
+        try {
+            const _fsf = await import('fs');
+            const _memPathF = './bots/' + bot.username + '/location_memory.json';
+            if (_fsf.existsSync(_memPathF)) {
+                const _lmf = JSON.parse(_fsf.readFileSync(_memPathF, 'utf8'));
+                const _resf = (_lmf.resources || {})[blockType];
+                if (_resf && _resf.length > 0) {
+                    const _bposf = bot.entity.position;
+                    _resf.sort((a,b) => ((a.x-_bposf.x)**2+(a.z-_bposf.z)**2) - ((b.x-_bposf.x)**2+(b.z-_bposf.z)**2));
+                    const _rlocf = _resf[0];
+                    const _distf = Math.sqrt((_rlocf.x-_bposf.x)**2+(_rlocf.z-_bposf.z)**2);
+                    if (_distf > range && _distf <= 200) {
+                        log(bot, `Heading to remembered ${blockType} at (${_rlocf.x}, ${_rlocf.z}), ~${_rlocf.count} blocks (${Math.round(_distf)}m away).`);
+                        await goToPosition(bot, _rlocf.x, _rlocf.y || _bposf.y, _rlocf.z, 5);
+                    }
+                }
+            }
+        } catch(_lmErrF) {}
+    }
     if (blockType === 'water' || blockType === 'lava') {
         let blocks = world.getNearestBlocksWhere(bot, block => block.name === blockType && block.metadata === 0, range, 1);
         if (blocks.length === 0) {
@@ -1260,15 +2505,116 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         block = blocks[0];
     }
     else {
-        block = world.getNearestBlock(bot, blockType, range);
+        // [mindaxis-patch:surface-prefer-v5] 地上ブロック優先 + デバッグログ
+        const botY = bot.entity.position.y;
+        const minY = Math.max(botY - 20, 50);
+        const candidates = world.getNearestBlocks(bot, blockType, range, 50);
+        console.log('[search-dbg] ' + blockType + ': ' + candidates.length + ' raw candidates within ' + range + ' blocks');
+        const _isWater = n => n && (n.name === 'water' || n.name === 'flowing_water');
+        const surfaceCandidates = candidates.filter(b => {
+            if (b.position.y < minY) { return false; }
+            const _above1 = bot.blockAt(b.position.offset(0, 1, 0));
+            const _above2 = bot.blockAt(b.position.offset(0, 2, 0));
+            if (_isWater(_above1) && _isWater(_above2)) { console.log('[search-dbg] SKIP submerged: ' + b.position); return false; }
+            const _belowB = bot.blockAt(b.position.offset(0, -1, 0));
+            if (_isWater(_belowB)) { console.log('[search-dbg] SKIP water-below: ' + b.position); return false; }
+            const _adjWater = [
+                bot.blockAt(b.position.offset(1, 1, 0)),
+                bot.blockAt(b.position.offset(-1, 1, 0)),
+                bot.blockAt(b.position.offset(0, 1, 1)),
+                bot.blockAt(b.position.offset(0, 1, -1)),
+            ].filter(_isWater).length;
+            if (_adjWater >= 3) { console.log('[search-dbg] SKIP water-adj: ' + b.position); return false; }
+            return true;
+        });
+        console.log('[search-dbg] ' + surfaceCandidates.length + ' surface candidates remain');
+        block = surfaceCandidates[0] || null;
+        if (surfaceCandidates.length > 1) {
+            bot._mindaxisSurfaceCandidates = surfaceCandidates.slice(1);
+        }
+    }
+    // [mindaxis-patch:location-memory-lookup] 記憶済み資源の場所を確認
+    if (!block) {
+        try {
+            const _fs = await import('fs');
+            const _memPath = './bots/' + bot.username + '/location_memory.json';
+            if (_fs.existsSync(_memPath)) {
+                const _lm = JSON.parse(_fs.readFileSync(_memPath, 'utf8'));
+                const _res = _lm.resources || {};
+                if (_res[blockType] && _res[blockType].length > 0) {
+                    const _bpos = bot.entity.position;
+                    _res[blockType].sort((a,b) => ((a.x-_bpos.x)**2+(a.z-_bpos.z)**2) - ((b.x-_bpos.x)**2+(b.z-_bpos.z)**2));
+                    const _rloc = _res[blockType][0];
+                    log(bot, `I remember ${blockType} at (${_rloc.x}, ${_rloc.z}), ~${_rloc.count} blocks. Going there...`);
+                    await goToPosition(bot, _rloc.x, _rloc.y || _bpos.y, _rloc.z, 5);
+                    block = world.getNearestBlock(bot, blockType, 32);
+                    if (block) {
+                        log(bot, `Found ${blockType} at remembered location!`);
+                    } else {
+                        _res[blockType] = _res[blockType].filter(l => Math.abs(l.x-_rloc.x)>=5 || Math.abs(l.z-_rloc.z)>=5);
+                        if (_res[blockType].length === 0) delete _res[blockType];
+                        _lm.resources = _res;
+                        _fs.writeFileSync(_memPath, JSON.stringify(_lm, null, 2), 'utf8');
+                        log(bot, `Resource at (${_rloc.x}, ${_rloc.z}) depleted. Removed from memory.`);
+                    }
+                }
+            }
+        } catch(_lmErr) {}
     }
     if (!block) {
-        log(bot, `Could not find any ${blockType} in ${range} blocks.`);
+        // [mindaxis-patch:auto-explore] 木が見つからない時は自動で遠くへ探索
+        const woodTypes = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
+        if (woodTypes.includes(blockType)) {
+            log(bot, `Could not find any ${blockType} nearby. Exploring to find trees...`);
+            // ランダムな方向に100ブロック移動して探索
+            const angle = Math.random() * 2 * Math.PI;
+            const distance = 80 + Math.random() * 40; // 80-120ブロック
+            const pos = bot.entity.position;
+            const targetX = Math.round(pos.x + Math.cos(angle) * distance);
+            const targetZ = Math.round(pos.z + Math.sin(angle) * distance);
+            try {
+                await goToPosition(bot, targetX, pos.y, targetZ, 5);
+                log(bot, `Explored to (${targetX}, ${targetZ}). Looking for ${blockType} again...`);
+            } catch (e) {
+                log(bot, `Exploration interrupted: ${e.message}`);
+            }
+        } else {
+            log(bot, `Could not find any ${blockType} in ${range} blocks.`);
+        }
         return false;
     }
-    log(bot, `Found ${blockType} at ${block.position}. Navigating...`);
-    await goToPosition(bot, block.position.x, block.position.y, block.position.z, min_distance);
-    return true;
+    // [mindaxis-patch:retry-candidates] 到達失敗時は次の候補を試す
+    const candidates = bot._mindaxisSurfaceCandidates || [];
+    let allCandidates = [block, ...candidates];
+
+    for (let i = 0; i < Math.min(allCandidates.length, 5); i++) {
+        const targetBlock = allCandidates[i];
+        log(bot, `Found ${blockType} at ${targetBlock.position}. Navigating... (candidate ${i + 1}/${Math.min(allCandidates.length, 5)})`);
+        try {
+            const reached = await goToPosition(bot, targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, min_distance);
+            if (reached) {
+                delete bot._mindaxisSurfaceCandidates;
+                return true;
+            }
+        } catch (e) {
+            log(bot, `Could not reach ${blockType} at ${targetBlock.position}: ${e.message}. Trying next...`);
+        }
+    }
+
+    // 全候補に到達できなかった場合は探索（木の場合のみ）
+    const woodTypes = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
+    if (woodTypes.includes(blockType)) {
+        log(bot, `All ${blockType} candidates unreachable. Exploring...`);
+        const angle = Math.random() * 2 * Math.PI;
+        const distance = 80 + Math.random() * 40;
+        const pos = bot.entity.position;
+        try {
+            await goToPosition(bot, Math.round(pos.x + Math.cos(angle) * distance), pos.y, Math.round(pos.z + Math.sin(angle) * distance), 5);
+        } catch (e) { /* ignore */ }
+    }
+
+    delete bot._mindaxisSurfaceCandidates;
+    return false;
 }
 
 export async function goToNearestEntity(bot, entityType, min_distance=2, range=64) {
@@ -1378,14 +2724,14 @@ export async function followPlayer(bot, username, distance=4) {
         if (distance_from_player <= nearby_distance) {
             clearInterval(doorCheckInterval);
             doorCheckInterval = null;
-            bot.modes.pause('unstuck');
+            /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
             bot.modes.pause('elbow_room');
         }
         else {
             if (!doorCheckInterval) {
                 doorCheckInterval = startDoorInterval(bot);
             }
-            bot.modes.unpause('unstuck');
+            /* [mindaxis-patch:no-unstuck-unpause] */ // unstuck mode deleted
             bot.modes.unpause('elbow_room');
         }
     }
@@ -1421,7 +2767,16 @@ export async function moveAway(bot, distance) {
         }
     }
 
-    await goToGoal(bot, inverted_goal);
+    // [mindaxis-patch:moveaway-surface-first] 水中/地下なら goToSurface で脱出、pathfinder はスキップ
+    if (bot.entity.isInWater) {
+        log(bot, 'Underwater detected in moveAway, surfacing first...');
+        await goToSurface(bot);
+        log(bot, 'moveAway: goToSurface done, skipping pathfinder (underground pathfinding is unreliable).');
+        return true;
+    }
+    // [mindaxis-patch:moveaway-timeout] 30秒でタイムアウト（水中A*ループ防止）
+    const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 30000);
+    try { await goToGoal(bot, inverted_goal); } catch(_e) {} finally { clearTimeout(_maTimer); }
     let new_pos = bot.entity.position;
     log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()}.`);
     return true;
@@ -1482,7 +2837,7 @@ export async function stay(bot, seconds=30) {
      * await skills.stay(bot);
      **/
     bot.modes.pause('self_preservation');
-    bot.modes.pause('unstuck');
+    /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
     bot.modes.pause('cowardice');
     bot.modes.pause('self_defense');
     bot.modes.pause('hunting');
@@ -1564,7 +2919,7 @@ export async function goToBed(bot) {
     const bed = bot.blockAt(loc);
     await bot.sleep(bed);
     log(bot, `You are in bed.`);
-    bot.modes.pause('unstuck');
+    /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
     while (bot.isSleeping) {
         await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -1719,7 +3074,7 @@ async function findAndGoToVillager(bot, id) {
     if (distance > 4) {
         log(bot, `Villager is ${distance.toFixed(1)} blocks away, moving closer...`);
         try {
-            bot.modes.pause('unstuck');
+            /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
             const goal = new pf.goals.GoalFollow(entity, 2);
             await goToGoal(bot, goal);
             
@@ -1730,7 +3085,7 @@ async function findAndGoToVillager(bot, id) {
             console.log(err);
             return null;
         } finally {
-            bot.modes.unpause('unstuck');
+            /* [mindaxis-patch:no-unstuck-unpause] */ // unstuck mode deleted
         }
     }
     
@@ -1961,24 +3316,987 @@ export async function digDown(bot, distance = 10) {
 }
 
 export async function goToSurface(bot) {
-    /**
-     * Navigate to the surface (highest non-air block at current x,z).
-     * @param {MinecraftBot} bot, reference to the minecraft bot.
-     * @returns {Promise<boolean>} true if the surface was reached, false otherwise.
-     **/
+    // [mindaxis-patch:gotosurface-pillar] v6: dig staircase upward + 水泳脱出 + 家ガード
     const pos = bot.entity.position;
-    for (let y = 360; y > -64; y--) { // probably not the best way to find the surface but it works
-        const block = bot.blockAt(new Vec3(pos.x, y, pos.z));
-        if (!block || block.name === 'air' || block.name === 'cave_air') {
-            continue;
+
+    // 家の範囲内ではピラージャンプ禁止 — ドアを使うべき
+    const _hs = bot._houseStructure;
+    if (_hs && _hs.bounds) {
+        const b = _hs.bounds;
+        const px = Math.floor(pos.x), pz = Math.floor(pos.z);
+        if (px >= b.x1 - 2 && px <= b.x2 + 2 && pz >= b.z1 - 2 && pz <= b.z2 + 2) {
+            log(bot, '[goToSurface] Near house — skipping pillar jump (use door instead).');
+            return false;
         }
-        await goToPosition(bot, block.position.x, block.position.y + 1, block.position.z, 0); // this will probably work most of the time but a custom mining and towering up implementation could be added if needed
-        log(bot, `Going to the surface at y=${y+1}.`);``
+    }
+
+    let surfaceY = null;
+    for (let y = 360; y > -64; y--) {
+        const block = bot.blockAt(new Vec3(pos.x, y, pos.z));
+        if (!block || block.name === 'air' || block.name === 'cave_air') continue;
+        surfaceY = y + 1;
+        break;
+    }
+    if (surfaceY === null) { log(bot, 'Could not find surface.'); return false; }
+    // 水中判定
+    const _feetB = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z)));
+    const _belowB = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y) - 1, Math.floor(pos.z)));
+    const _inWater = bot.entity.isInWater || (_feetB && (_feetB.name === 'water' || _feetB.name === 'flowing_water')) || (_belowB && (_belowB.name === 'water' || _belowB.name === 'flowing_water'));
+    if (_inWater) {
+        log(bot, 'In water (y=' + Math.floor(pos.y) + ', surface=' + surfaceY + '). Swimming to shore...');
+        function findLand() {
+            let cp = bot.entity.position;
+            let best = null;
+            let bestDist = 999;
+            for (let dir of [{dx:1,dz:0,n:'east'},{dx:-1,dz:0,n:'west'},{dx:0,dz:1,n:'south'},{dx:0,dz:-1,n:'north'}]) {
+                for (let dist = 1; dist <= 8; dist++) {
+                    let cx = Math.floor(cp.x) + dir.dx * dist;
+                    let cz = Math.floor(cp.z) + dir.dz * dist;
+                    for (let dy = -1; dy <= 3; dy++) {
+                        let checkY = Math.floor(cp.y) + dy;
+                        let block = bot.blockAt(new Vec3(cx, checkY, cz));
+                        let above = bot.blockAt(new Vec3(cx, checkY + 1, cz));
+                        if (block && block.name !== 'water' && block.name !== 'flowing_water'
+                            && block.name !== 'air' && block.name !== 'cave_air'
+                            && above && (above.name === 'air' || above.name === 'cave_air')) {
+                            if (dist < bestDist) {
+                                bestDist = dist;
+                                best = { x: cx + 0.5, y: checkY + 1, z: cz + 0.5, dir: dir.n, dist: dist };
+                            }
+                        }
+                    }
+                }
+            }
+            return best;
+        }
+        // [mindaxis-patch:shore-swim-v9] 水中脱出: pathfinder優先 + 水路振動検出 + バックトラック
+        bot._goToSurfaceActive = true;
+        // --- Phase 1: pathfinder で岸に移動（水中でもA*が使える） ---
+        {
+            let _pfShore = null; let _pfBestScore = 999;
+            const _pfCp = bot.entity.position;
+            const _pfBx = Math.floor(_pfCp.x), _pfBz = Math.floor(_pfCp.z);
+            for (let dx = -25; dx <= 25; dx++) {
+                for (let dz = -25; dz <= 25; dz++) {
+                    const dist = Math.abs(dx) + Math.abs(dz);
+                    if (dist === 0 || dist > 25) continue;
+                    const cx = _pfBx + dx, cz = _pfBz + dz;
+                    for (let checkY = Math.floor(_pfCp.y) - 2; checkY <= Math.floor(_pfCp.y) + 5; checkY++) {
+                        const block = bot.blockAt(new Vec3(cx, checkY, cz));
+                        const above = bot.blockAt(new Vec3(cx, checkY + 1, cz));
+                        const above2 = bot.blockAt(new Vec3(cx, checkY + 2, cz));
+                        if (block && block.name !== 'water' && block.name !== 'flowing_water'
+                            && block.name !== 'air' && block.name !== 'cave_air'
+                            && above && (above.name === 'air' || above.name === 'cave_air')
+                            && above2 && (above2.name === 'air' || above2.name === 'cave_air')) {
+                            const heightDiff = Math.abs(checkY + 1 - Math.floor(_pfCp.y));
+                            const score = heightDiff * 5 + dist;
+                            if (score < _pfBestScore) {
+                                _pfBestScore = score;
+                                _pfShore = { x: cx, y: checkY + 1, z: cz };
+                            }
+                        }
+                    }
+                }
+            }
+            if (_pfShore) {
+                console.log('[swim] Phase 1: pathfinder to shore (' + _pfShore.x + ',' + _pfShore.y + ',' + _pfShore.z + ')');
+                try {
+                    const _pfTimeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('pf-timeout')), 15000));
+                    const _pfMoves = new pf.Movements(bot);
+                    bot.pathfinder.setMovements(_pfMoves);
+                    const _pfGoal = new pf.goals.GoalNear(_pfShore.x + 0.5, _pfShore.y, _pfShore.z + 0.5, 2);
+                    await Promise.race([bot.pathfinder.goto(_pfGoal), _pfTimeoutP]);
+                    const _pfPos = bot.entity.position;
+                    const _pfFeet = bot.blockAt(new Vec3(Math.floor(_pfPos.x), Math.floor(_pfPos.y), Math.floor(_pfPos.z)));
+                    const _pfOnLand = !(_pfFeet && (_pfFeet.name === 'water' || _pfFeet.name === 'flowing_water'));
+                    if (_pfOnLand) {
+                        bot._goToSurfaceActive = false;
+                        log(bot, 'Pathfinder navigated to shore at y=' + Math.floor(_pfPos.y));
+                        let _skyOK = true;
+                        for (let _scy = Math.floor(_pfPos.y) + 2; _scy <= Math.floor(_pfPos.y) + 10; _scy++) {
+                            const _scb = bot.blockAt(new Vec3(Math.floor(_pfPos.x), _scy, Math.floor(_pfPos.z)));
+                            if (_scb && _scb.name !== 'air' && _scb.name !== 'cave_air' && _scb.name !== 'water' && _scb.name !== 'flowing_water') { _skyOK = false; break; }
+                        }
+                        if (_skyOK) { log(bot, 'On surface (sky visible), done!'); return true; }
+                    } else {
+                        console.log('[swim] Pathfinder reached goal but still in water');
+                    }
+                } catch (e) {
+                    try { bot.pathfinder.stop(); } catch(_) {}
+                    console.log('[swim] Pathfinder failed: ' + (e.message || e));
+                }
+            } else {
+                console.log('[swim] No shore found within 25 blocks for pathfinder');
+            }
+        }
+        // --- Phase 2: 手動 swim ループ（pathfinder 失敗時フォールバック） ---
+        const _blacklistedShores = [];
+        let _lastSwimPos = bot.entity.position.clone();
+        let _stuckCount = 0;
+        const _posHistory = [];
+        let _channelSwimDir = null;
+        let _channelSwimTicks = 0;
+        const _channelTriedDirs = [];
+        for (let attempt = 0; attempt < 60; attempt++) {
+            if (bot.interrupt_code) { bot._goToSurfaceActive = false; bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false); return false; }
+            let cp = bot.entity.position;
+            let cf = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y), Math.floor(cp.z)));
+            let cb = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y) - 1, Math.floor(cp.z)));
+            let feetInWater = cf && (cf.name === 'water' || cf.name === 'flowing_water');
+            let onSolid = cb && cb.name !== 'air' && cb.name !== 'cave_air' && cb.name !== 'water' && cb.name !== 'flowing_water';
+            if (!feetInWater && onSolid) {
+                bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
+                log(bot, 'Escaped water at y=' + Math.floor(cp.y) + '! Standing on ' + cb.name);
+                // Sky check: 上方10ブロックに固体がなければ地上 → 即リターン
+                let _skyOK = true;
+                for (let _scy = Math.floor(cp.y) + 2; _scy <= Math.floor(cp.y) + 10; _scy++) {
+                    let _scb = bot.blockAt(new Vec3(Math.floor(cp.x), _scy, Math.floor(cp.z)));
+                    if (_scb && _scb.name !== 'air' && _scb.name !== 'cave_air' && _scb.name !== 'water' && _scb.name !== 'flowing_water') {
+                        _skyOK = false; break;
+                    }
+                }
+                if (_skyOK) { log(bot, 'On surface (sky visible), done!'); return true; }
+                break; // underground → dig-staircase
+            }
+            // 進捗チェック: 水平距離0.3ブロック以上動いたか
+            const _movedDist = Math.sqrt((cp.x - _lastSwimPos.x) ** 2 + (cp.z - _lastSwimPos.z) ** 2);
+            if (_movedDist < 0.3) { _stuckCount++; } else { _stuckCount = 0; _lastSwimPos = cp.clone(); }
+            // デバッグログ（全回 console.log で切り詰め回避）
+            console.log('[swim] #' + attempt + ' pos=(' + cp.x.toFixed(1) + ',' + cp.y.toFixed(1) + ',' + cp.z.toFixed(1) + ') moved=' + _movedDist.toFixed(2) + ' stuck=' + _stuckCount);
+            // 振動検出: 6ティック前と同じ場所にいるか
+            _posHistory.push({ x: cp.x, z: cp.z });
+            let _oscillating = false;
+            if (_posHistory.length >= 8) {
+                const _oldP = _posHistory[_posHistory.length - 6];
+                const _oscDist = Math.sqrt((cp.x - _oldP.x) ** 2 + (cp.z - _oldP.z) ** 2);
+                if (_oscDist < 3.0) _oscillating = true;
+            }
+            // 水路追従: 振動を検出したら水が続く方向に泳ぐ
+            if (_oscillating && attempt >= 6) {
+                // 各方向の連続水ブロック数を計算
+                let _bestChDir = null; let _bestChLen = 0; let _secondChDir = null; let _secondChLen = 0;
+                for (const _chd of [{dx:1,dz:0,n:'E'},{dx:-1,dz:0,n:'W'},{dx:0,dz:1,n:'S'},{dx:0,dz:-1,n:'N'}]) {
+                    let _wLen = 0;
+                    for (let _d = 1; _d <= 20; _d++) {
+                        const _wb = bot.blockAt(new Vec3(Math.floor(cp.x) + _chd.dx * _d, Math.floor(cp.y), Math.floor(cp.z) + _chd.dz * _d));
+                        if (_wb && (_wb.name === 'water' || _wb.name === 'flowing_water')) _wLen++;
+                        else break;
+                    }
+                    if (_wLen > _bestChLen) {
+                        _secondChDir = _bestChDir; _secondChLen = _bestChLen;
+                        _bestChLen = _wLen; _bestChDir = { dx: _chd.dx, dz: _chd.dz, n: _chd.n, len: _wLen };
+                    } else if (_wLen > _secondChLen) {
+                        _secondChLen = _wLen; _secondChDir = { dx: _chd.dx, dz: _chd.dz, n: _chd.n, len: _wLen };
+                    }
+                }
+                if (_bestChDir && _bestChLen >= 3) {
+                    // 現在の方向がまだ試されていないか、進捗があるか確認
+                    if (!_channelSwimDir) {
+                        // 試していない方向を選ぶ
+                        const _alreadyTried = _channelTriedDirs.some(d => d.dx === _bestChDir.dx && d.dz === _bestChDir.dz);
+                        if (_alreadyTried && _secondChDir && _secondChLen >= 3) {
+                            _channelSwimDir = _secondChDir;
+                        } else {
+                            _channelSwimDir = _bestChDir;
+                        }
+                        _channelSwimTicks = 0;
+                        console.log('[swim] Oscillation! Following waterway ' + _channelSwimDir.n + ' (water=' + _channelSwimDir.len + 'b)');
+                    }
+                    _channelSwimTicks++;
+                    // 10ティック進んでも脱出できなければ方向転換
+                    if (_channelSwimTicks > 10) {
+                        console.log('[swim] Channel dir ' + _channelSwimDir.n + ' no progress after 10 ticks, trying opposite');
+                        _channelTriedDirs.push({ dx: _channelSwimDir.dx, dz: _channelSwimDir.dz });
+                        const _oppDir = { dx: -_channelSwimDir.dx, dz: -_channelSwimDir.dz, n: (_channelSwimDir.dx === 1 ? 'W' : _channelSwimDir.dx === -1 ? 'E' : _channelSwimDir.dz === 1 ? 'N' : 'S') };
+                        const _oppTried = _channelTriedDirs.some(d => d.dx === _oppDir.dx && d.dz === _oppDir.dz);
+                        if (!_oppTried) {
+                            _channelSwimDir = _oppDir;
+                            _channelSwimTicks = 0;
+                            console.log('[swim] Backtracking: ' + _channelSwimDir.n);
+                        } else {
+                            console.log('[swim] Both channel dirs tried, falling through to pillar');
+                            _channelSwimDir = null;
+                            break;
+                        }
+                    }
+                    await bot.lookAt(new Vec3(cp.x + _channelSwimDir.dx * 10, cp.y + 0.5, cp.z + _channelSwimDir.dz * 10));
+                    bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                    bot.setControlState('jump', attempt % 3 === 0);
+                    await new Promise(r => setTimeout(r, 1200));
+                    continue;
+                }
+            } else if (!_oscillating) {
+                // 振動が止まったらチャンネル追従リセット
+                _channelSwimDir = null;
+                _channelSwimTicks = 0;
+            }
+            // findLand: 全方位スキャン（15ブロック範囲）
+            let land = null;
+            let _localWaterTop = Math.floor(cp.y);
+            {
+                let _cp2 = bot.entity.position;
+                let _best = null; let _bestScore = 999;
+                let _bx = Math.floor(_cp2.x), _bz = Math.floor(_cp2.z);
+                _localWaterTop = Math.floor(_cp2.y);
+                for (let _wy = Math.floor(_cp2.y); _wy <= Math.floor(_cp2.y) + 20; _wy++) {
+                    let _wb = bot.blockAt(new Vec3(_bx, _wy, _bz));
+                    if (!_wb || (_wb.name !== 'water' && _wb.name !== 'flowing_water')) { _localWaterTop = _wy; break; }
+                }
+                let _yMin = Math.floor(_cp2.y) - 2;
+                let _yMax = _localWaterTop + 4;
+                if (attempt === 0) console.log('[swim] waterTop=' + _localWaterTop + ' searchY=' + _yMin + '-' + _yMax);
+                for (let dx = -15; dx <= 15; dx++) {
+                    for (let dz = -15; dz <= 15; dz++) {
+                        let dist = Math.abs(dx) + Math.abs(dz);
+                        if (dist === 0 || dist > 15) continue;
+                        let cx = _bx + dx, cz = _bz + dz;
+                        for (let checkY = _yMin; checkY <= _yMax; checkY++) {
+                            let block = bot.blockAt(new Vec3(cx, checkY, cz));
+                            let above = bot.blockAt(new Vec3(cx, checkY + 1, cz));
+                            let _aboveOk = above && (above.name === 'air' || above.name === 'cave_air'
+                                || above.name === 'water' || above.name === 'flowing_water');
+                            if (block && block.name !== 'water' && block.name !== 'flowing_water'
+                                && block.name !== 'air' && block.name !== 'cave_air'
+                                && _aboveOk) {
+                                let isBlacklisted = _blacklistedShores.some(bl => bl.x === cx && bl.z === cz && bl.y === checkY);
+                                let heightDiff = Math.abs(checkY + 1 - _localWaterTop);
+                                let score = heightDiff * 10 + dist;
+                                if (!isBlacklisted && score < _bestScore) {
+                                    _bestScore = score;
+                                    let _dirName = (dx > 0 ? 'E' : dx < 0 ? 'W' : '') + (dz > 0 ? 'S' : dz < 0 ? 'N' : '');
+                                    _best = { x: cx + 0.5, y: checkY + 1, z: cz + 0.5, dir: _dirName || 'here', dist: dist, bx: cx, bz: cz, by: checkY };
+                                }
+                            }
+                        }
+                    }
+                }
+                land = _best;
+            }
+            if (land) {
+                console.log('[swim] Shore ' + land.dist + 'b ' + land.dir + ' y=' + land.by + ' stuck=' + _stuckCount + ' nearSurf=' + (cp.y >= _localWaterTop - 3));
+                // stuck=4 → dig toward shore (cardinal directions)
+                if (_stuckCount >= 4) {
+                    console.log('[swim] Stuck ' + _stuckCount + ', digging toward shore...');
+                    const _digDirX = Math.sign(land.x - cp.x);
+                    const _digDirZ = Math.sign(land.z - cp.z);
+                    let _dugSomething = false;
+                    const _digDirs = [];
+                    if (_digDirX !== 0) _digDirs.push({ dx: _digDirX, dz: 0 });
+                    if (_digDirZ !== 0) _digDirs.push({ dx: 0, dz: _digDirZ });
+                    for (const _ddir of _digDirs) {
+                        for (let _dy = -1; _dy <= 2; _dy++) {
+                            for (let _dd = 1; _dd <= 3; _dd++) {
+                                const _bx2 = Math.floor(cp.x) + _ddir.dx * _dd;
+                                const _bz2 = Math.floor(cp.z) + _ddir.dz * _dd;
+                                const _digBlock = bot.blockAt(new Vec3(_bx2, Math.floor(cp.y) + _dy, _bz2));
+                                if (_digBlock && _digBlock.diggable && _digBlock.name !== 'air' && _digBlock.name !== 'cave_air'
+                                    && _digBlock.name !== 'water' && _digBlock.name !== 'flowing_water' && _digBlock.name !== 'bedrock') {
+                                    try { await bot.dig(_digBlock); _dugSomething = true; console.log('[swim] Dug ' + _digBlock.name + ' at (' + _bx2 + ',' + (Math.floor(cp.y)+_dy) + ',' + _bz2 + ')'); } catch(e) {}
+                                }
+                            }
+                        }
+                    }
+                    if (!_dugSomething) { _blacklistedShores.push({ x: land.bx, z: land.bz, y: land.by }); }
+                    _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
+                }
+                // stuck=8 → blacklist this shore
+                if (_stuckCount >= 8) {
+                    console.log('[swim] Giving up on shore ' + land.dir + ', blacklisting');
+                    _blacklistedShores.push({ x: land.bx, z: land.bz, y: land.by });
+                    _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
+                }
+                // cliff dig: shore above water level + close
+                if (land.by + 1 > _localWaterTop && land.dist <= 5 && attempt >= 2) {
+                    console.log('[swim] Cliff y=' + land.by + ' (waterTop=' + _localWaterTop + '), digging...');
+                    for (let _cliffY = land.by; _cliffY >= _localWaterTop; _cliffY--) {
+                        const _cliffB = bot.blockAt(new Vec3(land.bx, _cliffY, land.bz));
+                        if (_cliffB && _cliffB.diggable && _cliffB.name !== 'air' && _cliffB.name !== 'cave_air'
+                            && _cliffB.name !== 'water' && _cliffB.name !== 'flowing_water' && _cliffB.name !== 'bedrock') {
+                            try { await bot.dig(_cliffB); console.log('[swim] Dug cliff ' + _cliffB.name + ' y=' + _cliffY); } catch(e) {}
+                        }
+                    }
+                    _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
+                }
+                // SWIM toward shore — close=slow, far=fast
+                let _nearSurface = cp.y >= _localWaterTop - 3;
+                if (!_nearSurface) {
+                    await bot.lookAt(new Vec3(cp.x, cp.y + 10, cp.z));
+                    bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
+                    await new Promise(r => setTimeout(r, 1500));
+                } else if (land.dist <= 3) {
+                    // 近距離: スプリントOFF、短ディレイで振動防止
+                    await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
+                    bot.setControlState('forward', true); bot.setControlState('sprint', false);
+                    bot.setControlState('jump', attempt % 4 === 0);
+                    await new Promise(r => setTimeout(r, 600));
+                } else {
+                    // 遠距離: フルスピード
+                    await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
+                    bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                    bot.setControlState('jump', attempt % 3 === 0);
+                    await new Promise(r => setTimeout(r, 1200));
+                }
+            } else {
+                // No shore → cliff search (cardinal directions, 12 blocks)
+                let _cliff = null; let _cliffBestDist = 999;
+                for (let _cDir of [{dx:1,dz:0},{dx:-1,dz:0},{dx:0,dz:1},{dx:0,dz:-1}]) {
+                    for (let _cDist = 1; _cDist <= 12; _cDist++) {
+                        let _cx = Math.floor(cp.x) + _cDir.dx * _cDist;
+                        let _cz = Math.floor(cp.z) + _cDir.dz * _cDist;
+                        let _bFeet = bot.blockAt(new Vec3(_cx, Math.floor(cp.y), _cz));
+                        if (_bFeet && _bFeet.diggable && _bFeet.name !== 'water' && _bFeet.name !== 'flowing_water'
+                            && _bFeet.name !== 'air' && _bFeet.name !== 'cave_air' && _bFeet.name !== 'bedrock') {
+                            if (_cDist < _cliffBestDist) { _cliffBestDist = _cDist; _cliff = { x: _cx, z: _cz, y: Math.floor(cp.y), dist: _cDist }; }
+                            break;
+                        }
+                    }
+                }
+                if (_cliff) {
+                    console.log('[swim] No flat shore, cliff ' + _cliff.dist + 'b away');
+                    await bot.lookAt(new Vec3(_cliff.x + 0.5, cp.y, _cliff.z + 0.5));
+                    bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                    bot.setControlState('jump', attempt % 3 === 0);
+                    await new Promise(r => setTimeout(r, 1500));
+                    let _cp3 = bot.entity.position;
+                    let _distC = Math.sqrt((_cp3.x - (_cliff.x + 0.5)) ** 2 + (_cp3.z - (_cliff.z + 0.5)) ** 2);
+                    if (_distC < 3.0) {
+                        for (let _dy = -1; _dy <= 1; _dy++) {
+                            let _db = bot.blockAt(new Vec3(_cliff.x, _cliff.y + _dy, _cliff.z));
+                            if (_db && _db.diggable && _db.name !== 'water' && _db.name !== 'flowing_water' && _db.name !== 'bedrock') {
+                                try { await bot.dig(_db); console.log('[swim] Dug cliff ' + _db.name); } catch(e) {}
+                            }
+                        }
+                    }
+                } else {
+                    let angle = (attempt * 1.57) % 6.28;
+                    await bot.lookAt(new Vec3(cp.x + Math.cos(angle) * 5, cp.y + 1, cp.z + Math.sin(angle) * 5));
+                    bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+            }
+            if (attempt >= 49) { console.log('[swim] 50 attempts, pillar fallthrough...'); break; }
+        }
+        bot._goToSurfaceActive = false;
+        bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
+        let finalFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+        let finalBelow = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y) - 1, Math.floor(bot.entity.position.z)));
+        let finalInWater = finalFeet && (finalFeet.name === 'water' || finalFeet.name === 'flowing_water');
+        let finalOnSolid = finalBelow && finalBelow.name !== 'air' && finalBelow.name !== 'cave_air' && finalBelow.name !== 'water' && finalBelow.name !== 'flowing_water';
+        if (!finalInWater && finalOnSolid) {
+            // [mindaxis-patch:escape-water-final-continue] 水から出ても地下なら dig-staircase へ続行
+            log(bot, 'Escaped water! Checking if at surface...');
+        }
+        log(bot, 'Could not escape water after 30 attempts. Trying pillar dig...');
+        // [mindaxis-patch:gotosurface-water-pillar-fallback] 水中脱出失敗 → ピラーダイグにフォールスルー
+    }
+    // 地上近く（非水中 or 水中フォールスルー）なら現在位置で再評価
+    const _gsWfPos = bot.entity.position;
+    const _gsWfFt = bot.blockAt(new Vec3(Math.floor(_gsWfPos.x), Math.floor(_gsWfPos.y), Math.floor(_gsWfPos.z)));
+    const _gsWfBel = bot.blockAt(new Vec3(Math.floor(_gsWfPos.x), Math.floor(_gsWfPos.y)-1, Math.floor(_gsWfPos.z)));
+    const _gsWfWater = (_gsWfFt && (_gsWfFt.name === 'water' || _gsWfFt.name === 'flowing_water')) ||
+                       (_gsWfBel && (_gsWfBel.name === 'water' || _gsWfBel.name === 'flowing_water'));
+    // [mindaxis-patch:gotosurface-nearsurface-nowater] 水中（1ブロック下が水でも）near surface でも early return しない
+    if (_gsWfPos.y >= surfaceY - 2 && !_gsWfWater) {
+        log(bot, 'Already near surface (y=' + Math.floor(_gsWfPos.y) + ', surface=' + surfaceY + ').');
         return true;
     }
+    // [mindaxis-patch:gotosurface-cliff-break] 水面付近で崖ブロックを掘って脱出
+    if (_gsWfWater && _gsWfPos.y >= surfaceY - 3) {
+        log(bot, '[cliff-break] Trying to break cliff...');
+        const _cbDirs = [{dx:1,dz:0},{dx:-1,dz:0},{dx:0,dz:1},{dx:0,dz:-1}];
+        for (const _d of _cbDirs) {
+            // まず隣に壊せるブロックがあるか確認
+            let _cbFirst = null;
+            for (let _dy = 0; _dy <= 1; _dy++) {
+                const _b = bot.blockAt(new Vec3(Math.floor(_gsWfPos.x)+_d.dx, Math.floor(_gsWfPos.y)+_dy, Math.floor(_gsWfPos.z)+_d.dz));
+                if (_b && _b.diggable && _b.name !== 'air' && _b.name !== 'cave_air' &&
+                    _b.name !== 'water' && _b.name !== 'flowing_water' &&
+                    _b.name !== 'lava' && _b.name !== 'flowing_lava') { _cbFirst = {b:_b,dy:_dy}; break; }
+            }
+            if (!_cbFirst) continue;
+            // この方向に最大4ブロック連続で掘りながら前進
+            let _cbBroke = false;
+            for (let _dist = 1; _dist <= 4; _dist++) {
+                for (let _dy = 0; _dy <= 1; _dy++) {
+                    const _cb = bot.blockAt(new Vec3(Math.floor(_gsWfPos.x)+_d.dx*_dist, Math.floor(_gsWfPos.y)+_dy, Math.floor(_gsWfPos.z)+_d.dz*_dist));
+                    if (_cb && _cb.diggable && _cb.name !== 'air' && _cb.name !== 'cave_air' &&
+                        _cb.name !== 'water' && _cb.name !== 'flowing_water' &&
+                        _cb.name !== 'lava' && _cb.name !== 'flowing_lava') {
+                        try { await bot.dig(_cb); _cbBroke = true; log(bot, '[cliff-break] Broke ' + _cb.name + ' dist=' + _dist); } catch(e) {}
+                    }
+                }
+                // 掘った後スプリントで前進を試みる
+                await bot.lookAt(new Vec3(_gsWfPos.x+_d.dx*(_dist+1), _gsWfPos.y+1, _gsWfPos.z+_d.dz*(_dist+1)));
+                bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
+                await new Promise(r => setTimeout(r, 600));
+                bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
+                const _cbFt = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+                const _cbBel = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y)-1, Math.floor(bot.entity.position.z)));
+                const _cbStillWater = (_cbFt && (_cbFt.name === 'water'||_cbFt.name === 'flowing_water')) || (_cbBel && (_cbBel.name === 'water'||_cbBel.name === 'flowing_water'));
+                if (!_cbStillWater) { log(bot, '[cliff-break] Escaped water!'); return true; }
+            }
+            if (_cbBroke) break; // この方向で掘ったが脱出できなかった→次の方向は試さない
+        }
+    }
+    log(bot, 'Digging to surface from y=' + Math.floor(_gsWfPos.y) + ' to y=' + surfaceY + '...');
+
+    function findPillarItem() {
+        return bot.inventory.items().find(i => i.name === 'dirt')
+            || bot.inventory.items().find(i => i.name === 'cobblestone')
+            || bot.inventory.items().find(i => i.name === 'netherrack')
+            || bot.inventory.items().find(i => i.name.includes('planks'))
+            || bot.inventory.items().find(i => i.name.includes('stone') || i.name.includes('deepslate'));
+    }
+
+    const maxSteps = (surfaceY - Math.floor(pos.y)) + 10;
+
+    for (let step = 0; step < maxSteps; step++) {
+        if (bot.interrupt_code) { bot.setControlState('jump', false); return false; }
+        let curPos = bot.entity.position;
+        let curY = Math.floor(curPos.y);
+
+        const _pilFt = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)));
+        const _pilWater = _pilFt && (_pilFt.name === 'water' || _pilFt.name === 'flowing_water');
+        // [mindaxis-patch:gotosurface-pillardig-nowater] 水中は reached-surface でも return しない
+        if (curPos.y >= surfaceY - 1 && !_pilWater) {
+            log(bot, 'Reached surface at y=' + Math.floor(curPos.y) + '!');
+            bot.setControlState('jump', false);
+            return true;
+        }
+        if (_pilWater && curPos.y >= surfaceY - 2) {
+            // 水面付近 → ジャンプして step-up を試みる
+            bot.setControlState('jump', true);
+            bot.setControlState('sprint', true);
+            await new Promise(r => setTimeout(r, 1000));
+            bot.setControlState('jump', false);
+            bot.setControlState('sprint', false);
+            const _pilAfterFt = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+            if (_pilAfterFt && _pilAfterFt.name !== 'water' && _pilAfterFt.name !== 'flowing_water') {
+                log(bot, 'Jumped out of water at y=' + Math.floor(bot.entity.position.y) + '!');
+                return true;
+            }
+        }
+
+        let cx = Math.floor(curPos.x);
+        let cz = Math.floor(curPos.z);
+
+        // Step 1: Dig everything above (2-4 blocks up)
+        for (let dy = 1; dy <= 4; dy++) {
+            let block = bot.blockAt(new Vec3(cx, curY + dy, cz));
+            if (block && block.name !== 'air' && block.name !== 'cave_air'
+                && block.name !== 'water' && block.name !== 'flowing_water'
+                && block.name !== 'lava' && block.name !== 'flowing_lava'
+                && block.name !== 'bedrock') {
+                try { await bot.dig(block); } catch (e) {}
+                if (bot.interrupt_code) { bot.setControlState('jump', false); return false; }
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        // Step 2: Place a block under feet
+        let standBlock = null;
+        for (let dy = 0; dy <= 5; dy++) {
+            let b = bot.blockAt(new Vec3(cx, curY - 1 - dy, cz));
+            if (b && b.name !== 'air' && b.name !== 'cave_air'
+                && b.name !== 'water' && b.name !== 'flowing_water') {
+                standBlock = b;
+                break;
+            }
+        }
+
+        if (!standBlock) {
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 500));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 300));
+            continue;
+        }
+
+        let targetPlaceY = standBlock.position.y + 1;
+        let blockAtTarget = bot.blockAt(new Vec3(cx, targetPlaceY, cz));
+
+        // [mindaxis-patch:dig-up-water-pillar] 水中でも standBlock があればピラージャンプ、水ブロックへ設置も許可
+        let _digFeet = bot.blockAt(new Vec3(cx, curY, cz));
+        const _digInWater = _digFeet && (_digFeet.name === 'water' || _digFeet.name === 'flowing_water');
+        if (_digInWater && !standBlock) {
+            // 足場なし+水中 → ジャンプして次の iteration で再評価
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 600));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 200));
+            continue;
+        }
+
+        if (blockAtTarget && (blockAtTarget.name === 'air' || blockAtTarget.name === 'cave_air'
+                || blockAtTarget.name === 'water' || blockAtTarget.name === 'flowing_water')
+            && targetPlaceY >= curY) {
+            let pillarItem = findPillarItem();
+            if (!pillarItem) { log(bot, 'No blocks to build up.'); return false; }
+            await bot.equip(pillarItem, 'hand');
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 300));
+            try {
+                await bot.lookAt(standBlock.position.offset(0.5, 1.0, 0.5));
+                await bot.placeBlock(standBlock, new Vec3(0, 1, 0));
+            } catch (e) {
+                for (let dir of [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}]) {
+                    let sideBlock = bot.blockAt(new Vec3(cx + dir.x, curY, cz + dir.z));
+                    if (sideBlock && sideBlock.name !== 'air' && sideBlock.name !== 'cave_air'
+                        && sideBlock.name !== 'water' && sideBlock.name !== 'flowing_water') {
+                        try {
+                            let faceVec = new Vec3(-dir.x, 0, -dir.z);
+                            await bot.lookAt(sideBlock.position.offset(0.5 - dir.x*0.5, 0.5, 0.5 - dir.z*0.5));
+                            await bot.placeBlock(sideBlock, faceVec);
+                            break;
+                        } catch (e2) {}
+                    }
+                }
+            }
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 500));
+        } else if (targetPlaceY < curY) {
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 500));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 300));
+        } else {
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 500));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        let newPos = bot.entity.position;
+        if (Math.floor(newPos.y) <= curY && step > 5) {
+            log(bot, '[dig-up] No progress at y=' + curY + ', trying lateral move');
+            bot.setControlState('forward', true);
+            await new Promise(r => setTimeout(r, 300));
+            bot.setControlState('forward', false);
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+    log(bot, 'Failed to reach surface.');
     return false;
 }
 
+
+
+export async function scanStructure(bot) {
+    // [mindaxis-patch:scan-structure] レイキャスト方式で家の構造を検出
+    const pos = bot.entity.position;
+    let cx = Math.floor(pos.x);
+    let cy = Math.floor(pos.y);
+    let cz = Math.floor(pos.z);
+    const MAX_RAY = 15;
+
+    // house.json から _houseStructure を確実にロード
+    if (!bot._houseStructure) {
+        try {
+            const _fs2 = await import('fs');
+            const _hp2 = './bots/' + bot.username + '/house.json';
+            if (_fs2.existsSync(_hp2)) {
+                const _hd2 = JSON.parse(_fs2.readFileSync(_hp2, 'utf8'));
+                if (_hd2 && _hd2.bounds) bot._houseStructure = _hd2;
+            }
+        } catch(_e) {}
+    }
+
+    // キャッシュされた家の bounds がある場合、レイキャストをスキップして直接使用
+    // （ボット位置やボットが置いた内部ブロックで bounds がずれるのを防ぐ）
+    const _cached = bot._houseStructure?.bounds;
+    if (_cached) {
+        const hFloorY = _cached.y ?? _cached.floorY ?? cy;
+        const hDist = Math.max(
+            Math.abs(cx - Math.floor((_cached.x1 + _cached.x2) / 2)),
+            Math.abs(cz - Math.floor((_cached.z1 + _cached.z2) / 2))
+        );
+        if (hDist <= 15) {
+            // house.json の bounds を信頼してレイキャスト結果を上書き
+            cx = Math.floor((_cached.x1 + _cached.x2) / 2);
+            cz = Math.floor((_cached.z1 + _cached.z2) / 2);
+            cy = hFloorY;
+        }
+    }
+
+    const IGNORE = new Set(['air', 'cave_air', 'water', 'flowing_water', 'torch',
+        'wall_torch', 'redstone_torch', 'redstone_wall_torch', 'tall_grass',
+        'short_grass', 'flower', 'poppy', 'dandelion', 'snow', 'snow_layer',
+        'chest', 'trapped_chest', 'ender_chest', 'barrel',
+        'furnace', 'blast_furnace', 'smoker',
+        'crafting_table', 'enchanting_table', 'anvil',
+        'brewing_stand', 'campfire', 'soul_campfire',
+        'lantern', 'soul_lantern', 'flower_pot']);
+    function isFurniture(name) {
+        return name && (name.includes('_bed') || name.includes('banner') || name.includes('sign'));
+    }
+
+    function isDoor(name) { return name && name.includes('_door'); }
+    // 自然ブロックを除外して偽陽性を防ぐ（洞窟や地形を家と誤検出しない）
+    const NATURAL = new Set([
+        'stone', 'deepslate', 'granite', 'diorite', 'andesite', 'tuff', 'calcite',
+        'dirt', 'coarse_dirt', 'rooted_dirt', 'grass_block', 'podzol', 'mycelium', 'mud', 'clay',
+        'sand', 'red_sand', 'gravel',
+        'netherrack', 'basalt', 'smooth_basalt', 'blackstone', 'bedrock',
+        'ice', 'packed_ice', 'blue_ice', 'soul_sand', 'soul_soil'
+    ]);
+    function isWall(name) {
+        if (!name || IGNORE.has(name) || isDoor(name)) return false;
+        if (NATURAL.has(name)) return false;
+        if (name.includes('_ore')) return false;
+        if (name.includes('leaves')) return false;
+        if (isFurniture(name)) return false;
+        return true;
+    }
+
+    // 4方向にレイキャスト（足元Y+1 の高さで）
+    const scanY = cy;  // 足元の高さ
+    const dirs = [
+        { name: 'north', dx: 0, dz: -1 },
+        { name: 'south', dx: 0, dz: 1 },
+        { name: 'west',  dx: -1, dz: 0 },
+        { name: 'east',  dx: 1, dz: 0 }
+    ];
+
+    const walls = {};
+    let doorInfo = null;
+    let wallMaterial = null;
+
+    for (const dir of dirs) {
+        for (let dist = 1; dist <= MAX_RAY; dist++) {
+            const bx = cx + dir.dx * dist;
+            const bz = cz + dir.dz * dist;
+            // 壁の高さ1-3を全部チェック
+            for (let dy = 1; dy <= 3; dy++) {
+                const block = bot.blockAt(new Vec3(bx, scanY + dy, bz));
+                if (!block) continue;
+                if (isDoor(block.name)) {
+                    doorInfo = { x: bx, z: bz, facing: dir.name };
+                    walls[dir.name] = dist;
+                    break;
+                }
+                if (isWall(block.name)) {
+                    walls[dir.name] = dist;
+                    if (!wallMaterial) wallMaterial = block.name;
+                    break;
+                }
+            }
+            if (walls[dir.name]) break;
+        }
+    }
+
+    // 4方向すべてで壁が見つかったか
+    const enclosed = walls.north && walls.south && walls.west && walls.east;
+    if (!enclosed) {
+        // ギャップ検出: キャッシュ bounds または見つかった壁から推定
+        const prevBounds = bot._houseStructure?.bounds;
+        const wallsFound = Object.keys(walls);
+
+        // 3方向以上の壁が見つかれば、欠けた方向を対面の距離からミラー推定
+        let estimatedBounds = prevBounds;
+        if (!estimatedBounds && wallsFound.length >= 3) {
+            const eW = walls.west || walls.east || 5;
+            const eE = walls.east || walls.west || 5;
+            const eN = walls.north || walls.south || 5;
+            const eS = walls.south || walls.north || 5;
+            estimatedBounds = {
+                x1: cx - eW, x2: cx + eE,
+                z1: cz - eN, z2: cz + eS,
+                y: scanY
+            };
+        }
+
+        if (!estimatedBounds || wallsFound.length < 1) {
+            return { enclosed: false, wallsFound, wallMaterial,
+                description: 'Not inside an enclosed structure. Found walls: ' + (wallsFound.join(', ') || 'none') + '.' };
+        }
+        // 推定/キャッシュ境界で壁ラインをスキャンしてギャップを検出
+        const gaps = [];
+        const pb = estimatedBounds;
+        const prevDoor = doorInfo || bot._houseStructure?.door;
+        function isDoorPosEst(px, pz, dy) {
+            return prevDoor && px === prevDoor.x && pz === prevDoor.z && dy <= 2;
+        }
+        for (let dy = 1; dy <= 3; dy++) {
+            // 北壁 (z = pb.z1)
+            for (let x = pb.x1; x <= pb.x2; x++) {
+                if (isDoorPosEst(x, pb.z1, dy)) continue;
+                const b = bot.blockAt(new Vec3(x, pb.y + dy, pb.z1));
+                if (!b || b.name === 'air' || b.name === 'cave_air') {
+                    gaps.push({ x, y: pb.y + dy, z: pb.z1, dir: 'north' });
+                }
+            }
+            // 南壁 (z = pb.z2)
+            for (let x = pb.x1; x <= pb.x2; x++) {
+                if (isDoorPosEst(x, pb.z2, dy)) continue;
+                const b = bot.blockAt(new Vec3(x, pb.y + dy, pb.z2));
+                if (!b || b.name === 'air' || b.name === 'cave_air') {
+                    gaps.push({ x, y: pb.y + dy, z: pb.z2, dir: 'south' });
+                }
+            }
+            // 西壁 (x = pb.x1) — 角は北南で処理済みなので +1/-1
+            for (let z = pb.z1 + 1; z < pb.z2; z++) {
+                if (isDoorPosEst(pb.x1, z, dy)) continue;
+                const b = bot.blockAt(new Vec3(pb.x1, pb.y + dy, z));
+                if (!b || b.name === 'air' || b.name === 'cave_air') {
+                    gaps.push({ x: pb.x1, y: pb.y + dy, z, dir: 'west' });
+                }
+            }
+            // 東壁 (x = pb.x2)
+            for (let z = pb.z1 + 1; z < pb.z2; z++) {
+                if (isDoorPosEst(pb.x2, z, dy)) continue;
+                const b = bot.blockAt(new Vec3(pb.x2, pb.y + dy, z));
+                if (!b || b.name === 'air' || b.name === 'cave_air') {
+                    gaps.push({ x: pb.x2, y: pb.y + dy, z, dir: 'east' });
+                }
+            }
+        }
+        const missingDirs = ['north','south','west','east'].filter(d => !walls[d]);
+        let desc = 'House has ' + gaps.length + ' missing wall blocks.';
+        desc += ' Found walls: ' + wallsFound.join(', ') + '.';
+        desc += ' Damaged walls: ' + missingDirs.join(', ') + '.';
+        if (wallMaterial) desc += ' Material: ' + wallMaterial + '.';
+        return { enclosed: false, wallsFound, wallMaterial, gaps, previousBounds: estimatedBounds, bounds: estimatedBounds, description: desc };
+    }
+
+    // 境界座標を計算 — house.json の bounds がある場合はそちらを優先
+    let x1, x2, z1, z2;
+    if (_cached) {
+        x1 = _cached.x1; x2 = _cached.x2; z1 = _cached.z1; z2 = _cached.z2;
+    } else {
+        x1 = cx - walls.west; x2 = cx + walls.east;
+        z1 = cz - walls.north; z2 = cz + walls.south;
+    }
+    const width = x2 - x1 + 1;
+    const depth = z2 - z1 + 1;
+
+    // 屋根を検出 — house.json に roofY がある場合はそちらを優先
+    let roofY = _cached?.roofY || null;
+    if (!roofY) {
+        for (let dy = 2; dy <= 10; dy++) {
+            const block = bot.blockAt(new Vec3(cx, scanY + dy, cz));
+            if (block && isWall(block.name)) {
+                roofY = scanY + dy;
+                break;
+            }
+        }
+    }
+
+    // 内部アイテムをスキャン（チェスト、ベッド、かまど等）
+    const furniture = [];
+    for (let x = x1 + 1; x < x2; x++) {
+        for (let z = z1 + 1; z < z2; z++) {
+            for (let dy = 1; dy <= 3; dy++) {
+                const block = bot.blockAt(new Vec3(x, scanY + dy, z));
+                if (!block) continue;
+                if (block.name.includes('chest')) furniture.push('chest@' + x + ',' + (scanY+dy) + ',' + z);
+                if (block.name.includes('bed')) furniture.push('bed@' + x + ',' + (scanY+dy) + ',' + z);
+                if (block.name === 'furnace') furniture.push('furnace@' + x + ',' + (scanY+dy) + ',' + z);
+                if (block.name === 'crafting_table') furniture.push('crafting_table@' + x + ',' + (scanY+dy) + ',' + z);
+            }
+        }
+    }
+
+    // enclosed でも壁と屋根のギャップを詳細スキャン
+    const actualRoofY = roofY || (scanY + 4);
+    const wallHeight = actualRoofY - scanY;
+    const gaps = [];
+
+    // ドア保護: 現在検出 or キャッシュから取得（ドアが壊れていても位置を保護）
+    const doorRef = doorInfo || bot._houseStructure?.door;
+    function isDoorPos(px, pz, dy) {
+        return doorRef && px === doorRef.x && pz === doorRef.z && dy <= 2;
+    }
+
+    // 壁ギャップ: floor+1 から roof-1 まで全高さをチェック
+    for (let dy = 1; dy < wallHeight; dy++) {
+        // 北壁 (z = z1)
+        for (let x = x1; x <= x2; x++) {
+            if (isDoorPos(x, z1, dy)) continue;
+            const b = bot.blockAt(new Vec3(x, scanY + dy, z1));
+            if (!b || b.name === 'air' || b.name === 'cave_air') {
+                gaps.push({ x, y: scanY + dy, z: z1, dir: 'north' });
+            }
+        }
+        // 南壁 (z = z2)
+        for (let x = x1; x <= x2; x++) {
+            if (isDoorPos(x, z2, dy)) continue;
+            const b = bot.blockAt(new Vec3(x, scanY + dy, z2));
+            if (!b || b.name === 'air' || b.name === 'cave_air') {
+                gaps.push({ x, y: scanY + dy, z: z2, dir: 'south' });
+            }
+        }
+        // 西壁 (x = x1)
+        for (let z = z1 + 1; z < z2; z++) {
+            if (isDoorPos(x1, z, dy)) continue;
+            const b = bot.blockAt(new Vec3(x1, scanY + dy, z));
+            if (!b || b.name === 'air' || b.name === 'cave_air') {
+                gaps.push({ x: x1, y: scanY + dy, z, dir: 'west' });
+            }
+        }
+        // 東壁 (x = x2)
+        for (let z = z1 + 1; z < z2; z++) {
+            if (isDoorPos(x2, z, dy)) continue;
+            const b = bot.blockAt(new Vec3(x2, scanY + dy, z));
+            if (!b || b.name === 'air' || b.name === 'cave_air') {
+                gaps.push({ x: x2, y: scanY + dy, z, dir: 'east' });
+            }
+        }
+    }
+
+    // 屋根ギャップ: roofY の高さで内部全域をチェック
+    if (roofY) {
+        for (let x = x1; x <= x2; x++) {
+            for (let z = z1; z <= z2; z++) {
+                const b = bot.blockAt(new Vec3(x, roofY, z));
+                if (!b || b.name === 'air' || b.name === 'cave_air') {
+                    gaps.push({ x, y: roofY, z, dir: 'roof' });
+                }
+            }
+        }
+    }
+
+    const result = {
+        enclosed: gaps.length === 0,
+        bounds: { x1, z1, x2, z2, y: scanY, roofY: actualRoofY },
+        interior: { x1: x1 + 1, z1: z1 + 1, x2: x2 - 1, z2: z2 - 1 },
+        door: doorInfo,
+        wallMaterial: wallMaterial,
+        size: width + 'x' + depth,
+        furniture: furniture,
+        gaps: gaps.length > 0 ? gaps : undefined
+    };
+
+    // [mindaxis-patch:cramped-detect] 狭小判定
+    const interiorArea = (x2 - x1 - 1) * (z2 - z1 - 1);
+    const cramped = interiorArea <= 12 && furniture.length >= 2;
+    result.cramped = cramped;
+    result.interiorArea = interiorArea;
+
+    // 人間が読める説明文を生成
+    let desc = 'Inside a ' + width + 'x' + depth + ' ' + (wallMaterial || 'unknown') + ' house';
+    desc += ' (x:' + x1 + '-' + x2 + ', z:' + z1 + '-' + z2 + ', floor y:' + scanY + ')';
+    if (doorInfo) desc += '. Door: ' + doorInfo.facing + ' wall at (' + doorInfo.x + ',' + doorInfo.z + ')';
+    if (gaps.length > 0) desc += '. DAMAGED: ' + gaps.length + ' gaps found (walls: ' + gaps.filter(g => g.dir !== 'roof').length + ', roof: ' + gaps.filter(g => g.dir === 'roof').length + ')';
+    if (cramped) {
+        const _expandDir = doorInfo ? (doorInfo.facing === 'west' ? 'east' : doorInfo.facing === 'east' ? 'west' : doorInfo.facing === 'north' ? 'south' : 'north') : 'east';
+        desc += '. CRAMPED: Only ' + interiorArea + ' interior blocks with ' + furniture.length + ' furniture. Expand with !expandHouse("' + _expandDir + '", 3)';
+    }
+    if (furniture.length > 0) desc += '. Furniture: ' + furniture.join(', ');
+    desc += '. Interior space: x=' + (x1+1) + '-' + (x2-1) + ', z=' + (z1+1) + '-' + (z2-1);
+    result.description = desc;
+
+    return result;
+}
+
+
+export async function repairStructure(bot) {
+    // [mindaxis-patch:repair-structure] 家の壁ギャップを検出して修復
+    const Vec3 = (await import('vec3')).default;
+
+    // house.json から _houseStructure を確実にロード（ドア位置保護用）
+    if (!bot._houseStructure) {
+        try {
+            const _fs = await import('fs');
+            const _hp = './bots/' + bot.username + '/house.json';
+            if (_fs.existsSync(_hp)) {
+                const _hd = JSON.parse(_fs.readFileSync(_hp, 'utf8'));
+                if (_hd && _hd.bounds) bot._houseStructure = _hd;
+            }
+        } catch(_e) {}
+    }
+
+    // 1. スキャンしてギャップを検出
+    const scan = await scanStructure(bot);
+    if (scan.enclosed) {
+        log(bot, 'House is intact! No repairs needed.');
+        return scan;
+    }
+    if (!scan.gaps || scan.gaps.length === 0) {
+        log(bot, 'Cannot detect specific gaps to repair. ' + scan.description);
+        return scan;
+    }
+
+    // 2. 修復材料を決定
+    let material = scan.wallMaterial;
+    if (!material) material = bot._houseStructure?.wallMaterial;
+    const _preferMats = ['oak_planks', 'cobblestone', 'spruce_planks', 'birch_planks', 'stone', 'dirt'];
+    if (!material) {
+        const inv = bot.inventory.items();
+        for (const p of _preferMats) {
+            if (inv.find(i => i.name === p)) { material = p; break; }
+        }
+    }
+
+    // 3. インベントリの在庫チェック → 不足ならチェストから自動取得
+    const _countMat = (m) => bot.inventory.items().filter(i => i.name === m).reduce((s, i) => s + i.count, 0);
+    let available = material ? _countMat(material) : 0;
+    const needed = scan.gaps.length;
+
+    if (available < needed) {
+        log(bot, 'Need ' + needed + ' blocks, have ' + available + '. Checking chests...');
+        // チェストから材料を取得（material が決まっていない場合は候補順に試す）
+        const _matsToTry = material ? [material, ..._preferMats.filter(m => m !== material)] : _preferMats;
+        for (const _tryMat of _matsToTry) {
+            try {
+                const _before = _countMat(_tryMat);
+                await takeFromChest(bot, _tryMat, needed - available);
+                const _after = _countMat(_tryMat);
+                if (_after > _before) {
+                    material = _tryMat;
+                    available = _after;
+                    log(bot, 'Took ' + (_after - _before) + ' ' + _tryMat + ' from chest (total: ' + available + ')');
+                    if (available >= needed) break;
+                }
+            } catch(_e) {}
+        }
+    }
+
+    if (!material || available === 0) {
+        log(bot, 'No repair material available! Place building materials in a nearby chest or collect them.');
+        return scan;
+    }
+    const toRepair = Math.min(needed, available);
+
+    // 4. 各ギャップにブロックを配置（ドア位置は保護）
+    const doorPos = scan.door || bot._houseStructure?.door;
+    let repaired = 0;
+    bot._repairMode = true; // placeBlock の家ガードをバイパス
+    for (let i = 0; i < toRepair; i++) {
+        const gap = scan.gaps[i];
+        try {
+            // ドア位置には壁材を置かない（ドアを配置するか、スキップ）
+            if (doorPos && gap.x === doorPos.x && gap.z === doorPos.z && (gap.y - (scan.bounds?.y || 0)) <= 2) {
+                const hasDoor = bot.inventory.items().find(it => it.name.includes('_door'));
+                if (hasDoor) {
+                    await placeBlock(bot, hasDoor.name, gap.x, gap.y, gap.z);
+                    repaired++;
+                    log(bot, 'Placed door at ' + gap.x + ',' + gap.y + ',' + gap.z);
+                }
+                continue;
+            }
+            const block = bot.blockAt(new Vec3(gap.x, gap.y, gap.z));
+            if (block && block.name !== 'air' && block.name !== 'cave_air') continue;
+            // 既にドアがある場所には壁材を置かない
+            if (block && block.name.includes('_door')) continue;
+            await placeBlock(bot, material, gap.x, gap.y, gap.z);
+            repaired++;
+        } catch (e) {
+            log(bot, 'Could not place at ' + gap.x + ',' + gap.y + ',' + gap.z + ': ' + e.message);
+        }
+    }
+    bot._repairMode = false;
+    log(bot, 'Repaired ' + repaired + '/' + scan.gaps.length + ' wall gaps with ' + material + '.');
+
+    // 5. 再スキャンで確認
+    const rescan = await scanStructure(bot);
+    if (rescan.enclosed) {
+        log(bot, 'House is now fully enclosed! ' + rescan.description);
+    } else if (rescan.gaps && rescan.gaps.length > 0) {
+        log(bot, 'Still ' + rescan.gaps.length + ' gaps remaining. May need more material or another !repairHouse.');
+    }
+    return rescan;
+}
 export async function useToolOn(bot, toolName, targetName) {
     /**
      * Equip a tool and use it on the nearest target.

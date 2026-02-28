@@ -33,16 +33,16 @@
         "yargs": "^17.7.2"
     },
     "overrides": {
-      "canvas": "^3.1.0",
-      "gl": "^8.1.6"
+        "canvas": "^3.1.0",
+        "gl": "^8.1.6"
     },
     "scripts": {
         "postinstall": "patch-package",
         "start": "node main.js"
     },
     "devDependencies": {
-        "@eslint/js": "^9.13.0",
-        "eslint": "^9.13.0",
+        "@eslint/js": "^9.39.3",
+        "eslint": "^9.39.3",
         "eslint-plugin-no-floating-promise": "^2.0.0",
         "globals": "^15.11.0",
         "patch-package": "^8.0.0"

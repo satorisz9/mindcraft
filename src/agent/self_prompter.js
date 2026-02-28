@@ -60,20 +60,238 @@ export class SelfPrompter {
         }
         console.log('starting self-prompt loop')
         this.loop_active = true;
+        try { // [mindaxis-patch:loop-guard] 例外時に loop_active を確実にリセット
         let no_command_count = 0;
         const MAX_NO_COMMAND = 3;
         while (!this.interrupt) {
-            const msg = `You are self-prompting with the goal: '${this.prompt}'. Your next response MUST contain a command with this syntax: !commandName. Respond:`;
+            // [mindaxis-patch:house-hint] 家の状態をヒントとして追加
+            let houseHint = '';
+            {
+                let hs = this.agent.bot._houseStructure;
+                // house.json から復元（_houseStructure が未設定の場合）
+                if (!hs) {
+                    try {
+                        const _fs = await import('fs');
+                        const _housePath = './bots/' + this.agent.bot.username + '/house.json';
+                        if (_fs.existsSync(_housePath)) {
+                            const _hd = JSON.parse(_fs.readFileSync(_housePath, 'utf8'));
+                            if (_hd && _hd.bounds) {
+                                this.agent.bot._houseStructure = _hd;
+                                hs = _hd;
+                            }
+                        }
+                    } catch(_e) {}
+                }
+                if (hs && hs.enclosed && hs.cramped) {
+                    const _expandSuggest = hs.description && hs.description.match(/!expandHouse\([^)]+\)/);
+                    houseHint = ' YOUR HOUSE IS TOO SMALL: Interior has only ' + (hs.interiorArea || '?') + ' blocks with ' + (hs.furniture ? hs.furniture.length : '?') + ' furniture items. Use !expandHouse to make it bigger BEFORE adding more furniture. Suggested: ' + (_expandSuggest ? _expandSuggest[0] : '!expandHouse("east", 3)') + '. After expanding, run !scanHouse to update.';
+                } else if (hs && hs.enclosed && hs.interior) {
+                    let _furnitureNote = '';
+                    if (hs.furniture && hs.furniture.length > 0) {
+                        const _furnitureNames = [...new Set(hs.furniture.map(f => f.split('@')[0]))];
+                        _furnitureNote = ' Your house already has: ' + _furnitureNames.join(', ') + '. Do NOT craft items you already have placed (e.g. if you have a bed, use !goToBed instead of crafting a new one).';
+                    }
+                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home. Place furniture INSIDE interior bounds (x=' + hs.interior.x1 + '-' + hs.interior.x2 + ', z=' + hs.interior.z1 + '-' + hs.interior.z2 + ').' + _furnitureNote;
+                } else if (hs && hs.bounds && !hs.enclosed) {
+                    houseHint = ' YOU HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + ' that may need repair. Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home, then !scanHouse to check it.';
+                } else if (hs && hs.bounds) {
+                    houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! Use !goToCoordinates(' + Math.floor((hs.bounds.x1+hs.bounds.x2)/2) + ', ' + ((hs.bounds.y||69)+1) + ', ' + Math.floor((hs.bounds.z1+hs.bounds.z2)/2) + ', 2) to go home.';
+                }
+            }
+            // [mindaxis-patch:plan-hint-v2] プランヒント + 死亡タイマー（critical対応）
+            let planHint = '';
+            {
+                // --- 死亡アイテム回収タイマー ---
+                const _deathTime = this.agent.bot._lastDeathTime;
+                if (_deathTime && Date.now() - _deathTime < 300000) {
+                    const _remaining = Math.ceil((300000 - (Date.now() - _deathTime)) / 1000);
+                    const _deathPos = this.agent.memory_bank.recallPlace('last_death_position');
+                    const _deathPosText = _deathPos ? `x=${Math.round(_deathPos[0])}, y=${Math.round(_deathPos[1])}, z=${Math.round(_deathPos[2])}` : 'unknown';
+                    planHint += ' URGENT: You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + '. Use !goToCoordinates(' + ((_deathPos&&Math.round(_deathPos[0]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[1]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[2]))||'?') + ', 2) to recover items (' + _remaining + 's left before despawn). // [mindaxis-patch:death-coords-hint]';
+                } else if (_deathTime && Date.now() - _deathTime >= 300000) {
+                    planHint += ' Your dropped items have DESPAWNED (5+ minutes since death). Do NOT try to recover them. Resume normal activities and your current plan.';
+                    this.agent.bot._lastDeathTime = null;
+                }
+                // --- マクロプランヒント ---
+                try {
+                    const _fs = await import('fs');
+                    const _planPath = process.env.MINDAXIS_PLAN_PATH;
+                    if (_planPath && _fs.existsSync(_planPath)) {
+                        const _pd = JSON.parse(_fs.readFileSync(_planPath, 'utf8'));
+                        if (_pd && _pd.plans && _pd.plans.length > 0) {
+                            const _ci = _pd.currentPlanIndex || 0;
+                            const _plan = _pd.plans[_ci];
+                            if (_plan && _plan.status !== 'completed') {
+                                const _steps = _plan.steps || [];
+                                const _currentStep = _steps.findIndex(s => !s.done);
+                                const _totalSteps = _steps.length;
+                                if (_currentStep >= 0) {
+                                    const _isCritical = _steps[_currentStep].critical;
+                                    const _skipRule = _isCritical
+                                        ? 'This step is CRITICAL and CANNOT be skipped. But do NOT over-prepare! First !inventory to see what you already have, then !takeFromChest for missing items. Stone tools are fine if iron is not available — do NOT spend more than 2 turns gathering materials. Leave with minimum gear (stone tools + food) rather than wasting time.'
+                                        : 'If you cannot find what the step requires after 2-3 attempts, use !planSkip to skip it and move on — do NOT keep searching for the same thing or get sidetracked collecting other resources.';
+                                    planHint += ' CURRENT PLAN: 「' + _plan.goal + '」(Step ' + (_currentStep+1) + '/' + _totalSteps + ': ' + _steps[_currentStep].step + '). PLAN RULE: Follow the current step. When done, use !planDone to mark complete and advance. ' + _skipRule + ' IMPORTANT: Do NOT build a new house — you already have one. ONLY build structures if the current plan step explicitly requires it.';
+                                } else {
+                                    planHint += ' PLAN 「' + _plan.goal + '」is all steps done. Use !planNext to move to next plan.';
+                                }
+                            }
+                            // 日常ルーチン
+                            if (_pd.dailyRoutine) {
+                                const _time = this.agent.bot.time?.timeOfDay;
+                                if (_time != null) {
+                                    if (_time >= 12000 && _time < 13000) {
+                                        planHint += ' EVENING: Go home, organize inventory, store items in chests.';
+                                    } else if (_time >= 13000 || _time < 100) {
+                                        planHint += ' NIGHT: Stay inside your house. You have a bed placed at home — use !goToBed to sleep. Do NOT craft a new bed. If !goToBed fails, go home first with !goToCoordinates then try !goToBed again. NEVER build a new house or craft a new bed.';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch(_pe) {}
+                // インベントリ概要（アイテム名のみ、個数なし）
+                try {
+                    const _items = this.agent.bot.inventory.items();
+                    if (_items.length > 0) {
+                        const _names = [...new Set(_items.map(i => i.name))];
+                        planHint += ' INVENTORY: ' + _names.join(', ') + '.';
+                    } else {
+                        planHint += ' INVENTORY: empty.';
+                    }
+                } catch(_ie) {}
+                // チェスト概要（家のチェストのみ、アイテム名のみ）
+                try {
+                    let _chestNames = this.agent.bot._chestSummary;
+                    if (!_chestNames) {
+                        const _fs3 = await import('fs');
+                        const _csPath = './bots/' + this.agent.bot.username + '/chest_summary.json';
+                        if (_fs3.existsSync(_csPath)) {
+                            const _csData = JSON.parse(_fs3.readFileSync(_csPath, 'utf8'));
+                            _chestNames = _csData.items;
+                            this.agent.bot._chestSummary = _chestNames;
+                        }
+                    }
+                    if (_chestNames && _chestNames.length > 0) {
+                        planHint += ' HOME CHEST: ' + _chestNames.join(', ') + '.';
+                    }
+                } catch(_ce) {}
+                // [mindaxis-patch:underwater-emergency-hint] 水中緊急ヒント（頭が水没した場合のみ）
+                try {
+                    const _uwBot = this.agent.bot;
+                    if (_uwBot.entity) {
+                        const _eyePos = _uwBot.entity.position.offset(0, 1.62, 0);
+                        const _eyeBlock = _uwBot.blockAt(_eyePos);
+                        const _headSubmerged = _eyeBlock && (_eyeBlock.name === 'water' || _eyeBlock.name === 'flowing_water');
+                        if (_headSubmerged) {
+                            planHint += ' UNDERWATER EMERGENCY: Your head is underwater and you will drown! Your NEXT action MUST be !goToSurface — it swims to shore and gets you above water. Do NOT call !moveAway while underwater.';
+                        }
+                    }
+                } catch(_uwe) {}
+                // [mindaxis-patch:gameplay-tips] ゲームプレイのヒント
+                planHint += ' TIPS: Breaking placed blocks (torches, crafting_table, furnace, chests, planks, fences, etc.) drops them into your inventory — you can recover resources by mining them. If !goToCoordinates keeps failing near water, craft a boat (!craftRecipe("oak_boat", 1) needs 5 planks) and use !boatTo(x, y, z) to cross water.';
+            }
+            const msg = `You are self-prompting with the goal: '${this.prompt}'.${houseHint}${planHint} Your next response MUST contain a command with this syntax: !commandName. /* [mindaxis-patch:chest-management] */ CHEST RULE: Always place chests at your base - NEVER place chests in random locations or you will lose items. If you are not at base, carry items back first. RESOURCE RULE: Before crafting or searching, ALWAYS !takeFromChest first! Check raw materials (oak_log, iron_ingot, coal, string). Example: !takeFromChest("oak_log") before searching for wood. Do NOT take furniture (bed, furnace, crafting_table) from chests — they are already placed in your house. BUILDING RULE: NEVER place cobblestone, stone, dirt, oak_planks, or other building blocks inside your house. Only place furniture (bed, chest, furnace, crafting_table, torch). FURNITURE PLACEMENT: Place furniture against the back and side walls, away from the door entrance. Keep the area near the door clear for easy entry/exit. Respond:`;
             
-            let used_command = await this.agent.handleMessage('system', msg, -1);
+            // [mindaxis-patch:cmd-watchdog] コマンド90秒ウォッチドッグ — ハングするコマンドを強制中断
+            const _wdBot = this.agent.bot;
+            const _watchdog = setTimeout(() => {
+                try { _wdBot.interrupt_code = true; } catch(_we) {}
+                try { _wdBot.pathfinder.stop(); } catch(_we) {}
+                console.log('[mindaxis] Watchdog: command force-interrupted after 90s');
+            }, 90000);
+            let used_command;
+            try {
+                used_command = await this.agent.handleMessage('system', msg, -1);
+            } finally {
+                clearTimeout(_watchdog);
+            }
+            // [mindaxis-patch:loop-detect-v3] 同じステップで8ターン→物理スタックならvision-unstuck、論理スタックなら!planSkip
+            try {
+                if (this._loopStepKey == null) this._loopStepKey = '';
+                if (this._loopTurns == null) this._loopTurns = 0;
+                if (this._loopStartPos == null) this._loopStartPos = null;
+                const _fs2 = await import('fs');
+                const _lp = process.env.MINDAXIS_PLAN_PATH;
+                if (_lp && _fs2.existsSync(_lp)) {
+                    const _lpd = JSON.parse(_fs2.readFileSync(_lp, 'utf8'));
+                    const _lci = _lpd.currentPlanIndex || 0;
+                    const _lplan = _lpd.plans && _lpd.plans[_lci];
+                    if (_lplan && _lplan.steps) {
+                        const _lstep = _lplan.steps.findIndex(s => !s.done);
+                        const _lsText = (_lstep >= 0 && _lplan.steps[_lstep]) ? _lplan.steps[_lstep].step || '' : '';
+                        const _stepKey = _lci + ':' + _lstep;
+                        if (_stepKey === this._loopStepKey) {
+                            this._loopTurns++;
+                        } else {
+                            this._loopStepKey = _stepKey;
+                            this._loopTurns = 0;
+                            // 新しいステップ開始時の位置を記録
+                            const _bp = this.agent.bot.entity ? this.agent.bot.entity.position : null;
+                            this._loopStartPos = _bp ? { x: _bp.x, y: _bp.y, z: _bp.z } : null;
+                        }
+                        // 毎ターン位置チェック: 物理スタック=3ターン、論理スタック=8ターン
+                        let _isPhysical = false;
+                        const _curPos = this.agent.bot.entity ? this.agent.bot.entity.position : null;
+                        if (this._loopStartPos && _curPos) {
+                            const _dx = _curPos.x - this._loopStartPos.x;
+                            const _dy = _curPos.y - this._loopStartPos.y;
+                            const _dz = _curPos.z - this._loopStartPos.z;
+                            const _dist = Math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz);
+                            _isPhysical = _dist < 5;
+                        }
+                        const _threshold = _isPhysical ? 3 : 8;
+                        if (this._loopTurns >= _threshold) {
+                            if (_isPhysical) {
+                                console.log('[mindaxis] PHYSICAL stuck: plan ' + _lci + ' step ' + (_lstep+1) + ', ' + this._loopTurns + ' turns, < 5 blocks moved');
+                            } else {
+                                console.log('[mindaxis] LOGICAL stuck: plan ' + _lci + ' step ' + (_lstep+1) + ', ' + this._loopTurns + ' turns');
+                            }
+                            this._loopTurns = 0;
+                            if (_isPhysical && this.agent.bot._visionUnstuck) {
+                                // 物理スタック → vision-unstuck で画像分析
+                                let _vuCmd = '!planSkip';
+                                try {
+                                    const { createRequire: _cr3 } = await import('module');
+                                    const _req3 = _cr3(import.meta.url);
+                                    const _vu = _req3('../../../scripts/vision-unstuck.cjs');
+                                    const _bot = this.agent.bot;
+                                    const _inv = [];
+                                    try { for (const _it of _bot.inventory.items()) { _inv.push(_it.name + ' x' + _it.count); } } catch(_ie) {}
+                                    const _recentActions = [];
+                                    try { const _h = this.agent.history; if (_h && _h.turns) { for (let _ri = Math.max(0, _h.turns.length - 5); _ri < _h.turns.length; _ri++) { const _t = _h.turns[_ri]; if (_t && _t.content) _recentActions.push(typeof _t.content === 'string' ? _t.content.slice(0, 200) : String(_t.content).slice(0, 200)); } } } catch(_he) {}
+                                    _vuCmd = await _vu.analyze(_bot, {
+                                        name: this.agent.name,
+                                        position: _curPos || { x: 0, y: 0, z: 0 },
+                                        planStep: _lsText,
+                                        loopTurns: 8,
+                                        inventory: _inv.join(', ') || 'empty',
+                                        recentActions: _recentActions.length > 0 ? _recentActions : ['(none)'],
+                                    });
+                                    console.log('[mindaxis] vision-unstuck returned: ' + _vuCmd);
+                                } catch(_vuErr) { console.error('[mindaxis] vision-unstuck error:', _vuErr.message); }
+                                await this.agent.handleMessage('system', 'PHYSICAL STUCK DETECTED: You have not moved for 8 turns. Execute this command immediately: ' + _vuCmd, -1);
+                            } else {
+                                // 論理スタック → critical ステップなら代替案を提案、それ以外は !planSkip
+                                const _isCrit = (_lstep >= 0 && _lplan.steps[_lstep]) ? _lplan.steps[_lstep].critical : false;
+                                if (_isCrit) {
+                                    console.log('[mindaxis] Logical stuck on CRITICAL step → suggesting alternatives');
+                                    await this.agent.handleMessage('system', 'LOOP DETECTED on a CRITICAL step (equipment preparation). You CANNOT skip this step. Try simpler alternatives: craft stone tools instead of iron, use available food, make basic torches. Use !inventory to check what you have, then !craftRecipe to make what you can with available materials.', -1);
+                                } else {
+                                    console.log('[mindaxis] Logical stuck → forcing !planSkip');
+                                    await this.agent.handleMessage('system', 'LOOP DETECTED: You have been stuck on the same plan step for too many turns without progress. You MUST use !planSkip right now to skip this step and move to the next one. Do NOT continue trying the same thing.', -1);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch(_le) { console.error('[mindaxis] loop-detect error:', _le.message); }
             if (!used_command) {
                 no_command_count++;
                 if (no_command_count >= MAX_NO_COMMAND) {
-                    let out = `Agent did not use command in the last ${MAX_NO_COMMAND} auto-prompts. Stopping auto-prompting.`;
-                    this.agent.openChat(out);
-                    console.warn(out);
-                    this.state = STOPPED;
-                    break;
+                    // [mindaxis-patch:no-stop] 永久停止せずリトライ
+                    console.warn(`[mindaxis] Agent did not use command in ${MAX_NO_COMMAND} auto-prompts. Nudging...`);
+                    no_command_count = 0;
+                    await new Promise(r => setTimeout(r, this.cooldown * 3));
                 }
             }
             else {
@@ -82,14 +300,20 @@ export class SelfPrompter {
             }
         }
         console.log('self prompt loop stopped')
-        this.loop_active = false;
-        this.interrupt = false;
+        } catch (err) {
+            // [mindaxis-patch:loop-finally] ループ内例外をキャッチ
+            console.error('[mindaxis] Self-prompt loop crashed:', err);
+        } finally {
+            this.loop_active = false;
+            this.interrupt = false;
+        }
     }
 
     update(delta) {
         // automatically restarts loop
-        if (this.state === ACTIVE && !this.loop_active && !this.interrupt) {
-            if (this.agent.isIdle())
+        if (this.state === ACTIVE && !this.loop_active && !this.interrupt) { // [mindaxis-patch:active-restart-lock]
+            const _prompterBusy2 = this.agent.prompter && this.agent.prompter.most_recent_msg_time && (Date.now() - this.agent.prompter.most_recent_msg_time < 15000);
+            if (this.agent.isIdle() && !_prompterBusy2)
                 this.idle_time += delta;
             else
                 this.idle_time = 0;
@@ -97,6 +321,29 @@ export class SelfPrompter {
             if (this.idle_time >= this.cooldown) {
                 console.log('Restarting self-prompting...');
                 this.startLoop();
+                this.idle_time = 0;
+            }
+        }
+        // [mindaxis-patch:auto-restart] [mindaxis-patch:default-goal] STOPPED / 未起動でも自動開始
+        else if (this.state === STOPPED && !this.loop_active && !this.interrupt) { // [mindaxis-patch:auto-start-lock]
+            // prompter が直近 15 秒以内に API 呼び出し中なら自動起動を遅延
+            const _prompterBusy = this.agent.prompter && this.agent.prompter.most_recent_msg_time && (Date.now() - this.agent.prompter.most_recent_msg_time < 15000);
+            if (this.agent.isIdle() && !_prompterBusy)
+                this.idle_time += delta;
+            else
+                this.idle_time = 0;
+
+            const _threshold = this.prompt ? 60000 : 30000;
+            if (this.idle_time >= _threshold) {
+                if (!this.prompt) {
+                    const _defaultGoal = process.env.MINDAXIS_DEFAULT_GOAL || "Explore the area, gather resources like wood and stone, craft basic tools, and build a small shelter. Stay safe and keep busy!";
+                    console.log('[mindaxis] No self-prompting goal set. Auto-starting with default goal:', _defaultGoal);
+                    this.start(_defaultGoal);
+                } else {
+                    console.log('[mindaxis] Self-prompter auto-restarting from STOPPED state...');
+                    this.state = ACTIVE;
+                    this.startLoop();
+                }
                 this.idle_time = 0;
             }
         }

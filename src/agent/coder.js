@@ -157,6 +157,11 @@ export class Coder {
         code = this._sanitizeCode(code);
         let src = '';
         code = code.replaceAll('console.log(', 'log(bot,');
+        // [mindaxis-patch:iife-await] GPT が生成する IIFE パターンに await を追加
+        code = code.replace(/^(\s*)\(async\s*\(\)\s*=>\s*\{/m, '$1await (async () => {');
+        // require() → ESM 環境では無効なので除去
+        code = code.replace(/const\s+\w+\s*=\s*require\([^)]+\)\.goals;?/g, '');
+        code = code.replace(/require\([^)]+\)/g, '{}');
         code = code.replaceAll('log("', 'log(bot,"');
 
         console.log(`Generated code: """${code}"""`);

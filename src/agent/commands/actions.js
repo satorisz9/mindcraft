@@ -26,6 +26,741 @@ function runAsAction (actionFn, resume = false, timeout = -1) {
 }
 
 export const actionsList = [
+
+
+    // [mindaxis-patch:repair-house] 家の修復コマンド
+    {
+        name: '!repairHouse',
+        description: 'Detect and repair missing wall blocks in your house. Use when !scanHouse shows the structure is not enclosed or when your house walls are damaged.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            agent.bot._allowHouseDig = true;
+            try {
+            const result = await skills.repairStructure(agent.bot);
+            // 修復結果をキャッシュ
+            const prev = agent.bot._houseStructure;
+            if (!result.enclosed && prev?.bounds) {
+                result.bounds = prev.bounds;
+                result.door = result.door || prev.door;
+                result.wallMaterial = result.wallMaterial || prev.wallMaterial;
+            }
+            agent.bot._houseStructure = result;
+            } finally { agent.bot._allowHouseDig = false; }
+        })
+    },
+    // [mindaxis-patch:scan-house] 家の構造スキャンコマンド
+    {
+        name: '!scanHouse',
+        description: 'Scan the structure around you to detect walls, roof, door, and furniture. Use this at your base to understand your house layout before placing beds, chests, or furniture.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            const bot = agent.bot;
+            // 家が既存でボットが遠い場合は警告
+            const prev = bot._houseStructure;
+            if (prev && prev.bounds) {
+                const _p = bot.entity.position;
+                const _b = prev.bounds;
+                const _cx = (_b.x1 + _b.x2) / 2, _cz = (_b.z1 + _b.z2) / 2;
+                const _dist = Math.sqrt((_p.x - _cx) ** 2 + (_p.z - _cz) ** 2);
+                if (_dist > 30) {
+                    skills.log(bot, 'You are ' + Math.floor(_dist) + ' blocks away from your house. Go home first with !goToCoordinates(' + Math.floor(_cx) + ', ' + ((_b.y||69)+1) + ', ' + Math.floor(_cz) + ', 2) then run !scanHouse.');
+                    return;
+                }
+            }
+            const result = await skills.scanStructure(bot);
+            // キャッシュして self-prompt に注入できるようにする
+            // not-enclosed でも以前の bounds/door を保持（修復用）
+            if (!result.enclosed && prev?.bounds) {
+                result.bounds = prev.bounds;
+                result.door = result.door || prev.door;
+                result.wallMaterial = result.wallMaterial || prev.wallMaterial;
+            }
+            // 家具が見つからなかったが以前の記録がある場合、保持する（描画距離外の可能性）
+            if ((!result.furniture || result.furniture.length === 0) && prev?.furniture && prev.furniture.length > 0) {
+                result.furniture = prev.furniture;
+            }
+            bot._houseStructure = result;
+            // house.json に家データを永続化（memory.json は history.save() で上書きされるため別ファイル）
+            try {
+                const _fs = await import('fs');
+                const _housePath = './bots/' + bot.username + '/house.json';
+                _fs.writeFileSync(_housePath, JSON.stringify({ bounds: result.bounds, door: result.door, wallMaterial: result.wallMaterial, enclosed: !!result.enclosed, interior: result.interior, interiorArea: result.interiorArea, furniture: result.furniture || [] }, null, 2));
+            } catch(_e) {}
+            skills.log(agent.bot, result.description);
+        })
+    },
+
+    // [mindaxis-patch:build-house] 建築専用コマンド
+    {
+        name: '!buildHouse',
+        description: 'Build a simple house at the current location with proper coordinate handling.',
+        params: {
+            'width': { type: 'int', description: 'Width of the house (3-10)', domain: [3, 11] },
+            'depth': { type: 'int', description: 'Depth of the house (3-10)', domain: [3, 11] },
+            'material': { type: 'string', description: 'Wall material (e.g., oak_planks, cobblestone)' }
+        },
+        perform: runAsAction(async (agent, width, depth, material) => {
+            const bot = agent.bot;
+            const Vec3 = (await import('vec3')).default;
+            const log = (msg) => agent.bot.chat(msg);
+
+            // 家が既にある場合は拒否
+            const _hs = bot._houseStructure;
+            if (_hs && _hs.bounds) {
+                skills.log(bot, 'You already have a house at x=' + _hs.bounds.x1 + '-' + _hs.bounds.x2 + ' z=' + _hs.bounds.z1 + '-' + _hs.bounds.z2 + '. Use !goToCoordinates to go home, then !repairHouse if needed. Do NOT build a new house.');
+                return;
+            }
+
+            // 1. 地形スキャン
+            const pos = bot.entity.position;
+            const ox = Math.floor(pos.x) + 2;
+            const oz = Math.floor(pos.z) + 2;
+            let maxGroundY = -999;
+            let minGroundY = 999;
+            const groundMap = {};
+
+            for (let dx = 0; dx < width; dx++) {
+                for (let dz = 0; dz < depth; dz++) {
+                    for (let y = Math.floor(pos.y) + 5; y >= Math.floor(pos.y) - 10; y--) {
+                        const b = bot.blockAt(new Vec3(ox + dx, y, oz + dz));
+                        if (b && b.name !== 'air' && b.name !== 'cave_air' &&
+                            !b.name.includes('leaves') && !b.name.includes('flower') &&
+                            b.name !== 'tall_grass' && b.name !== 'short_grass' && b.name !== 'snow') {
+                            groundMap[dx + ',' + dz] = y;
+                            if (y > maxGroundY) maxGroundY = y;
+                            if (y < minGroundY) minGroundY = y;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            const oy = maxGroundY;
+            const variance = maxGroundY - minGroundY;
+
+            if (variance > 3) {
+                return `Terrain too uneven (variance: ${variance} blocks). Move to flatter ground.`;
+            }
+
+            // 1.5. インベントリチェック — 必要素材が足りなければ早期リターン
+            const floorBlocks = width * depth;
+            const wallBlocks = (width * 2 + (depth - 2) * 2) * 3 - 2; // 3段, ドア穴2マス分引く
+            const roofBlocks = width * depth;
+            const totalNeeded = floorBlocks + wallBlocks + roofBlocks;
+            const inv = bot.inventory.items();
+            const materialCount = inv.filter(i => i.name === material).reduce((s, i) => s + i.count, 0);
+            const doorCount = inv.filter(i => i.name === 'oak_door').reduce((s, i) => s + i.count, 0);
+            const torchCount = inv.filter(i => i.name === 'torch').reduce((s, i) => s + i.count, 0);
+
+            const missing = [];
+            if (materialCount < totalNeeded) missing.push(`${material}: have ${materialCount}, need ${totalNeeded}`);
+            if (doorCount < 1) missing.push(`oak_door: have ${doorCount}, need 1`);
+            if (torchCount < 2) missing.push(`torch: have ${torchCount}, need 2`);
+
+            if (missing.length > 0) {
+                return `Not enough materials to build! Missing: ${missing.join(', ')}. Gather resources first with !collectBlocks or !craftRecipe.`;
+            }
+
+            log(`Building ${width}x${depth} house at ox=${ox} oy=${oy} oz=${oz} (using ${totalNeeded} ${material})`);
+
+            // 2. 床を敷く
+            for (let dx = 0; dx < width; dx++) {
+                for (let dz = 0; dz < depth; dz++) {
+                    await skills.placeBlock(bot, material, ox + dx, oy, oz + dz);
+                    await skills.wait(bot, 100);
+                }
+            }
+
+            // 3. 壁を建てる (3ブロック高)
+            const wallHeight = 3;
+            const doorX = Math.floor(width / 2);
+
+            for (let h = 1; h <= wallHeight; h++) {
+                // 北壁 (z = oz)
+                for (let dx = 0; dx < width; dx++) {
+                    if (dx === doorX && h <= 2) continue; // ドア穴
+                    await skills.placeBlock(bot, material, ox + dx, oy + h, oz);
+                    await skills.wait(bot, 50);
+                }
+                // 南壁 (z = oz + depth - 1)
+                for (let dx = 0; dx < width; dx++) {
+                    await skills.placeBlock(bot, material, ox + dx, oy + h, oz + depth - 1);
+                    await skills.wait(bot, 50);
+                }
+                // 西壁 (x = ox)
+                for (let dz = 1; dz < depth - 1; dz++) {
+                    await skills.placeBlock(bot, material, ox, oy + h, oz + dz);
+                    await skills.wait(bot, 50);
+                }
+                // 東壁 (x = ox + width - 1)
+                for (let dz = 1; dz < depth - 1; dz++) {
+                    await skills.placeBlock(bot, material, ox + width - 1, oy + h, oz + dz);
+                    await skills.wait(bot, 50);
+                }
+            }
+
+            // 4. 屋根
+            const roofY = oy + wallHeight + 1;
+            for (let dx = 0; dx < width; dx++) {
+                for (let dz = 0; dz < depth; dz++) {
+                    await skills.placeBlock(bot, material, ox + dx, roofY, oz + dz);
+                    await skills.wait(bot, 50);
+                }
+            }
+
+            // 5. ドアを設置
+            try {
+                await skills.placeBlock(bot, 'oak_door', ox + doorX, oy + 1, oz);
+            } catch (e) {
+                log('Could not place door');
+            }
+
+            // 6. 内装（松明）
+            try {
+                await skills.placeBlock(bot, 'torch', ox + 1, oy + 2, oz + 1, 'side');
+                await skills.placeBlock(bot, 'torch', ox + width - 2, oy + 2, oz + depth - 2, 'side');
+            } catch (e) {
+                log('Could not place torches');
+            }
+
+            return `Built ${width}x${depth} house at (${ox}, ${oy}, ${oz}) with ${material}`;
+        }, false, 5)
+    },
+    // [mindaxis-patch:boat-nav] ボート航行コマンド
+    {
+        name: '!boatTo',
+        description: 'Navigate to coordinates by boat across water. Automatically crafts a boat if you have 5+ planks. Use when !goToCoordinates fails near large water bodies.',
+        params: {
+            'x': { type: 'int', description: 'x coordinate' },
+            'y': { type: 'int', description: 'y coordinate' },
+            'z': { type: 'int', description: 'z coordinate' }
+        },
+        perform: runAsAction(async (agent, x, y, z) => {
+            const bot = agent.bot;
+            const Vec3 = (await import('vec3')).default;
+
+            // --- 1. Get or craft a boat ---
+            let boatItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+            if (!boatItem) {
+                skills.log(bot, 'No boat in inventory. Checking for planks to craft one...');
+                const planks = bot.inventory.items().filter(i => i.name.includes('planks'));
+                const totalPlanks = planks.reduce((sum, i) => sum + i.count, 0);
+                if (totalPlanks < 5) {
+                    skills.log(bot, 'Need a boat or 5 planks to craft one. Collect 5 planks first (!collectBlocks("oak_log", 2) then !craftRecipe("oak_planks", 2)).');
+                    return;
+                }
+                try {
+                    await skills.craftRecipe(bot, 'oak_boat');
+                } catch(e) {
+                    skills.log(bot, 'Failed to craft boat: ' + e.message + '. May need a crafting table nearby.');
+                    return;
+                }
+                boatItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+                if (!boatItem) {
+                    skills.log(bot, 'Failed to craft boat. Try placing a crafting table first.');
+                    return;
+                }
+                skills.log(bot, 'Crafted a boat!');
+            }
+
+            // --- 2. Find water nearby ---
+            const waterBlockId = bot.registry.blocksByName['water'] ? bot.registry.blocksByName['water'].id : null;
+            let waterBlock = waterBlockId != null ? bot.findBlock({ matching: waterBlockId, maxDistance: 32 }) : null;
+            if (!waterBlock) {
+                skills.log(bot, 'No water nearby to place boat. Use !goToCoordinates instead.');
+                return;
+            }
+
+            // --- 3. Walk close to water ---
+            const wp = waterBlock.position;
+            try {
+                await skills.goToPosition(bot, wp.x, wp.y + 1, wp.z, 3);
+            } catch(e) {
+                // goToPosition failed but bot may still be close enough
+            }
+
+            // --- 4. Equip and place boat ---
+            try {
+                boatItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+                if (!boatItem) { skills.log(bot, 'Lost boat item.'); return; }
+                await bot.equip(boatItem, 'hand');
+            } catch(e) {
+                skills.log(bot, 'Failed to equip boat: ' + e.message);
+                return;
+            }
+
+            // Find closest reachable water block
+            let placeTarget = null;
+            const botPos = bot.entity.position;
+            let bestDist = 999;
+            for (let dx = -4; dx <= 4; dx++) {
+                for (let dz = -4; dz <= 4; dz++) {
+                    for (let dy = -2; dy <= 0; dy++) {
+                        const checkPos = botPos.offset(dx, dy, dz);
+                        const block = bot.blockAt(checkPos);
+                        if (block && block.name === 'water') {
+                            const d = botPos.distanceTo(checkPos);
+                            if (d < bestDist && d <= 5) {
+                                bestDist = d;
+                                placeTarget = block;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!placeTarget) {
+                skills.log(bot, 'Cannot find reachable water block to place boat on.');
+                return;
+            }
+
+            let boatEntity;
+            try {
+                boatEntity = await bot.placeEntity(placeTarget, new Vec3(0, 1, 0));
+            } catch(e) {
+                skills.log(bot, 'Failed to place boat on water: ' + e.message);
+                return;
+            }
+
+            // --- 5. Mount boat ---
+            try {
+                bot.mount(boatEntity);
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Mount timeout')), 5000);
+                    bot.once('mount', () => { clearTimeout(timeout); resolve(); });
+                });
+            } catch(e) {
+                skills.log(bot, 'Failed to mount boat: ' + e.message);
+                return;
+            }
+
+            skills.log(bot, 'Riding boat toward x=' + x + ' z=' + z + '...');
+
+            // --- 6. Navigate by looking at target + moving forward ---
+            const startTime = Date.now();
+            const TIMEOUT = 120000;
+            let stuckCount = 0;
+            let lastPos = bot.entity.position.clone();
+            let landCount = 0;
+
+            while (Date.now() - startTime < TIMEOUT) {
+                if (!bot.vehicle) break;
+
+                const pos = bot.entity.position;
+                const ddx = x - pos.x;
+                const ddz = z - pos.z;
+                const dist = Math.sqrt(ddx * ddx + ddz * ddz);
+
+                if (dist < 15) {
+                    skills.log(bot, 'Close to target (' + Math.floor(dist) + ' blocks). Dismounting.');
+                    break;
+                }
+
+                // Stuck detection
+                if (pos.distanceTo(lastPos) < 0.3) {
+                    stuckCount++;
+                    if (stuckCount > 40) {
+                        skills.log(bot, 'Boat stuck for ~4 seconds. Dismounting.');
+                        break;
+                    }
+                } else {
+                    stuckCount = 0;
+                }
+                lastPos = pos.clone();
+
+                // Land detection: if block below is solid, we hit shore
+                const below = bot.blockAt(pos.offset(0, -1, 0));
+                if (below && below.name !== 'water' && below.boundingBox === 'block') {
+                    landCount++;
+                    if (landCount > 15) {
+                        skills.log(bot, 'Reached land. Dismounting.');
+                        break;
+                    }
+                } else {
+                    landCount = 0;
+                }
+
+                // Steer: look at target then move forward
+                const yaw = Math.atan2(-ddx, -ddz);
+                await bot.look(yaw, 0);
+                bot.moveVehicle(0, 1);
+
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            // --- 7. Dismount ---
+            if (bot.vehicle) {
+                try {
+                    bot.dismount();
+                    await new Promise(r => setTimeout(r, 500));
+                } catch(e) {}
+            }
+
+            const fp = bot.entity.position;
+            const finalDist = Math.sqrt((x - fp.x) ** 2 + (z - fp.z) ** 2);
+            if (finalDist < 20) {
+                skills.log(bot, 'Boat navigation complete! Position: x=' + Math.floor(fp.x) + ' y=' + Math.floor(fp.y) + ' z=' + Math.floor(fp.z) + '. ' + Math.floor(finalDist) + ' blocks from target. Use !goToCoordinates for the last stretch.');
+            } else {
+                skills.log(bot, 'Boat navigation ended. Position: x=' + Math.floor(fp.x) + ' y=' + Math.floor(fp.y) + ' z=' + Math.floor(fp.z) + '. Still ' + Math.floor(finalDist) + ' blocks away. Try !boatTo again or !moveAway(100) to continue.');
+            }
+        })
+    },
+    // [mindaxis-patch:plan-commands-v2] マクロプランニングコマンド（critical guard付き）
+    {
+        name: '!planStatus',
+        description: 'Show current macro plan status, goals, and steps.',
+        perform: runAsAction(async (agent) => {
+            const bot = agent.bot;
+            try {
+                const fs = await import('fs');
+                const planPath = process.env.MINDAXIS_PLAN_PATH;
+                if (!planPath || !fs.existsSync(planPath)) {
+                    skills.log(bot, 'No plan file found.');
+                    return;
+                }
+                const pd = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+                if (!pd || !pd.plans || pd.plans.length === 0) {
+                    skills.log(bot, 'No plans available.');
+                    return;
+                }
+                const ci = pd.currentPlanIndex || 0;
+                let status = 'Plans:\n';
+                pd.plans.forEach((p, i) => {
+                    const marker = i === ci ? '>>>' : '   ';
+                    status += marker + ' ' + (i+1) + '. ' + p.goal + ' [' + (p.status || 'pending') + ']\n';
+                    if (i === ci && p.steps) {
+                        p.steps.forEach((s, j) => {
+                            status += '      ' + (s.done ? '[x]' : '[ ]') + ' ' + (j+1) + '. ' + s.step + '\n';
+                        });
+                    }
+                });
+                skills.log(bot, status);
+            } catch(e) {
+                skills.log(bot, 'Error reading plan: ' + e.message);
+            }
+        })
+    },
+    {
+        name: '!planDone',
+        description: 'Mark the current plan step as completed and advance to the next step.',
+        perform: runAsAction(async (agent) => {
+            const bot = agent.bot;
+            try {
+                const fs = await import('fs');
+                const planPath = process.env.MINDAXIS_PLAN_PATH;
+                if (!planPath || !fs.existsSync(planPath)) {
+                    skills.log(bot, 'No plan file found.');
+                    return;
+                }
+                const pd = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+                const ci = pd.currentPlanIndex || 0;
+                const plan = pd.plans[ci];
+                if (!plan || !plan.steps) {
+                    skills.log(bot, 'No active plan.');
+                    return;
+                }
+                const stepIdx = plan.steps.findIndex(s => !s.done);
+                if (stepIdx < 0) {
+                    skills.log(bot, 'All steps already done. Use !planNext to go to next plan.');
+                    return;
+                }
+                plan.steps[stepIdx].done = true;
+                const nextStep = plan.steps.findIndex(s => !s.done);
+                if (nextStep < 0) {
+                    plan.status = 'completed';
+                    skills.log(bot, 'Step ' + (stepIdx+1) + ' done! Plan 「' + plan.goal + '」completed!');
+                } else {
+                    skills.log(bot, 'Step ' + (stepIdx+1) + ' done! Next: ' + plan.steps[nextStep].step);
+                }
+                fs.writeFileSync(planPath, JSON.stringify(pd, null, 2));
+            } catch(e) {
+                skills.log(bot, 'Error updating plan: ' + e.message);
+            }
+        })
+    },
+    {
+        name: '!planNext',
+        description: 'Skip to the next macro plan goal.',
+        perform: runAsAction(async (agent) => {
+            const bot = agent.bot;
+            try {
+                const fs = await import('fs');
+                const planPath = process.env.MINDAXIS_PLAN_PATH;
+                if (!planPath || !fs.existsSync(planPath)) {
+                    skills.log(bot, 'No plan file found.');
+                    return;
+                }
+                const pd = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+                const ci = pd.currentPlanIndex || 0;
+                if (ci + 1 >= pd.plans.length) {
+                    skills.log(bot, 'No more plans. All plans completed!');
+                    return;
+                }
+                pd.currentPlanIndex = ci + 1;
+                pd.plans[ci + 1].status = 'in_progress';
+                fs.writeFileSync(planPath, JSON.stringify(pd, null, 2));
+                const next = pd.plans[ci + 1];
+                skills.log(bot, 'Switched to plan: 「' + next.goal + '」 Reason: ' + (next.reason || ''));
+            } catch(e) {
+                skills.log(bot, 'Error switching plan: ' + e.message);
+            }
+        })
+    },
+    {
+        name: '!planSkip',
+        description: 'Skip the current step in the active plan.',
+        perform: runAsAction(async (agent) => {
+            const bot = agent.bot;
+            try {
+                const fs = await import('fs');
+                const planPath = process.env.MINDAXIS_PLAN_PATH;
+                if (!planPath || !fs.existsSync(planPath)) {
+                    skills.log(bot, 'No plan file found.');
+                    return;
+                }
+                const pd = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+                const ci = pd.currentPlanIndex || 0;
+                const plan = pd.plans[ci];
+                if (!plan || !plan.steps) {
+                    skills.log(bot, 'No active plan.');
+                    return;
+                }
+                const stepIdx = plan.steps.findIndex(s => !s.done);
+                if (stepIdx < 0) {
+                    skills.log(bot, 'No step to skip.');
+                    return;
+                }
+                if (plan.steps[stepIdx].critical) {
+                    skills.log(bot, 'Step ' + (stepIdx+1) + ' is CRITICAL and cannot be skipped. But do NOT over-prepare! Use !inventory to check what you already have, then !takeFromChest for missing items. Stone tools + food is enough to leave — use !planDone when you have minimum gear.');
+                    return;
+                }
+                plan.steps[stepIdx].done = true;
+                plan.steps[stepIdx].skipped = true;
+                const nextStep = plan.steps.findIndex(s => !s.done);
+                if (nextStep >= 0) {
+                    skills.log(bot, 'Skipped step ' + (stepIdx+1) + '. Next: ' + plan.steps[nextStep].step);
+                } else {
+                    plan.status = 'completed';
+                    skills.log(bot, 'Skipped step ' + (stepIdx+1) + '. Plan completed!');
+                }
+                fs.writeFileSync(planPath, JSON.stringify(pd, null, 2));
+            } catch(e) {
+                skills.log(bot, 'Error skipping step: ' + e.message);
+            }
+        })
+    },
+    // [mindaxis-patch:expand-house] 家の拡張コマンド
+    {
+        name: '!expandHouse',
+        description: 'Expand your house by extending one wall outward. Use when house is too cramped. Args: direction (north/south/east/west), amount (1-4 blocks, default 2).',
+        params: {
+            'direction': { type: 'string', description: 'Wall direction to extend: north, south, east, west' },
+            'amount': { type: 'int', description: 'Blocks to extend (1-4)', domain: [1, 5] }
+        },
+        perform: runAsAction(async (agent, direction, amount) => {
+            const bot = agent.bot;
+            const Vec3 = (await import('vec3')).default;
+            const hs = bot._houseStructure;
+            if (!hs || !hs.bounds) {
+                skills.log(bot, 'No house detected! Run !scanHouse first.');
+                return;
+            }
+            direction = (direction || 'east').toLowerCase().replace(/['"]/g, '');
+            amount = parseInt(amount) || 2;
+            if (amount < 1) amount = 1;
+            if (amount > 4) amount = 4;
+            if (!['north','south','east','west'].includes(direction)) {
+                skills.log(bot, 'Invalid direction: ' + direction + '. Use north/south/east/west.');
+                return;
+            }
+
+            const b = hs.bounds;
+            const mat = hs.wallMaterial || 'oak_planks';
+            const floorY = b.y;
+            const roofY = b.roofY || (floorY + 4);
+            const wallH = roofY - floorY - 1;
+            const width = b.x2 - b.x1 + 1;
+            const depth = b.z2 - b.z1 + 1;
+
+            let spanLen;
+            if (direction === 'north' || direction === 'south') { spanLen = width; }
+            else { spanLen = depth; }
+            const blocksNeeded = spanLen * amount + 2 * wallH * amount + spanLen * wallH + spanLen * amount;
+
+            const inv = bot.inventory.items();
+            let availMat = null;
+            let availCount = 0;
+            const tryMats = [mat, 'cobblestone', 'oak_planks', 'spruce_planks', 'birch_planks', 'stone', 'dirt'];
+            for (const m of tryMats) {
+                const count = inv.filter(i => i.name === m).reduce((s, i) => s + i.count, 0);
+                if (count > 0) {
+                    if (!availMat) { availMat = m; availCount = count; }
+                    else { availCount += count; }
+                }
+            }
+
+            if (!availMat || availCount < 10) {
+                skills.log(bot, 'Need ~' + blocksNeeded + ' blocks to expand. Have ' + availCount + '. Collect more building materials first!');
+                return;
+            }
+
+            skills.log(bot, 'Expanding house ' + direction + ' by ' + amount + ' blocks using ' + (availMat || mat) + '...');
+            bot._allowHouseDig = true;
+            try {
+
+            let newX1 = b.x1, newZ1 = b.z1, newX2 = b.x2, newZ2 = b.z2;
+            if (direction === 'north') { newZ1 = b.z1 - amount; }
+            if (direction === 'south') { newZ2 = b.z2 + amount; }
+            if (direction === 'west') { newX1 = b.x1 - amount; }
+            if (direction === 'east') { newX2 = b.x2 + amount; }
+
+            const useMat = availMat || mat;
+
+            // Phase 1: Break old wall
+            skills.log(bot, 'Phase 1: Breaking old ' + direction + ' wall...');
+            if (direction === 'north' || direction === 'south') {
+                const wz = direction === 'north' ? b.z1 : b.z2;
+                for (let wx = b.x1 + 1; wx < b.x2; wx++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        const bl = bot.blockAt(new Vec3(wx, wy, wz));
+                        if (bl && bl.name !== 'air' && bl.name !== 'cave_air' && !bl.name.includes('door')) {
+                            try { await bot.dig(bl); } catch(e) {}
+                        }
+                    }
+                }
+                for (let wx = b.x1; wx <= b.x2; wx++) {
+                    const rl = bot.blockAt(new Vec3(wx, roofY, wz));
+                    if (rl && rl.name !== 'air') { try { await bot.dig(rl); } catch(e) {} }
+                }
+            } else {
+                const wx = direction === 'west' ? b.x1 : b.x2;
+                for (let wz = b.z1 + 1; wz < b.z2; wz++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        const bl = bot.blockAt(new Vec3(wx, wy, wz));
+                        if (bl && bl.name !== 'air' && bl.name !== 'cave_air' && !bl.name.includes('door')) {
+                            try { await bot.dig(bl); } catch(e) {}
+                        }
+                    }
+                }
+                for (let wz = b.z1; wz <= b.z2; wz++) {
+                    const rl = bot.blockAt(new Vec3(wx, roofY, wz));
+                    if (rl && rl.name !== 'air') { try { await bot.dig(rl); } catch(e) {} }
+                }
+            }
+
+            // Phase 2: Extend floor
+            skills.log(bot, 'Phase 2: Extending floor...');
+            if (direction === 'north' || direction === 'south') {
+                const zStart = direction === 'north' ? newZ1 : b.z2 + 1;
+                const zEnd = direction === 'north' ? b.z1 - 1 : newZ2;
+                for (let fz = zStart; fz <= zEnd; fz++) {
+                    for (let fx = newX1; fx <= newX2; fx++) {
+                        await skills.placeBlock(bot, useMat, fx, floorY, fz);
+                    }
+                }
+            } else {
+                const xStart = direction === 'west' ? newX1 : b.x2 + 1;
+                const xEnd = direction === 'west' ? b.x1 - 1 : newX2;
+                for (let fx = xStart; fx <= xEnd; fx++) {
+                    for (let fz = newZ1; fz <= newZ2; fz++) {
+                        await skills.placeBlock(bot, useMat, fx, floorY, fz);
+                    }
+                }
+            }
+
+            // Phase 3: Extend side walls
+            skills.log(bot, 'Phase 3: Extending side walls...');
+            if (direction === 'north' || direction === 'south') {
+                const zStart = direction === 'north' ? newZ1 : b.z2 + 1;
+                const zEnd = direction === 'north' ? b.z1 - 1 : newZ2;
+                for (let fz = zStart; fz <= zEnd; fz++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        await skills.placeBlock(bot, useMat, b.x1, wy, fz);
+                        await skills.placeBlock(bot, useMat, b.x2, wy, fz);
+                    }
+                }
+            } else {
+                const xStart = direction === 'west' ? newX1 : b.x2 + 1;
+                const xEnd = direction === 'west' ? b.x1 - 1 : newX2;
+                for (let fx = xStart; fx <= xEnd; fx++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        await skills.placeBlock(bot, useMat, fx, wy, b.z1);
+                        await skills.placeBlock(bot, useMat, fx, wy, b.z2);
+                    }
+                }
+            }
+
+            // Phase 4: Build new wall
+            skills.log(bot, 'Phase 4: Building new ' + direction + ' wall...');
+            const doorOnThisWall = hs.door && (
+                (direction === 'north' && hs.door.z === b.z1) ||
+                (direction === 'south' && hs.door.z === b.z2) ||
+                (direction === 'west' && hs.door.x === b.x1) ||
+                (direction === 'east' && hs.door.x === b.x2)
+            );
+            if (direction === 'north' || direction === 'south') {
+                const wz = direction === 'north' ? newZ1 : newZ2;
+                for (let wx = newX1; wx <= newX2; wx++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        if (doorOnThisWall && wx === hs.door.x && (wy - floorY) <= 2) continue;
+                        await skills.placeBlock(bot, useMat, wx, wy, wz);
+                    }
+                }
+            } else {
+                const wx = direction === 'west' ? newX1 : newX2;
+                for (let wz = newZ1; wz <= newZ2; wz++) {
+                    for (let wy = floorY + 1; wy < roofY; wy++) {
+                        if (doorOnThisWall && wz === hs.door.z && (wy - floorY) <= 2) continue;
+                        await skills.placeBlock(bot, useMat, wx, wy, wz);
+                    }
+                }
+            }
+
+            // Phase 5: Extend roof
+            skills.log(bot, 'Phase 5: Extending roof...');
+            if (direction === 'north' || direction === 'south') {
+                const zStart = direction === 'north' ? newZ1 : b.z2 + 1;
+                const zEnd = direction === 'north' ? b.z1 : newZ2;
+                for (let fz = zStart; fz <= zEnd; fz++) {
+                    for (let fx = newX1; fx <= newX2; fx++) {
+                        await skills.placeBlock(bot, useMat, fx, roofY, fz);
+                    }
+                }
+            } else {
+                const xStart = direction === 'west' ? newX1 : b.x2 + 1;
+                const xEnd = direction === 'west' ? b.x1 : newX2;
+                for (let fx = xStart; fx <= xEnd; fx++) {
+                    for (let fz = newZ1; fz <= newZ2; fz++) {
+                        await skills.placeBlock(bot, useMat, fx, roofY, fz);
+                    }
+                }
+            }
+
+            // Phase 6: Relocate door if needed
+            if (doorOnThisWall) {
+                skills.log(bot, 'Phase 6: Relocating door...');
+                let newDoorX = hs.door.x, newDoorZ = hs.door.z;
+                if (direction === 'north') newDoorZ = newZ1;
+                else if (direction === 'south') newDoorZ = newZ2;
+                else if (direction === 'west') newDoorX = newX1;
+                else if (direction === 'east') newDoorX = newX2;
+                await skills.placeBlock(bot, 'oak_door', newDoorX, floorY + 1, newDoorZ);
+            }
+
+            // Phase 7: Re-scan
+            skills.log(bot, 'Re-scanning expanded house...');
+            const rescan = await skills.scanStructure(bot);
+            bot._houseStructure = rescan;
+
+            if (rescan.enclosed) {
+                skills.log(bot, 'House expanded! New size: ' + rescan.size + '. ' + rescan.description);
+            } else {
+                skills.log(bot, 'Expansion done but house may have gaps. Run !repairHouse to fix.');
+            }
+
+            } finally { bot._allowHouseDig = false; }
+        }, false, 300)
+    },
     {
         name: '!newAction',
         description: 'Perform new and unknown custom behaviors that are not available as a command.', 
@@ -283,11 +1018,7 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, item_name, num) => {
             let success = await skills.smeltItem(agent.bot, item_name, num);
-            if (success) {
-                setTimeout(() => {
-                    agent.cleanKill('Safely restarting to update inventory.');
-                }, 500);
-            }
+            // [mindaxis-patch:smelt-no-cleankill] cleanKill 不要（mineflayer がインベントリ自動更新）
         })
     },
     {
@@ -303,8 +1034,111 @@ export const actionsList = [
         description: 'Place a given block in the current location. Do NOT use to build structures, only use for single blocks/torches.',
         params: {'type': { type: 'BlockOrItemName', description: 'The block type to place.' }},
         perform: runAsAction(async (agent, type) => {
-            let pos = agent.bot.entity.position;
-            await skills.placeBlock(agent.bot, type, pos.x, pos.y, pos.z);
+            // [mindaxis-patch:placehere-settle] ピラージャンプ修正
+            const Vec3 = (await import('vec3')).default;
+            let bot = agent.bot;
+            // 家の中で建材ブロック配置を防止（家具のみ許可）
+            {
+                const _hs = bot._houseStructure;
+                if (_hs && _hs.bounds) {
+                    const _p = bot.entity.position;
+                    const _b = _hs.bounds;
+                    const _inHouse = _p.x > _b.x1 && _p.x < _b.x2 && _p.z > _b.z1 && _p.z < _b.z2
+                                   && _p.y >= _b.y && _p.y <= (_b.roofY || _b.y + 4);
+                    if (_inHouse) {
+                        const _furniture = ['torch','soul_torch','lantern','chest','trapped_chest','barrel',
+                            'furnace','blast_furnace','smoker','crafting_table','anvil','enchanting_table',
+                            'brewing_stand','bed','white_bed','red_bed','blue_bed','green_bed','yellow_bed',
+                            'black_bed','brown_bed','cyan_bed','gray_bed','light_blue_bed','light_gray_bed',
+                            'lime_bed','magenta_bed','orange_bed','pink_bed','purple_bed',
+                            'flower_pot','painting','item_frame','armor_stand','campfire','soul_campfire',
+                            'bookshelf','jukebox','note_block','bell','lectern','loom','grindstone',
+                            'stonecutter','cartography_table','smithing_table','composter','beehive',
+                            'respawn_anchor','lodestone'];
+                        if (!_furniture.some(f => type.includes(f))) {
+                            skills.log(bot, `Blocked placing ${type} inside house (not furniture). Use placeHere outside.`);
+                            return;
+                        }
+                    }
+                }
+            }
+            // 浮遊中なら着地を待つ
+            if (!bot.entity.onGround) {
+                for (let i = 0; i < 20 && !bot.entity.onGround; i++) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
+            // トーチ等の非固体ブロックは従来通り足元に配置
+            const nonSolid = ['torch', 'redstone_torch', 'redstone', 'lever', 'button', 'rail',
+                'detector_rail', 'powered_rail', 'activator_rail', 'tripwire_hook', 'string'];
+            if (nonSolid.some(n => type.includes(n))) {
+                let pos = bot.entity.position;
+                await skills.placeBlock(bot, type, pos.x, pos.y, pos.z);
+                return;
+            }
+            // 固体ブロック: インベントリ確認
+            let block_item = bot.inventory.items().find(item => item.name === type);
+            if (!block_item) {
+                skills.log(bot, `Don't have any ${type} to place.`);
+                return;
+            }
+            await bot.equip(block_item, 'hand');
+            // 足元のブロックを取得（配置の参照ブロック）
+            let pos = bot.entity.position;
+            let feetY = Math.floor(pos.y);
+            let standBlock = bot.blockAt(new Vec3(Math.floor(pos.x), feetY - 1, Math.floor(pos.z)));
+            // 足元が空気の場合: さらに下を探す（落下中等）
+            if (!standBlock || standBlock.name === 'air' || standBlock.name === 'cave_air') {
+                for (let dy = 2; dy <= 5; dy++) {
+                    let b = bot.blockAt(new Vec3(Math.floor(pos.x), feetY - dy, Math.floor(pos.z)));
+                    if (b && b.name !== 'air' && b.name !== 'cave_air') {
+                        standBlock = b;
+                        break;
+                    }
+                }
+            }
+            if (!standBlock || standBlock.name === 'air' || standBlock.name === 'cave_air') {
+                skills.log(bot, `Cannot pillar: no solid block below.`);
+                return;
+            }
+            // [mindaxis-patch:placehere-water-detect] 水中/水面: 足元 solid base に直置き
+            const _phIsWater = n => n === 'water' || n === 'flowing_water';
+            const _phFeetBlock = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z)));
+            if (_phFeetBlock && _phIsWater(_phFeetBlock.name)) {
+                let _phBase = null;
+                for (let _phDy = 0; _phDy <= 10; _phDy++) {
+                    const _phB = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y) - _phDy, Math.floor(pos.z)));
+                    if (_phB && !_phIsWater(_phB.name) && _phB.name !== 'air' && _phB.name !== 'cave_air') {
+                        _phBase = _phB;
+                        break;
+                    }
+                }
+                if (_phBase) {
+                    try {
+                        await bot.lookAt(_phBase.position.offset(0.5, 1.0, 0.5));
+                        await bot.placeBlock(_phBase, new Vec3(0, 1, 0));
+                        skills.log(bot, `Placed ${type} in water at ${_phBase.position.offset(0, 1, 0)}.`);
+                    } catch (_phErr) {
+                        skills.log(bot, `Cannot place in water: ${_phErr.message}`);
+                    }
+                } else {
+                    skills.log(bot, `Cannot placeHere: no solid base under water.`);
+                }
+                return;
+            }
+            // ジャンプしてピラー配置
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 400));
+            bot.setControlState('jump', false);
+            try {
+                // 足元の固体ブロックの上面に配置
+                await bot.lookAt(standBlock.position.offset(0.5, 1.0, 0.5));
+                await bot.placeBlock(standBlock, new Vec3(0, 1, 0));
+                skills.log(bot, `Placed ${type} at ${standBlock.position.offset(0, 1, 0)} (pillar jump).`);
+            } catch (err) {
+                // [mindaxis-patch:placehere-no-hang] skills.placeBlock は水中でハングするため使わない
+                skills.log(bot, `Pillar place failed: ${err.message}. Try !goToSurface first.`);
+            }
         })
     },
     {

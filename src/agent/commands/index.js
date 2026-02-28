@@ -26,13 +26,47 @@ export function blacklistCommands(commands) {
     }
 }
 
-const commandRegex = /!(\w+)(?:\(((?:-?\d+(?:\.\d+)?|true|false|"[^"]*")(?:\s*,\s*(?:-?\d+(?:\.\d+)?|true|false|"[^"]*"))*)\))?/
+// [mindaxis-patch:robust-parser] 日本語や長い文字列に対応した堅牢なパーサー
+const commandRegex = /!(\w+)(?:\((.+)\))?$/s;
 const argRegex = /-?\d+(?:\.\d+)?|true|false|"[^"]*"/g;
 
+// 堅牢な引数抽出: 括弧のネストを考慮して文字列引数を正確に抽出
+function extractArgs(argsStr) {
+    if (!argsStr) return [];
+    const args = [];
+    let current = '';
+    let inString = false;
+    let depth = 0;
+
+    for (let i = 0; i < argsStr.length; i++) {
+        const c = argsStr[i];
+
+        if (c === '"' && (i === 0 || argsStr[i-1] !== '\\')) {
+            inString = !inString;
+            current += c;
+        } else if (!inString && c === '(') {
+            depth++;
+            current += c;
+        } else if (!inString && c === ')') {
+            depth--;
+            if (depth < 0) break; // 閉じ括弧が多すぎる
+            current += c;
+        } else if (!inString && depth === 0 && c === ',') {
+            args.push(current.trim());
+            current = '';
+        } else {
+            current += c;
+        }
+    }
+    if (current.trim()) args.push(current.trim());
+    return args;
+}
+
 export function containsCommand(message) {
-    const commandMatch = message.match(commandRegex);
-    if (commandMatch)
-        return "!" + commandMatch[1];
+    // [mindaxis-patch:contain-cmd] メッセージ内の最後のコマンドを検出
+    const simpleMatch = message.match(/!(\w+)(?:\(|$|\s)/);
+    if (simpleMatch)
+        return "!" + simpleMatch[1];
     return null;
 }
 
@@ -100,9 +134,13 @@ export function parseCommandMessage(message) {
 
     const commandName = "!"+commandMatch[1];
 
+    // [mindaxis-patch:parse-cmd] 堅牢な引数抽出を使用
     let args;
-    if (commandMatch[2]) args = commandMatch[2].match(argRegex);
-    else args = [];
+    if (commandMatch[2]) {
+        args = extractArgs(commandMatch[2]);
+    } else {
+        args = [];
+    }
 
     const command = getCommand(commandName);
     if(!command) return `${commandName} is not a command.`
