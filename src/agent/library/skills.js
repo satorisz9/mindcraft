@@ -3311,12 +3311,31 @@ async function findAndGoToVillager(bot, id) {
         log(bot, 'Entity is not a villager');
         return null;
     }
-    
+
     if (entity.metadata && entity.metadata[16] === 1) {
-        log(bot, 'This is either a baby villager or a villager with no job - neither can trade');
+        log(bot, 'This is a baby villager - cannot trade');
         return null;
     }
-    
+
+    // [mindaxis-patch:villager-profession-check] Skip unemployed/nitwit villagers (they cannot trade)
+    const _profMeta = entity.metadata && entity.metadata[18];
+    const _profId = _profMeta != null ? (typeof _profMeta === 'object' ? _profMeta.villagerProfession : _profMeta) : -1;
+    if (_profId === 0) {
+        log(bot, `Villager ${id} is Unemployed (no job site block) - cannot trade. Place a job site block near them to give them a profession (e.g. composter=farmer, lectern=librarian, blast_furnace=armorer, smoker=butcher, cartography_table=cartographer, brewing_stand=cleric, barrel=fisherman, fletching_table=fletcher, loom=shepherd, grindstone=weaponsmith, smithing_table=toolsmith, stonecutter=mason).`);
+        return null;
+    }
+    if (_profId === 11) {
+        log(bot, `Villager ${id} is a Nitwit - permanently cannot trade. Find a different villager.`);
+        return null;
+    }
+
+    // [mindaxis-patch:villager-night-check] Check if it's nighttime (villagers sleep at night)
+    const _timeOfDay = bot.time && bot.time.timeOfDay;
+    if (_timeOfDay != null && _timeOfDay > 12542 && _timeOfDay < 23459) {
+        log(bot, `It is nighttime (time=${_timeOfDay}) - villagers are sleeping. Use !goToBed to sleep until morning, or wait for daylight.`);
+        return null;
+    }
+
     const distance = bot.entity.position.distanceTo(entity.position);
     if (distance > 4) {
         log(bot, `Villager is ${distance.toFixed(1)} blocks away, moving closer...`);
@@ -3372,7 +3391,8 @@ export async function showVillagerTrades(bot, id) {
         villager.close();
         return true;
     } catch (err) {
-        log(bot, 'Failed to open villager trading interface - they might be sleeping, a baby, or jobless');
+        // [mindaxis-patch:villager-trade-error-msg] Improved error message with actionable advice
+        log(bot, `Failed to open villager trading interface: ${err.message}. The villager may be sleeping (try at daytime), have no profession (place a job site block), or be unavailable.`);
         console.log('Villager trading error:', err.message);
         return false;
     }
@@ -3451,7 +3471,8 @@ export async function tradeWithVillager(bot, id, index, count) {
             return false;
         }
     } catch (err) {
-        log(bot, 'Failed to open villager trading interface');
+        // [mindaxis-patch:villager-trade-error-msg]
+        log(bot, `Failed to open villager trading: ${err.message}. Check villager has a profession (place job site blocks), and try during daytime.`);
         console.log('Villager interface error:', err.message);
         return false;
     }
