@@ -468,6 +468,19 @@ export const actionsList = [
                 const nextStep = plan.steps.findIndex(s => !s.done);
                 if (nextStep < 0) {
                     plan.status = 'completed';
+                    // Update achievements.json if this plan came from a roadmap phase
+                    if (plan.phaseId) {
+                        const achPath = process.env.MINDAXIS_ACHIEVEMENTS_PATH;
+                        if (achPath) {
+                            try {
+                                const ach = fs.existsSync(achPath) ? JSON.parse(fs.readFileSync(achPath, 'utf8')) : { completed: [] };
+                                if (!ach.completed.includes(plan.phaseId)) {
+                                    ach.completed.push(plan.phaseId);
+                                    fs.writeFileSync(achPath, JSON.stringify(ach, null, 2));
+                                }
+                            } catch (_) {}
+                        }
+                    }
                     skills.log(bot, 'Step ' + (stepIdx+1) + ' done! Plan 「' + plan.goal + '」completed!');
                 } else {
                     skills.log(bot, 'Step ' + (stepIdx+1) + ' done! Next: ' + plan.steps[nextStep].step);
