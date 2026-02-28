@@ -478,7 +478,12 @@ export class Agent {
             if (settings.speak) {
                 speak(to_translate, this.prompter.profile.speak_model);
             }
-            if (settings.chat_ingame) {this.bot.chat(message);}
+            if (settings.chat_ingame) {
+                const _now = new Date();
+                const _hh = _now.getHours().toString().padStart(2, '0');
+                const _mm = _now.getMinutes().toString().padStart(2, '0');
+                this.bot.chat(`[${_hh}:${_mm}] ${message}`);
+            }
             sendOutputToServer(this.name, message);
         }
     }
