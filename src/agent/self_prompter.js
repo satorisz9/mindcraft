@@ -192,10 +192,28 @@ export class SelfPrompter {
                         }
                     }
                 } catch(_uwe) {}
+                // [mindaxis-patch:stay-out-hint] 遠出時は帰宅抑制
+                try {
+                    const _soBot = this.agent.bot;
+                    const _soHs = _soBot._houseStructure;
+                    if (_soHs && _soHs.bounds && _soBot.entity) {
+                        const _soPos = _soBot.entity.position;
+                        const _soHx = (_soHs.bounds.x1 + _soHs.bounds.x2) / 2;
+                        const _soHz = (_soHs.bounds.z1 + _soHs.bounds.z2) / 2;
+                        const _soDist = Math.sqrt((_soPos.x-_soHx)**2 + (_soPos.z-_soHz)**2);
+                        if (_soDist > 50) {
+                            const _soTypes = new Set(_soBot.inventory.items().map(i => i.name)).size;
+                            const _soFood = _soBot.inventory.items().some(i => ['apple','bread','cooked_beef','salmon','cooked_salmon','mutton','cooked_mutton','porkchop','cooked_porkchop','carrot','potato','baked_potato','cooked_chicken','chicken'].includes(i.name));
+                            if (_soTypes < 12 && _soFood) {
+                                planHint += ' STAY OUT: You are ' + Math.round(_soDist) + ' blocks from home and inventory is not full (' + _soTypes + '/12 item types). Keep exploring! Only go home when inventory is full, food is gone, or it is night.';
+                            }
+                        }
+                    }
+                } catch(_soe) {}
                 // [mindaxis-patch:gameplay-tips] ゲームプレイのヒント
                 planHint += ' TIPS: Breaking placed blocks (torches, crafting_table, furnace, chests, planks, fences, etc.) drops them into your inventory — you can recover resources by mining them. If !goToCoordinates keeps failing near water, craft a boat (!craftRecipe("oak_boat", 1) needs 5 planks) and use !boatTo(x, y, z) to cross water.';
             }
-            const msg = `You are self-prompting with the goal: '${this.prompt}'.${houseHint}${planHint} Your next response MUST contain a command with this syntax: !commandName. /* [mindaxis-patch:chest-management] */ CHEST RULE: Always place chests at your base - NEVER place chests in random locations or you will lose items. If you are not at base, carry items back first. RESOURCE RULE: Before crafting or searching, ALWAYS !takeFromChest first! Check raw materials (oak_log, iron_ingot, coal, string). Example: !takeFromChest("oak_log") before searching for wood. Do NOT take furniture (furnace, crafting_table) from chests. A BED is OK to carry in your inventory for exploration — !goToBed will place it, sleep through the night, then pick it back up automatically. BUILDING RULE: NEVER place cobblestone, stone, dirt, oak_planks, or other building blocks inside your house. Only place furniture (bed, chest, furnace, crafting_table, torch). FURNITURE PLACEMENT: Place furniture against the back and side walls, away from the door entrance. Keep the area near the door clear for easy entry/exit. Respond:`;
+            const msg = `You are self-prompting with the goal: '${this.prompt}'.${houseHint}${planHint} Your next response MUST contain a command with this syntax: !commandName. /* [mindaxis-patch:chest-management-v2] */ CHEST RULE: NEVER place chests outside your home base. RESOURCE RULE: Only use !takeFromChest when you are at home preparing to go out. When exploring far from home (50+ blocks away), do NOT return just to deposit items — keep exploring until (a) inventory has 12+ item types, (b) food runs out, or (c) it is night without a bed. Do NOT take furniture (furnace, crafting_table) from chests. A BED is OK to carry for exploration — !goToBed places it, sleeps, then picks it back up. BUILDING RULE: NEVER place cobblestone, stone, dirt, oak_planks, or other building blocks inside your house. Only place furniture (bed, chest, furnace, crafting_table, torch). FURNITURE PLACEMENT: Place furniture against the back and side walls, away from the door entrance. Keep the area near the door clear for easy entry/exit. Respond:`;
             
             // [mindaxis-patch:cmd-watchdog] コマンド90秒ウォッチドッグ — ハングするコマンドを強制中断
             const _wdBot = this.agent.bot;
