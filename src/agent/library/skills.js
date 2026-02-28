@@ -3515,6 +3515,24 @@ export async function goToSurface(bot) {
             }
             // 水路追従: 振動を検出したら水が続く方向に泳ぐ
             if (_oscillating && attempt >= 6) {
+                // [mindaxis-patch:swim-osc-dig-up] 振動検出時は水路追従前に即掘り上げ
+                if (!_channelSwimDir) {
+                    bot.setControlState('forward', false); bot.setControlState('sprint', false);
+                    let _oscDugUp = false;
+                    for (let _dy = 1; _dy <= 5; _dy++) {
+                        const _dub = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y) + _dy, Math.floor(cp.z)));
+                        if (_dub && _dub.diggable && !['air','cave_air','water','flowing_water','bedrock'].includes(_dub.name)) {
+                            try { await bot.dig(_dub); _oscDugUp = true; console.log('[swim] OscDig ' + _dub.name + ' y=' + (Math.floor(cp.y)+_dy)); } catch(e) {}
+                            break;
+                        }
+                    }
+                    if (_oscDugUp) {
+                        _stuckCount = 0; _lastSwimPos = cp.clone(); bot.setControlState('jump', true);
+                        await new Promise(r => setTimeout(r, 600));
+                        continue;
+                    }
+                }
+                // 掘れなかった => 水路追従（従来の処理）
                 // 各方向の連続水ブロック数を計算
                 let _bestChDir = null; let _bestChLen = 0; let _secondChDir = null; let _secondChLen = 0;
                 for (const _chd of [{dx:1,dz:0,n:'E'},{dx:-1,dz:0,n:'W'},{dx:0,dz:1,n:'S'},{dx:0,dz:-1,n:'N'}]) {
@@ -3595,8 +3613,8 @@ export async function goToSurface(bot) {
                         for (let checkY = _yMin; checkY <= _yMax; checkY++) {
                             let block = bot.blockAt(new Vec3(cx, checkY, cz));
                             let above = bot.blockAt(new Vec3(cx, checkY + 1, cz));
-                            let _aboveOk = above && (above.name === 'air' || above.name === 'cave_air'
-                                || above.name === 'water' || above.name === 'flowing_water');
+                            // [mindaxis-patch:shore-dry-only] 水没した壁を岸と誤認しないよう water を除外
+                            let _aboveOk = above && (above.name === 'air' || above.name === 'cave_air');
                             if (block && block.name !== 'water' && block.name !== 'flowing_water'
                                 && block.name !== 'air' && block.name !== 'cave_air'
                                 && _aboveOk) {
@@ -3710,10 +3728,18 @@ export async function goToSurface(bot) {
                         }
                     }
                 } else {
-                    let angle = (attempt * 1.57) % 6.28;
-                    await bot.lookAt(new Vec3(cp.x + Math.cos(angle) * 5, cp.y + 1, cp.z + Math.sin(angle) * 5));
-                    bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
-                    await new Promise(r => setTimeout(r, 1500));
+                    // [mindaxis-patch:swim-enclosed-dig-up] 陸も崖もない密閉水域 => 真上を掘る
+                    console.log('[swim] Enclosed water, digging up');
+                    bot.setControlState('forward', false); bot.setControlState('sprint', false); bot.setControlState('jump', true);
+                    let _encDugUp = false;
+                    for (let _dy = 1; _dy <= 5; _dy++) {
+                        const _dub = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y) + _dy, Math.floor(cp.z)));
+                        if (_dub && _dub.diggable && !['air','cave_air','water','flowing_water','bedrock'].includes(_dub.name)) {
+                            try { await bot.dig(_dub); _encDugUp = true; console.log('[swim] EncDig up ' + _dub.name + ' at y=' + (Math.floor(cp.y)+_dy)); } catch(e) {}
+                            break;
+                        }
+                    }
+                    await new Promise(r => setTimeout(r, _encDugUp ? 500 : 1000));
                 }
             }
             if (attempt >= 49) { console.log('[swim] 50 attempts, pillar fallthrough...'); break; }
