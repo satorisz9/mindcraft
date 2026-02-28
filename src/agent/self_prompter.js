@@ -100,8 +100,11 @@ export class SelfPrompter {
                         _homeZ = hs.door.z + (_f==='south'?1:_f==='north'?-1:0);
                     }
                 }
-                if (hs && hs.cramped) {
-                    // CRAMPED は enclosed でなくても最優先（expandHouse が壁を壊すと一時的に enclosed=false になる）
+                if (hs && hs.cramped && !hs.enclosed) {
+                    // cramped だが enclosed=false → 壁が壊れている（expandHouse が中途で止まった等）
+                    // まず壁を修復してから拡張するよう誘導する
+                    houseHint = ' !! TOP PRIORITY: HOUSE WALLS ARE BROKEN (enclosed=false). Go home immediately: !goToCoordinates(' + _homeX + ', ' + _homeY + ', ' + _homeZ + ', 1). Then run !repairHouse to seal the walls. After walls are fixed (!scanHouse returns enclosed=true), THEN expand: !expandHouse("east", 4).';
+                } else if (hs && hs.cramped) {
                     const _expandSuggest = hs.description && hs.description.match(/!expandHouse\([^)]+\)/);
                     const _expandCmd = _expandSuggest ? _expandSuggest[0] : '!expandHouse("east", 4)';
                     houseHint = ' !! TOP PRIORITY: YOUR HOUSE IS TOO CRAMPED (freeTiles=' + ((hs.interiorArea||0)-(hs.furniture?hs.furniture.length:0)) + '). Run ' + _expandCmd + ' NOW — skip your current plan step and expand first. If it is nighttime, sleep first (!goToBed), then expand immediately after waking up. Do NOT add furniture or continue other plan steps until the house is expanded.';
