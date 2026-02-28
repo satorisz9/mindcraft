@@ -578,6 +578,8 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, direction, amount) => {
             const bot = agent.bot;
+            // 複数フェーズの建築は 90s 以上かかるので 300s の watchdog 延長を要請
+            bot._requestWatchdogMs = 300000;
             const Vec3 = (await import('vec3')).default;
             const hs = bot._houseStructure;
             if (!hs || !hs.bounds) {
@@ -744,9 +746,10 @@ export const actionsList = [
             }
 
             // Phase 5: Extend roof
+            // Phase 1 が旧壁の屋根ブロックを壊すので、旧壁位置も含めて再建する
             skills.log(bot, 'Phase 5: Extending roof...');
             if (direction === 'north' || direction === 'south') {
-                const zStart = direction === 'north' ? newZ1 : b.z2 + 1;
+                const zStart = direction === 'north' ? newZ1 : b.z2; // b.z2: 旧南壁屋根も再建
                 const zEnd = direction === 'north' ? b.z1 : newZ2;
                 for (let fz = zStart; fz <= zEnd; fz++) {
                     for (let fx = newX1; fx <= newX2; fx++) {
@@ -754,7 +757,7 @@ export const actionsList = [
                     }
                 }
             } else {
-                const xStart = direction === 'west' ? newX1 : b.x2 + 1;
+                const xStart = direction === 'west' ? newX1 : b.x2; // b.x2: 旧東壁屋根も再建
                 const xEnd = direction === 'west' ? b.x1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
@@ -774,10 +777,42 @@ export const actionsList = [
                 await skills.placeBlock(bot, 'oak_door', newDoorX, floorY + 1, newDoorZ);
             }
 
-            // Phase 7: Re-scan
+            // Phase 7: Re-scan and save new bounds
             skills.log(bot, 'Re-scanning expanded house...');
             const rescan = await skills.scanStructure(bot);
-            bot._houseStructure = rescan;
+
+            // 拡張後の期待 bounds を計算（scan が失敗しても正しい bounds を保存）
+            const newInteriorArea = (newX2 - newX1 - 1) * (newZ2 - newZ1 - 1);
+            const furnitureCount = (hs.furniture || []).length;
+            const newFreeTiles = newInteriorArea - furnitureCount;
+            const expectedStructure = {
+                bounds: { x1: newX1, z1: newZ1, x2: newX2, z2: newZ2, y: b.y, roofY: b.roofY },
+                door: hs.door,
+                wallMaterial: useMat,
+                enclosed: !!rescan.enclosed,
+                interior: { x1: newX1 + 1, z1: newZ1 + 1, x2: newX2 - 1, z2: newZ2 - 1 },
+                interiorArea: newInteriorArea,
+                furniture: hs.furniture || [],
+                cramped: newFreeTiles <= 12 && furnitureCount >= 2,
+            };
+            bot._houseStructure = rescan.enclosed ? rescan : expectedStructure;
+
+            // house.json に新しい bounds を保存（再起動後も反映されるように）
+            try {
+                const _fsExp = await import('fs');
+                const _housePathExp = './bots/' + bot.username + '/house.json';
+                const saved = rescan.enclosed ? {
+                    bounds: rescan.bounds, door: rescan.door, wallMaterial: rescan.wallMaterial,
+                    enclosed: true, interior: rescan.interior, interiorArea: rescan.interiorArea,
+                    furniture: rescan.furniture || [], cramped: !!rescan.cramped,
+                } : {
+                    bounds: expectedStructure.bounds, door: expectedStructure.door,
+                    wallMaterial: useMat, enclosed: false,
+                    interior: expectedStructure.interior, interiorArea: newInteriorArea,
+                    furniture: hs.furniture || [], cramped: expectedStructure.cramped,
+                };
+                _fsExp.writeFileSync(_housePathExp, JSON.stringify(saved, null, 2));
+            } catch(_saveErr) { skills.log(bot, 'Warning: could not save house.json: ' + _saveErr.message); }
 
             if (rescan.enclosed) {
                 skills.log(bot, 'House expanded! New size: ' + rescan.size + '. ' + rescan.description);
