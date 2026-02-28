@@ -2915,7 +2915,7 @@ export async function goToBed(bot) {
     if (beds.length === 0) {
         const bedItem = bot.inventory.items().find(item => item.name.includes('_bed'));
         if (!bedItem) {
-            log(bot, );
+            log(bot, `Could not find a bed to sleep in.`);
             return false;
         }
         const pos = bot.entity.position;
@@ -2926,7 +2926,7 @@ export async function goToBed(bot) {
             if (await placeBlock(bot, bedItem.name, tx, ty, tz)) { placed = true; break; }
         }
         if (!placed) {
-            log(bot, );
+            log(bot, `Could not place bed nearby.`);
             return false;
         }
         const newBeds = bot.findBlocks({
@@ -2935,12 +2935,12 @@ export async function goToBed(bot) {
             count: 1
         });
         if (newBeds.length === 0) {
-            log(bot, );
+            log(bot, `Bed placed but could not locate it.`);
             return false;
         }
         beds.push(newBeds[0]);
         portableBedPos = newBeds[0];
-        log(bot, );
+        log(bot, `Placed portable bed at ${portableBedPos}.`);
     }
 
     let loc = beds[0];
@@ -2949,19 +2949,19 @@ export async function goToBed(bot) {
     try {
         await bot.sleep(bed);
     } catch(e) {
-        log(bot, );
+        log(bot, `Could not sleep: ${e.message}`);
         if (portableBedPos) await breakBlockAt(bot, portableBedPos.x, portableBedPos.y, portableBedPos.z);
         return false;
     }
-    log(bot, );
+    log(bot, `You are in bed.`);
     /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
     while (bot.isSleeping) {
         await new Promise(resolve => setTimeout(resolve, 500));
     }
-    log(bot, );
+    log(bot, `You have woken up.`);
     if (portableBedPos) {
         await breakBlockAt(bot, portableBedPos.x, portableBedPos.y, portableBedPos.z);
-        log(bot, );
+        log(bot, `Picked up portable bed.`);
     }
     return true;
 }
