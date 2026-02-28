@@ -3903,20 +3903,6 @@ export async function goToSurface(bot) {
                     _blacklistedShores.push({ x: land.bx, z: land.bz, y: land.by });
                     _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
                 }
-                // cliff dig: 3ブロック以上の崖のみ（1-2ブロック差は泳いでジャンプで上がれる。岸ブロックを掘ると水没する）
-                // land.by は STANDING POSITION（固体ブロック + 1）なので land.by - 1 が床レベル
-                // 床レベル > waterTop + 1 = 2ブロック超の崖 → dig が必要
-                if (land.by > _localWaterTop + 2 && land.dist <= 5 && attempt >= 2) {
-                    console.log('[swim] Cliff y=' + land.by + ' (waterTop=' + _localWaterTop + '), digging...');
-                    for (let _cliffY = land.by; _cliffY >= _localWaterTop; _cliffY--) {
-                        const _cliffB = bot.blockAt(new Vec3(land.bx, _cliffY, land.bz));
-                        if (_cliffB && _cliffB.diggable && _cliffB.name !== 'air' && _cliffB.name !== 'cave_air'
-                            && _cliffB.name !== 'water' && _cliffB.name !== 'flowing_water' && _cliffB.name !== 'bedrock') {
-                            try { await bot.dig(_cliffB); console.log('[swim] Dug cliff ' + _cliffB.name + ' y=' + _cliffY); } catch(e) {}
-                        }
-                    }
-                    _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
-                }
                 // SWIM toward shore — close=slow, far=fast
                 let _nearSurface = cp.y >= _localWaterTop - 3;
                 if (!_nearSurface) {
