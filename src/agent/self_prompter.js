@@ -140,7 +140,15 @@ export class SelfPrompter {
                     const _remaining = Math.ceil((300000 - (Date.now() - _deathTime)) / 1000);
                     const _deathPos = this.agent.memory_bank.recallPlace('last_death_position');
                     const _deathPosText = _deathPos ? `x=${Math.round(_deathPos[0])}, y=${Math.round(_deathPos[1])}, z=${Math.round(_deathPos[2])}` : 'unknown';
-                    planHint += ' URGENT: You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + '. Use !goToCoordinates(' + ((_deathPos&&Math.round(_deathPos[0]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[1]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[2]))||'?') + ', 2) to recover items (' + _remaining + 's left before despawn). // [mindaxis-patch:death-coords-hint]';
+                    // [mindaxis-patch:death-coords-hint-v2] 溺死座標（y<63 または drown 危険ゾーン）は回収ヒントを抑制
+                    const _dzones = this.agent.bot._deathZones || [];
+                    const _drownDeath = (_deathPos && _deathPos[1] < 63) ||
+                        _dzones.some(z => _deathPos && Math.abs(z.x - _deathPos[0]) < 5 && Math.abs(z.z - _deathPos[2]) < 5 && z.cause === 'drown');
+                    if (_drownDeath) {
+                        planHint += ' You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + ' (water/drown zone). Item recovery is too dangerous — do NOT go there. Items will despawn in ' + _remaining + 's but your safety is more important. Continue your current plan. // [mindaxis-patch:death-coords-hint]';
+                    } else {
+                        planHint += ' URGENT: You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + '. Use !goToCoordinates(' + ((_deathPos&&Math.round(_deathPos[0]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[1]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[2]))||'?') + ', 2) to recover items (' + _remaining + 's left before despawn). // [mindaxis-patch:death-coords-hint]';
+                    }
                 } else if (_deathTime && Date.now() - _deathTime >= 300000) {
                     planHint += ' Your dropped items have DESPAWNED (5+ minutes since death). Do NOT try to recover them. Resume normal activities and your current plan.';
                     this.agent.bot._lastDeathTime = null;
