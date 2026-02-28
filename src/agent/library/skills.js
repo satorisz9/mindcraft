@@ -2814,12 +2814,12 @@ export async function moveAway(bot, distance) {
         }
     }
 
-    // [mindaxis-patch:moveaway-surface-first] 水中/地下なら goToSurface で脱出
+    // [mindaxis-patch:moveaway-surface-first] 水中なら goToSurface で脱出してから移動を継続
     if (bot.entity.isInWater) {
         log(bot, 'Underwater detected in moveAway, surfacing first...');
         await goToSurface(bot);
-        log(bot, 'moveAway: goToSurface done.');
-        return true;
+        log(bot, 'moveAway: goToSurface done, continuing moveAway...');
+        // 脱出後に pos を更新して移動開始（return しない）
     }
 
     // [mindaxis-patch:moveaway-concrete-goal] GoalInvert → 8方向の具体座標 GoalNear に変更
@@ -2880,8 +2880,8 @@ export async function moveAway(bot, distance) {
             const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, _maFallbackTimeout);
             try { await goToGoal(bot, _maGoal); } catch(_) {} finally { clearTimeout(_maTimer); }
         }
-        // 十分移動できたら終了
-        if (bot.entity.position.distanceTo(pos) >= distance * 0.5) break;
+        // 十分移動できたら終了（85%以上達成で OK）
+        if (bot.entity.position.distanceTo(pos) >= distance * 0.85) break;
     }
     let new_pos = bot.entity.position;
     let _actualDist = Math.round(new_pos.distanceTo(pos));
