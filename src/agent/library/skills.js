@@ -2856,7 +2856,12 @@ export async function moveAway(bot, distance) {
         if (bot.entity.position.distanceTo(pos) >= distance * 0.5) break;
     }
     const new_pos = bot.entity.position;
-    log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()}.`);
+    const _actualDist = Math.round(new_pos.distanceTo(pos));
+    if (_actualDist < distance * 0.3) {
+        log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()} (only ${_actualDist} blocks moved, target was ${distance}). Cannot move far — likely surrounded by water. To cross water: !craftRecipe("oak_boat", 1) (needs 5 oak_planks), then !boatTo(targetX, targetZ) to reach distant land.`);
+    } else {
+        log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
+    }
     return true;
 }
 
