@@ -565,10 +565,10 @@ export const actionsList = [
     // [mindaxis-patch:expand-house] 家の拡張コマンド
     {
         name: '!expandHouse',
-        description: 'Expand your house by extending one wall outward. Use when house is too cramped. Args: direction (north/south/east/west), amount (1-4 blocks, default 2).',
+        description: 'Expand your house by extending one wall outward. Use when house is too cramped. Args: direction (north/south/east/west), amount (1-6 blocks, default 4).',
         params: {
             'direction': { type: 'string', description: 'Wall direction to extend: north, south, east, west' },
-            'amount': { type: 'int', description: 'Blocks to extend (1-4)', domain: [1, 5] }
+            'amount': { type: 'int', description: 'Blocks to extend (1-6)', domain: [1, 7] }
         },
         perform: runAsAction(async (agent, direction, amount) => {
             const bot = agent.bot;
@@ -579,9 +579,9 @@ export const actionsList = [
                 return;
             }
             direction = (direction || 'east').toLowerCase().replace(/['"]/g, '');
-            amount = parseInt(amount) || 2;
+            amount = parseInt(amount) || 4;
             if (amount < 1) amount = 1;
-            if (amount > 4) amount = 4;
+            if (amount > 6) amount = 6;
             if (!['north','south','east','west'].includes(direction)) {
                 skills.log(bot, 'Invalid direction: ' + direction + '. Use north/south/east/west.');
                 return;

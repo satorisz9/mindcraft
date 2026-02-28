@@ -4319,7 +4319,7 @@ export async function scanStructure(bot) {
     if (gaps.length > 0) desc += '. DAMAGED: ' + gaps.length + ' gaps found (walls: ' + gaps.filter(g => g.dir !== 'roof').length + ', roof: ' + gaps.filter(g => g.dir === 'roof').length + ')';
     if (cramped) {
         const _expandDir = doorInfo ? (doorInfo.facing === 'west' ? 'east' : doorInfo.facing === 'east' ? 'west' : doorInfo.facing === 'north' ? 'south' : 'north') : 'east';
-        desc += '. CRAMPED: Only ' + interiorArea + ' interior blocks with ' + furniture.length + ' furniture. Expand with !expandHouse("' + _expandDir + '", 3)';
+        desc += '. CRAMPED: Only ' + interiorArea + ' interior blocks with ' + furniture.length + ' furniture. Expand with !expandHouse("' + _expandDir + '", 4)';
     }
     if (furniture.length > 0) desc += '. Furniture: ' + furniture.join(', ');
     desc += '. Interior space: x=' + (x1+1) + '-' + (x2-1) + ', z=' + (z1+1) + '-' + (z2-1);

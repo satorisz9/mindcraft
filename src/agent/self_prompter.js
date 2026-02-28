@@ -97,7 +97,8 @@ export class SelfPrompter {
                 }
                 if (hs && hs.enclosed && hs.cramped) {
                     const _expandSuggest = hs.description && hs.description.match(/!expandHouse\([^)]+\)/);
-                    houseHint = ' YOUR HOUSE IS TOO SMALL: Interior has only ' + (hs.interiorArea || '?') + ' blocks with ' + (hs.furniture ? hs.furniture.length : '?') + ' furniture items. Use !expandHouse to make it bigger BEFORE adding more furniture. Suggested: ' + (_expandSuggest ? _expandSuggest[0] : '!expandHouse("east", 3)') + '. After expanding, run !scanHouse to update.';
+                    const _expandCmd = _expandSuggest ? _expandSuggest[0] : '!expandHouse("east", 4)';
+                    houseHint = ' !! TOP PRIORITY: YOUR HOUSE IS TOO CRAMPED (freeTiles=' + ((hs.interiorArea||0)-(hs.furniture?hs.furniture.length:0)) + '). Run ' + _expandCmd + ' NOW — skip your current plan step and expand first. If it is nighttime, sleep first (!goToBed), then expand immediately after waking up. Do NOT add furniture or continue other plan steps until the house is expanded.';
                 } else if (hs && hs.enclosed && hs.interior) {
                     let _furnitureNote = '';
                     if (hs.furniture && hs.furniture.length > 0) {
