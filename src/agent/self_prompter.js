@@ -157,7 +157,7 @@ export class SelfPrompter {
                                 if (_currentStep >= 0) {
                                     const _isCritical = _steps[_currentStep].critical;
                                     const _stepDesc = _steps[_currentStep].step || '';
-                                    const _isExploreStep = /find|search|village|villager|locate|discover|explore/i.test(_stepDesc) || /find|search|village|villager|locate|discover/i.test(_plan.goal || '');
+                                    const _isExploreStep = /find|search|village|villager|locate|discover|explore/i.test(_stepDesc) || /find|search|village|villager|locate|discover|explore/i.test(_plan.goal || '');
                                     const _skipRule = _isCritical
                                         ? 'This step is CRITICAL and CANNOT be skipped. But do NOT over-prepare! First !inventory to see what you already have, then !takeFromChest for missing items. Stone tools are fine if iron is not available — do NOT spend more than 2 turns gathering materials. Leave with minimum gear (stone tools + food) rather than wasting time.'
                                         : _isExploreStep
