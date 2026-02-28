@@ -199,6 +199,26 @@ export class SelfPrompter {
                         planHint += ' HOME CHEST: ' + _chestNames.join(', ') + '.';
                     }
                 } catch(_ce) {}
+                // [mindaxis-patch:farm-status-hint] farmland 不足ヒント
+                try {
+                    const _farmBot = this.agent.bot;
+                    const _farmBlocks = _farmBot.findBlocks({
+                        matching: block => block.name === 'farmland' || block.name === 'wheat' || block.name === 'carrots' || block.name === 'potatoes' || block.name === 'beetroots',
+                        maxDistance: 60,
+                        count: 20
+                    });
+                    // 地上のfarmlandのみカウント（y > 60）
+                    const _surfaceFarm = _farmBlocks.filter(pos => pos.y > 60 && pos.y > 55);
+                    if (_surfaceFarm.length < 4) {
+                        const _hasHoe = _farmBot.inventory.items().some(i => i.name.includes('hoe'));
+                        const _hasSeeds = _farmBot.inventory.items().some(i => i.name.includes('seeds') || i.name.includes('seed'));
+                        if (_hasHoe && _hasSeeds) {
+                            planHint += ' FARM ALERT: Only ' + _surfaceFarm.length + ' farmland block(s) on surface (need 4+). Create a small farm near home: use !useOn("stone_hoe","grass_block") on surface grass, then !useOn("wheat_seeds","farmland") to plant. IMPORTANT: Only farm on the surface — NOT underground.';
+                        } else if (_surfaceFarm.length === 0) {
+                            planHint += ' FARM ALERT: No farmland found near home. Get a hoe (!craftRecipe("stone_hoe",1)) and seeds (!collectBlocks("grass",4) drops wheat_seeds), then till surface grass to create a farm.';
+                        }
+                    }
+                } catch(_fe) {}
                 // [mindaxis-patch:underwater-emergency-hint] 水中緊急ヒント（頭が水没した場合のみ）
                 try {
                     const _uwBot = this.agent.bot;

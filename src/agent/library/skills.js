@@ -3046,6 +3046,20 @@ export async function tillAndSow(bot, x, y, z, seedType=null) {
         log(bot, `Cannot till ${block.name}, must be grass_block or dirt.`);
         return false;
     }
+    // [mindaxis-patch:till-surface-only] 地下では耕せない — 頭上20ブロックが開放されているか確認
+    {
+        let _underground = false;
+        for (let _dy = 1; _dy <= 20; _dy++) {
+            const _cb = bot.blockAt(new Vec3(Math.floor(x), Math.floor(y) + _dy, Math.floor(z)));
+            if (_cb && _cb.name !== 'air' && _cb.name !== 'cave_air' && _cb.name !== 'water' && _cb.name !== 'flowing_water') {
+                _underground = true; break;
+            }
+        }
+        if (_underground) {
+            log(bot, `Cannot till underground. Farming must be done on the surface with open sky above.`);
+            return false;
+        }
+    }
     let above = bot.blockAt(new Vec3(x, y+1, z));
     if (above.name !== 'air') {
         if (block.name === 'farmland') {
@@ -4471,7 +4485,27 @@ export async function useToolOn(bot, toolName, targetName) {
             block = blocks[0];
         }
         else {
-            block = world.getNearestBlock(bot, targetName, 64);
+            // [mindaxis-patch:hoe-surface-only] hoe で dirt/grass_block を使う場合、地上のブロックのみ対象
+            if (toolName.includes('hoe') && (targetName === 'dirt' || targetName === 'grass_block')) {
+                const _allBlocks = world.getNearestBlocksWhere(bot, b => b.name === targetName, 64, 20);
+                block = null;
+                for (const _b of _allBlocks) {
+                    let _underground = false;
+                    for (let _dy = 1; _dy <= 20; _dy++) {
+                        const _cb = bot.blockAt(_b.position.offset(0, _dy, 0));
+                        if (_cb && _cb.name !== 'air' && _cb.name !== 'cave_air' && _cb.name !== 'water' && _cb.name !== 'flowing_water') {
+                            _underground = true; break;
+                        }
+                    }
+                    if (!_underground) { block = _b; break; }
+                }
+                if (!block) {
+                    log(bot, `Could not find any surface ${targetName} to till (only underground blocks found).`);
+                    return false;
+                }
+            } else {
+                block = world.getNearestBlock(bot, targetName, 64);
+            }
         }
         if (!block) {
             log(bot, `Could not find any ${targetName}.`);
