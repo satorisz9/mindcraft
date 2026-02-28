@@ -3696,8 +3696,10 @@ export async function goToSurface(bot) {
         let _channelSwimDir = null;
         let _channelSwimTicks = 0;
         const _channelTriedDirs = [];
-        for (let attempt = 0; attempt < 60; attempt++) {
-            if (bot.interrupt_code) { bot._goToSurfaceActive = false; bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false); return false; }
+        // [mindaxis-patch:surface-timeout] 最大 25 attempt（約 50 秒）で諦める。moveAway の中で詰まらないように
+        const _swimStart = Date.now();
+        for (let attempt = 0; attempt < 25; attempt++) {
+            if (bot.interrupt_code || Date.now() - _swimStart > 45000) { bot._goToSurfaceActive = false; bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false); return false; }
             let cp = bot.entity.position;
             let cf = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y), Math.floor(cp.z)));
             let cb = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y) - 1, Math.floor(cp.z)));
