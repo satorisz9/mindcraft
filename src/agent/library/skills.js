@@ -3399,10 +3399,15 @@ export async function goToSurface(bot) {
             let cp = bot.entity.position;
             let best = null;
             let bestDist = 999;
+            // [mindaxis-patch:findland-skip-house-walls] 家の壁を shore として誤認識しないようにする
+            const _flHs = bot._houseStructure;
+            const _flBounds = _flHs && _flHs.bounds;
             for (let dir of [{dx:1,dz:0,n:'east'},{dx:-1,dz:0,n:'west'},{dx:0,dz:1,n:'south'},{dx:0,dz:-1,n:'north'}]) {
                 for (let dist = 1; dist <= 8; dist++) {
                     let cx = Math.floor(cp.x) + dir.dx * dist;
                     let cz = Math.floor(cp.z) + dir.dz * dist;
+                    // 家の bounds 内の座標は shore 候補から除外（壁を shore と誤認識しない）
+                    if (_flBounds && cx >= _flBounds.x1 && cx <= _flBounds.x2 && cz >= _flBounds.z1 && cz <= _flBounds.z2) continue;
                     for (let dy = -1; dy <= 3; dy++) {
                         let checkY = Math.floor(cp.y) + dy;
                         let block = bot.blockAt(new Vec3(cx, checkY, cz));
