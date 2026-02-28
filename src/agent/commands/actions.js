@@ -961,7 +961,16 @@ export const actionsList = [
             'search_range': { type: 'float', description: 'The range to search for the entity.', domain: [32, 512] }
         },
         perform: runAsAction(async (agent, entity_type, range) => {
-            await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
+            const _reached = await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
+            // 重要エンティティに到達したらプロセス再起動に備えて即座に位置を自動保存
+            if (_reached && (entity_type === 'villager' || entity_type === 'wandering_trader')) {
+                const _p = agent.bot.entity.position;
+                const _name = entity_type === 'villager' ? 'village' : entity_type;
+                if (!agent.memory_bank.recallPlace(_name)) {
+                    agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
+                    skills.log(agent.bot, `Auto-saved location as "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
+                }
+            }
         })
     },
     {
