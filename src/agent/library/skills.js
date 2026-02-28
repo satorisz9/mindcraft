@@ -2074,12 +2074,10 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                            && _pos2.y >= _hb2.y && _pos2.y <= (_hb2.roofY || _hb2.y + 4);
             const _targetInside2 = x > _hb2.x1 && x < _hb2.x2 && z > _hb2.z1 && z < _hb2.z2
                                  && y >= _hb2.y && y <= (_hb2.roofY || _hb2.y + 4);
-            // ボットが外にいて目標が家の中の場合 → ドア経由（近距離のみ）
+            // ボットが外にいて目標が家の中の場合 → 距離に関わらずドア経由 [mindaxis-patch:door-entry-no-dist-limit]
             const _distToHouse = Math.sqrt((_pos2.x - (_hb2.x1 + _hb2.x2) / 2) ** 2 + (_pos2.z - (_hb2.z1 + _hb2.z2) / 2) ** 2);
-            if (!_inside2 && _targetInside2 && _distToHouse >= 50) {
-                console.log('[goto-trace] door-entry SKIP: too far from house (' + Math.round(_distToHouse) + ' blocks)');
-            }
-            if (!_inside2 && _targetInside2 && _distToHouse < 50) {
+            console.log('[goto-trace] door-entry check: inside=' + _inside2 + ' targetInside=' + _targetInside2 + ' distToHouse=' + Math.round(_distToHouse));
+            if (!_inside2 && _targetInside2) {
                     bot._doorEntryInProgress = true;
                     try {
                         log(bot, 'Target is inside house. Navigating to door first...');
@@ -3365,14 +3363,21 @@ export async function goToSurface(bot) {
     // [mindaxis-patch:gotosurface-pillar] v6: dig staircase upward + 水泳脱出 + 家ガード
     const pos = bot.entity.position;
 
-    // 家の範囲内ではピラージャンプ禁止 — ドアを使うべき
+    // 家の範囲内かつ家のフロアレベルにいる場合はピラージャンプ禁止 — ドアを使うべき
+    // Y座標が家のフロアより低い場合（地下・水中）はピラージャンプを実行する [mindaxis-patch:gotosurface-near-house-y-check]
     const _hs = bot._houseStructure;
     if (_hs && _hs.bounds) {
         const b = _hs.bounds;
         const px = Math.floor(pos.x), pz = Math.floor(pos.z);
-        if (px >= b.x1 - 2 && px <= b.x2 + 2 && pz >= b.z1 - 2 && pz <= b.z2 + 2) {
-            log(bot, '[goToSurface] Near house — skipping pillar jump (use door instead).');
+        const _houseFloorY = b.y || 70;
+        const _nearHouseXZ = px >= b.x1 - 2 && px <= b.x2 + 2 && pz >= b.z1 - 2 && pz <= b.z2 + 2;
+        const _atFloorLevel = pos.y >= _houseFloorY - 2; // フロアの2ブロック以内ならドア使用
+        if (_nearHouseXZ && _atFloorLevel) {
+            log(bot, '[goToSurface] Near house at floor level — skipping pillar jump (use door instead).');
             return false;
+        }
+        if (_nearHouseXZ && !_atFloorLevel) {
+            log(bot, '[goToSurface] Below house (y=' + Math.floor(pos.y) + ' < floor=' + _houseFloorY + ') — pillar jump to escape.');
         }
     }
 
