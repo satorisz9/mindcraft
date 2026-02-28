@@ -117,7 +117,9 @@ index b38bd30..750af7e 100644
 +    const _nearWater = bot.entity.isInWater || (_feetBlock && _feetBlock.type === waterType) || (_belowBlock && _belowBlock.type === waterType) || (_below2Block && _below2Block.type === waterType)
 +    if (_nearWater) {
 +      const _needSwimUp = path.length > 0 && path[0].y > bot.entity.position.y + 0.5
-+      if (!bot.entity.onGround || _needSwimUp) {
++      // [mindaxis-patch:water-no-jump-down] 次ステップが下方向（陸に降りる）なら jump しない（y=67 オーバーシュート防止）
++      const _nextStepDown = path.length > 0 && path[0].y < bot.entity.position.y - 0.3
++      if ((!bot.entity.onGround || _needSwimUp) && !_nextStepDown) {
 +        bot.setControlState('jump', true)
 +      }
 +      if (stateMovements.allowSprinting) {
