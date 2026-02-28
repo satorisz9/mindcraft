@@ -121,6 +121,15 @@ export class SelfPrompter {
                     houseHint = ' YOU ALREADY HAVE A HOUSE at x=' + hs.bounds.x1 + '-' + hs.bounds.x2 + ' z=' + hs.bounds.z1 + '-' + hs.bounds.z2 + ' floor_y=' + (hs.bounds.y || 69) + '. DO NOT build a new house! HOME DOOR FRONT: !goToCoordinates(' + _homeX + ', ' + _homeY + ', ' + _homeZ + ', 1) to go home (this is the door front — walk through to enter).';
                 }
             }
+            // [mindaxis-patch:saved-places-global-hint] 保存済み場所を常にヒントとして提供（プランなしでも有効）
+            try {
+                const _spAll = this.agent.memory_bank.memory || {};
+                const _spEntries = Object.entries(_spAll).filter(([k]) => k !== 'last_death_position');
+                if (_spEntries.length > 0) {
+                    const _spStr = _spEntries.map(([k, v]) => `"${k}"=(${Math.round(v[0])},${Math.round(v[1])},${Math.round(v[2])})`).join(', ');
+                    houseHint += ' SAVED LOCATIONS: ' + _spStr + '. Use !goToRememberedPlace("<name>") to go there, or !goToCoordinates(x,y,z,3) directly. If you need to find any of these, GO THERE FIRST instead of searching blindly.';
+                }
+            } catch(_spe) {}
             // [mindaxis-patch:plan-hint-v2] プランヒント + 死亡タイマー（critical対応）
             let planHint = '';
             {
