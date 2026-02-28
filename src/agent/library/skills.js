@@ -3703,6 +3703,11 @@ export async function goToSurface(bot) {
             }
         } // end if (!_isUnderground)
         // --- Phase 2: 手動 swim ループ（pathfinder 失敗時フォールバック） ---
+        // [mindaxis-patch:underground-skip-phase2] 地下水路では Phase 2 をスキップして pillar dig へ直行
+        if (_isUnderground) {
+            console.log('[swim] Underground: skipping Phase 2 swim loop, going to pillar dig');
+        }
+        if (!_isUnderground) {
         const _blacklistedShores = [];
         let _lastSwimPos = bot.entity.position.clone();
         let _stuckCount = 0;
@@ -3898,8 +3903,10 @@ export async function goToSurface(bot) {
                     _blacklistedShores.push({ x: land.bx, z: land.bz, y: land.by });
                     _stuckCount = 0; _lastSwimPos = cp.clone(); continue;
                 }
-                // cliff dig: shore above water level + close
-                if (land.by + 1 > _localWaterTop && land.dist <= 5 && attempt >= 2) {
+                // cliff dig: 3ブロック以上の崖のみ（1-2ブロック差は泳いでジャンプで上がれる。岸ブロックを掘ると水没する）
+                // land.by は STANDING POSITION（固体ブロック + 1）なので land.by - 1 が床レベル
+                // 床レベル > waterTop + 1 = 2ブロック超の崖 → dig が必要
+                if (land.by > _localWaterTop + 2 && land.dist <= 5 && attempt >= 2) {
                     console.log('[swim] Cliff y=' + land.by + ' (waterTop=' + _localWaterTop + '), digging...');
                     for (let _cliffY = land.by; _cliffY >= _localWaterTop; _cliffY--) {
                         const _cliffB = bot.blockAt(new Vec3(land.bx, _cliffY, land.bz));
@@ -3977,6 +3984,7 @@ export async function goToSurface(bot) {
             }
             if (attempt >= 49) { console.log('[swim] 50 attempts, pillar fallthrough...'); break; }
         }
+        } // end if (!_isUnderground)
         bot._goToSurfaceActive = false;
         bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
         let finalFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
