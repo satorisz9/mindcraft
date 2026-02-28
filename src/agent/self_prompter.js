@@ -204,11 +204,24 @@ export class SelfPrompter {
                             if (_pd.dailyRoutine) {
                                 const _time = this.agent.bot.time?.timeOfDay;
                                 if (_time != null) {
+                                    // [mindaxis-patch:village-night-sleep] 村付近なら帰宅不要、村のベッドを使う
+                                    const _vrBot = this.agent.bot;
+                                    const _vrSaved = _vrBot._savedPlaces || {};
+                                    const _vrVillage = _vrSaved.village;
+                                    const _vrPos = _vrBot.entity && _vrBot.entity.position;
+                                    const _vrNearVillage = _vrVillage && _vrPos &&
+                                        Math.sqrt((_vrPos.x-_vrVillage[0])**2 + (_vrPos.z-_vrVillage[2])**2) < 150;
                                     if (_time >= 12000 && _time < 13000) {
-                                        planHint += ' EVENING: Go home, organize inventory, store items in chests.';
+                                        if (_vrNearVillage) {
+                                            planHint += ' EVENING: You are at a village — no need to go home. Prepare for night.';
+                                        } else {
+                                            planHint += ' EVENING: Go home, organize inventory, store items in chests.';
+                                        }
                                     } else if (_time >= 13000 || _time < 100) {
                                         const _hasBed = this.agent.bot.inventory.items().some(i => i.name.includes('_bed'));
-                                    if (_hasBed) {
+                                    if (_vrNearVillage) {
+                                        planHint += ' NIGHT: You are at a village — use !goToBed to sleep in a nearby village bed. Do NOT go home just to sleep. Village beds work fine!';
+                                    } else if (_hasBed) {
                                         planHint += ' NIGHT: You have a bed in your inventory. Use !goToBed to sleep wherever you are — it places the bed, sleeps through the night, then picks it back up automatically.';
                                     } else {
                                         planHint += ' NIGHT: Stay inside your house. You have a bed placed at home — use !goToBed to sleep. If !goToBed fails, go home first with !goToCoordinates then try !goToBed again.';

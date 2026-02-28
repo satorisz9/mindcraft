@@ -1601,8 +1601,9 @@ async function _discoverLocations(bot) {
                 _changed = true;
             }
         }
-        // 危険地帯の検出（溶岩源が近くに3つ以上）
-        const _lavaBlocks = world.getNearestBlocks(bot, 'lava', 16, 5);
+        // 危険地帯の検出（溶岩源が近くに3つ以上、地表レベルのみ）
+        // [mindaxis-patch:lava-surface-only] 地下溶岩洞窟を除外（ボット足元±3ブロック以内のみ）
+        const _lavaBlocks = world.getNearestBlocks(bot, 'lava', 16, 5).filter(b => Math.abs(b.position.y - _pos.y) <= 3);
         if (_lavaBlocks.length >= 3) {
             if (!_lm.places.danger) _lm.places.danger = [];
             const _lx = Math.round(_pos.x), _lz = Math.round(_pos.z);
