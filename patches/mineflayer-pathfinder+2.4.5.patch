@@ -1,5 +1,5 @@
 diff --git a/node_modules/mineflayer-pathfinder/index.js b/node_modules/mineflayer-pathfinder/index.js
-index b38bd30..750af7e 100644
+index b38bd30..853d7ea 100644
 --- a/node_modules/mineflayer-pathfinder/index.js
 +++ b/node_modules/mineflayer-pathfinder/index.js
 @@ -439,13 +439,32 @@ function inject (bot) {
@@ -45,12 +45,13 @@ index b38bd30..750af7e 100644
              fullStop()
            }
          } else if (!pathUpdated) {
+-          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal)
 +          // [mindaxis-patch:water-skip-repath-v2] [mindaxis-patch:water-skip-repath] 水中でも A* パス計算を常に実行
-+          // [mindaxis-patch:repath-timeout-v2] repath に 0.5s タイムアウト: event loop 詰まりで MC keepalive 切断を防ぐ
-           const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 500)
++          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 500) // [mindaxis-patch:repath-timeout]
            bot.emit('path_update', results)
            path = results.path
            astartTimedout = results.status === 'partial'
++          var _pp = path.slice(0, 5).map(function(n){return '('+n.x+','+n.y+','+n.z+')'}).join(' '); console.log('[water-nav] getPathTo: len=' + path.length + ' status=' + results.status + ' bot=(' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.y) + ',' + Math.round(bot.entity.position.z) + ') path=' + _pp)
            pathUpdated = true
          }
        }
@@ -103,7 +104,7 @@ index b38bd30..750af7e 100644
          return
        }
        // not done yet
-@@ -608,7 +662,22 @@ function inject (bot) {
+@@ -608,7 +662,24 @@ function inject (bot) {
      bot.setControlState('forward', true)
      bot.setControlState('jump', false)
  
@@ -117,7 +118,7 @@ index b38bd30..750af7e 100644
 +    const _nearWater = bot.entity.isInWater || (_feetBlock && _feetBlock.type === waterType) || (_belowBlock && _belowBlock.type === waterType) || (_below2Block && _below2Block.type === waterType)
 +    if (_nearWater) {
 +      const _needSwimUp = path.length > 0 && path[0].y > bot.entity.position.y + 0.5
-+      // [mindaxis-patch:water-no-jump-down] 次ステップが下方向（陸に降りる）なら jump しない（y=67 オーバーシュート防止）
++      // [mindaxis-patch:water-no-jump-down] 次ステップが下方向なら jump しない（y=67 オーバーシュート防止）
 +      const _nextStepDown = path.length > 0 && path[0].y < bot.entity.position.y - 0.3
 +      if ((!bot.entity.onGround || _needSwimUp) && !_nextStepDown) {
 +        bot.setControlState('jump', true)
@@ -129,7 +130,7 @@ index b38bd30..750af7e 100644
        bot.setControlState('jump', true)
        bot.setControlState('sprint', false)
      } else if (stateMovements.allowSprinting && physics.canStraightLine(path, true)) {
-@@ -629,8 +698,13 @@ function inject (bot) {
+@@ -629,8 +700,13 @@ function inject (bot) {
      }
  
      // check for futility
@@ -146,7 +147,7 @@ index b38bd30..750af7e 100644
      }
    }
 diff --git a/node_modules/mineflayer-pathfinder/lib/movements.js b/node_modules/mineflayer-pathfinder/lib/movements.js
-index a7e3505..6f9ae22 100644
+index a7e3505..cd86c2d 100644
 --- a/node_modules/mineflayer-pathfinder/lib/movements.js
 +++ b/node_modules/mineflayer-pathfinder/lib/movements.js
 @@ -55,6 +55,10 @@ class Movements {
@@ -160,7 +161,19 @@ index a7e3505..6f9ae22 100644
  
      this.gravityBlocks = new Set()
      this.gravityBlocks.add(registry.blocksByName.sand.id)
-@@ -396,6 +400,8 @@ class Movements {
+@@ -346,7 +350,10 @@ class Movements {
+     }
+ 
+     const block0 = this.getBlock(node, 0, -1, 0)
+-    if (blockC.height - block0.height > 1.2) return // Too high to jump
++    // [mindaxis-patch:water-surface-jumpup] 水面では block0 が水ブロック(shape なし)で height -1 低い → +1 補正
++    const _wsjNodeLiq = this.getBlock(node, 0, 0, 0).liquid
++    const _wsjB0H = (_wsjNodeLiq && !block0.physical) ? block0.height + 1 : block0.height
++    if (blockC.height - _wsjB0H > 1.2) return // Too high to jump
+ 
+     cost += this.safeOrBreak(blockA, toBreak)
+     if (cost > 100) return
+@@ -396,6 +403,8 @@ class Movements {
      }
  
      if (this.getBlock(node, 0, 0, 0).liquid) cost += this.liquidCost
@@ -169,7 +182,19 @@ index a7e3505..6f9ae22 100644
  
      neighbors.push(new Move(blockC.position.x, blockC.position.y, blockC.position.z, node.remainingBlocks - toPlace.length, cost, toBreak, toPlace))
    }
-@@ -493,7 +499,8 @@ class Movements {
+@@ -445,7 +454,10 @@ class Movements {
+ 
+     const blockD = this.getBlock(node, dir.x, -1, dir.z)
+     if (y === 1) { // Case jump up by 1
+-      if (blockC.height - block0.height > 1.2) return // Too high to jump
++      // [mindaxis-patch:water-surface-jumpup-diag] 水面 height 補正（diagonal）
++      const _wsjNodeLiq2 = this.getBlock(node, 0, 0, 0).liquid
++      const _wsjB0H2 = (_wsjNodeLiq2 && !block0.physical) ? block0.height + 1 : block0.height
++      if (blockC.height - _wsjB0H2 > 1.2) return // Too high to jump
+       cost += this.safeOrBreak(this.getBlock(node, 0, 2, 0), toBreak)
+       if (cost > 100) return
+       cost += 1
+@@ -493,7 +505,8 @@ class Movements {
      cost += this.safeOrBreak(blockD, toBreak)
      if (cost > 100) return
  
@@ -179,7 +204,7 @@ index a7e3505..6f9ae22 100644
  
      cost += this.getNumEntitiesAt(blockLand.position, 0, 0, 0) * this.entityCost // add cost for entities
  
-@@ -513,7 +520,8 @@ class Movements {
+@@ -513,7 +526,8 @@ class Movements {
      cost += this.safeOrBreak(block0, toBreak)
      if (cost > 100) return
  
@@ -189,7 +214,7 @@ index a7e3505..6f9ae22 100644
  
      cost += this.getNumEntitiesAt(blockLand.position, 0, 0, 0) * this.entityCost // add cost for entities
  
-@@ -522,18 +530,19 @@ class Movements {
+@@ -522,18 +536,19 @@ class Movements {
  
    getMoveUp (node, neighbors) {
      const block1 = this.getBlock(node, 0, 0, 0)
@@ -211,7 +236,7 @@ index a7e3505..6f9ae22 100644
        if (!this.allow1by1towers || node.remainingBlocks === 0) return // not enough blocks to place
  
        if (!block1.replaceable) {
-@@ -561,9 +570,9 @@ class Movements {
+@@ -561,9 +576,9 @@ class Movements {
      if ((block1.physical && block1.height >= block0.height) ||
        !this.getBlock(node, dir.x, 0, dir.z).safe ||
        !this.getBlock(node, dir.x, 1, dir.z).safe) return
