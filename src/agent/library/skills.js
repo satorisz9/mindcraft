@@ -2837,6 +2837,9 @@ export async function moveAway(bot, distance) {
         });
     }
     const _maStartAngle = 0; // unused, kept for structure
+    // 最初の方向（最も水域が少ない）は十分なタイムアウトを与える。残りは短め。
+    const _maMainTimeout = Math.min(distance * 300, 90000); // 200→60s, 300→90s
+    const _maFallbackTimeout = 8000;
     for (let _mai = 0; _mai < 8; _mai++) {
         if (bot.interrupt_code) break;
         const _maAngle = _maAngles[_mai];
@@ -2850,18 +2853,95 @@ export async function moveAway(bot, distance) {
             if (_b0 && _b0.solid && _b1 && !_b1.solid) { _maTy = _maTy + _dy; break; }
         }
         const _maGoal = new pf.goals.GoalNear(_maTx, _maTy, _maTz, 5);
-        const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 8000);
+        const _maTout = _mai === 0 ? _maMainTimeout : _maFallbackTimeout;
+        const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, _maTout);
         try { await goToGoal(bot, _maGoal); } catch(_) {} finally { clearTimeout(_maTimer); }
         // 十分移動できたら終了
         if (bot.entity.position.distanceTo(pos) >= distance * 0.5) break;
     }
-    const new_pos = bot.entity.position;
-    const _actualDist = Math.round(new_pos.distanceTo(pos));
-    if (_actualDist < distance * 0.3) {
-        log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()} (only ${_actualDist} blocks moved, target was ${distance}). Cannot move far — likely surrounded by water. To cross water: !craftRecipe("oak_boat", 1) (needs 5 oak_planks), then !boatTo(targetX, targetZ) to reach distant land.`);
-    } else {
-        log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
+    let new_pos = bot.entity.position;
+    let _actualDist = Math.round(new_pos.distanceTo(pos));
+
+    // [mindaxis-patch:moveaway-boat-fallback] 距離不足なら自動ボートで水を渡る
+    if (_actualDist < distance * 0.3 && !bot.interrupt_code) {
+        log(bot, `Only moved ${_actualDist} blocks (target: ${distance}). Trying boat crossing...`);
+        try {
+            // ボートを取得 or 作成
+            let _mabItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+            if (!_mabItem) {
+                const _mabPlanks = bot.inventory.items().filter(i => i.name.includes('planks')).reduce((s, i) => s + i.count, 0);
+                if (_mabPlanks >= 5) {
+                    await craftRecipe(bot, 'oak_boat');
+                    _mabItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+                }
+            }
+            if (_mabItem) {
+                // 地形キャッシュがあれば水域の少ない方向を選ぶ、なければランダム
+                const _mabAngle = _maAngles[0]; // 既にソート済み（水域の少ない順）
+                const _mabTx = Math.round(pos.x + distance * Math.cos(_mabAngle));
+                const _mabTz = Math.round(pos.z + distance * Math.sin(_mabAngle));
+                // 近くの水ブロックを探す
+                const _mabWaterId = bot.registry.blocksByName['water']?.id;
+                const _mabWater = _mabWaterId ? bot.findBlock({ matching: _mabWaterId, maxDistance: 30 }) : null;
+                if (_mabWater) {
+                    // 水辺に移動してボートを設置
+                    const _mabGoal = new pf.goals.GoalNear(_mabWater.position.x, _mabWater.position.y, _mabWater.position.z, 2);
+                    const _mabT = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 10000);
+                    try { await goToGoal(bot, _mabGoal); } catch(_) {} finally { clearTimeout(_mabT); }
+                    // ボートを装備・設置
+                    _mabItem = bot.inventory.items().find(i => i.name.includes('boat') && !i.name.includes('chest'));
+                    if (_mabItem) {
+                        await bot.equip(_mabItem, 'hand').catch(() => {});
+                        const _mabEnt = await bot.placeEntity(_mabWater, new Vec3(0, 1, 0)).catch(() => null);
+                        if (_mabEnt) {
+                            bot.mount(_mabEnt);
+                            await new Promise((res, rej) => {
+                                const t = setTimeout(() => rej(new Error('mount timeout')), 5000);
+                                bot.once('mount', () => { clearTimeout(t); res(); });
+                            }).catch(() => {});
+                            // ボートでターゲットへ向かう
+                            const _mabEnd = Date.now() + 90000;
+                            let _mabStuck = 0, _mabLast = bot.entity.position.clone(), _mabLand = 0;
+                            while (Date.now() < _mabEnd && bot.vehicle && !bot.interrupt_code) {
+                                const _cp = bot.entity.position;
+                                const _ddx = _mabTx - _cp.x, _ddz = _mabTz - _cp.z;
+                                if (Math.sqrt(_ddx*_ddx+_ddz*_ddz) < 15) break;
+                                if (_cp.distanceTo(_mabLast) < 0.3) { if (++_mabStuck > 40) break; } else _mabStuck = 0;
+                                _mabLast = _cp.clone();
+                                const _bel = bot.blockAt(_cp.offset(0, -1, 0));
+                                if (_bel && _bel.name !== 'water' && _bel.boundingBox === 'block') { if (++_mabLand > 15) break; } else _mabLand = 0;
+                                await bot.look(Math.atan2(-_ddx, -_ddz), 0);
+                                bot.moveVehicle(0, 1);
+                                await new Promise(r => setTimeout(r, 100));
+                            }
+                            // 降船
+                            if (bot.vehicle) { try { bot.dismount(); await new Promise(r => setTimeout(r, 500)); } catch(_) {} }
+                            // ボート回収
+                            if (bot.entities[_mabEnt.id]) {
+                                await bot.unequip('hand').catch(() => {});
+                                for (let _bi = 0; _bi < 8; _bi++) {
+                                    if (!bot.entities[_mabEnt.id]) break;
+                                    await bot.attack(bot.entities[_mabEnt.id]);
+                                    await new Promise(r => setTimeout(r, 400));
+                                }
+                            }
+                            new_pos = bot.entity.position;
+                            _actualDist = Math.round(new_pos.distanceTo(pos));
+                            log(bot, `Boat crossing done. Moved ${_actualDist} blocks from start.`);
+                        }
+                    }
+                } else {
+                    log(bot, 'No water nearby for boat. Cannot cross.');
+                }
+            } else {
+                log(bot, 'No boat and not enough planks to craft one. Collect 5 oak_planks first.');
+            }
+        } catch (_mabErr) {
+            log(bot, 'Boat fallback error: ' + _mabErr.message);
+        }
     }
+
+    log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
     return true;
 }
 
