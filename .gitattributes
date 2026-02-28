@@ -1,0 +1,2 @@
+# Force LF line endings for patch files (prevent CRLF corruption on Windows)
+*.patch text eol=lf
