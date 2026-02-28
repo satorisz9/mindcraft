@@ -156,8 +156,12 @@ export class SelfPrompter {
                                 const _totalSteps = _steps.length;
                                 if (_currentStep >= 0) {
                                     const _isCritical = _steps[_currentStep].critical;
+                                    const _stepDesc = _steps[_currentStep].step || '';
+                                    const _isExploreStep = /find|search|village|villager|locate|discover|explore/i.test(_stepDesc) || /find|search|village|villager|locate|discover/i.test(_plan.goal || '');
                                     const _skipRule = _isCritical
                                         ? 'This step is CRITICAL and CANNOT be skipped. But do NOT over-prepare! First !inventory to see what you already have, then !takeFromChest for missing items. Stone tools are fine if iron is not available — do NOT spend more than 2 turns gathering materials. Leave with minimum gear (stone tools + food) rather than wasting time.'
+                                        : _isExploreStep
+                                        ? 'This step requires EXPLORATION — keep moving and searching! !searchForEntity only detects entities in already-loaded chunks (~250 block radius). If it returns nothing: use !moveAway(300) to travel to new unexplored chunks, then search again. Repeat: !searchForEntity → nothing → !moveAway(300) → !searchForEntity → keep going. If surrounded by water, craft a boat: !craftRecipe("oak_boat", 1), then swim across. NOTE: !searchForEntity max range is 512 — do NOT exceed it. Only use !planSkip after 5+ move+search cycles with no results.'
                                         : 'If you cannot find what the step requires after 2-3 attempts, use !planSkip to skip it and move on — do NOT keep searching for the same thing or get sidetracked collecting other resources.';
                                     planHint += ' CURRENT PLAN: 「' + _plan.goal + '」(Step ' + (_currentStep+1) + '/' + _totalSteps + ': ' + _steps[_currentStep].step + '). PLAN RULE: Follow the current step. When done, use !planDone to mark complete and advance. ' + _skipRule + ' IMPORTANT: Do NOT build a new house — you already have one. ONLY build structures if the current plan step explicitly requires it.';
                                 } else {
