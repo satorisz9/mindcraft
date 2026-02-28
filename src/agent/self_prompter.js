@@ -233,6 +233,38 @@ export class SelfPrompter {
                         }
                     }
                 } catch(_fe) {}
+                // [mindaxis-patch:terrain-map-hint] 地形マップから方向別サマリーを AI に渡す
+                try {
+                    const _tmBot = this.agent.bot;
+                    if (_tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
+                        const _tmPos = _tmBot.entity && _tmBot.entity.position;
+                        if (_tmPos) {
+                            const _tmDirs = [
+                                {name:'N',angle:270},{name:'NE',angle:315},{name:'E',angle:0},{name:'SE',angle:45},
+                                {name:'S',angle:90},{name:'SW',angle:135},{name:'W',angle:180},{name:'NW',angle:225},
+                            ];
+                            const _tmResults = [];
+                            _tmDirs.forEach(d => {
+                                const _rad = d.angle * Math.PI / 180;
+                                const _dx = Math.cos(_rad), _dz = Math.sin(_rad);
+                                let _water = 0, _land = 0;
+                                for (let _si = 1; _si <= 5; _si++) {
+                                    const _tx = Math.round(_tmPos.x + _dx * _si * 20);
+                                    const _tz = Math.round(_tmPos.z + _dz * _si * 20);
+                                    const _tile = _tmBot._terrainCache[_tx + '_' + _tz];
+                                    if (!_tile) continue;
+                                    (_tile.block === 'water' || _tile.block === 'flowing_water') ? _water++ : _land++;
+                                }
+                                if (_water + _land === 0) return;
+                                const _pct = Math.round(_water / (_water + _land) * 100);
+                                _tmResults.push(d.name + '=' + (_pct >= 60 ? 'water' : _pct >= 30 ? 'mixed' : 'land'));
+                            });
+                            if (_tmResults.length >= 4) {
+                                planHint += ' KNOWN TERRAIN (' + Object.keys(_tmBot._terrainCache).length + ' tiles explored): ' + _tmResults.join(', ') + '. Prefer land directions for !moveAway.';
+                            }
+                        }
+                    }
+                } catch(_tme) {}
                 // [mindaxis-patch:underwater-emergency-hint] 水中緊急ヒント（頭が水没した場合のみ）
                 try {
                     const _uwBot = this.agent.bot;

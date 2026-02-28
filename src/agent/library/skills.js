@@ -2825,10 +2825,21 @@ export async function moveAway(bot, distance) {
     // [mindaxis-patch:moveaway-concrete-goal] GoalInvert → 8方向の具体座標 GoalNear に変更
     // GoalInvert は A* 探索空間が無限大になりタイムアウトしやすい。
     // 具体的なゴール座標を 8方向で順番に試し、8s で次方向へ切り替える。
-    const _maStartAngle = Math.random() * Math.PI * 2;
+    // 地形キャッシュがあれば水域の少ない方向を優先する。
+    const _maAngles = Array.from({length: 8}, (_, i) => (Math.random() * Math.PI * 2) + (i / 8) * Math.PI * 2);
+    // Sort: prefer directions with fewer known water tiles
+    if (bot._terrainCache && bot._terrainAnalyzeDir) {
+        _maAngles.sort((a, b) => {
+            const _stepSz = Math.floor(distance / 5);
+            const _da = bot._terrainAnalyzeDir(pos.x, pos.z, a * 180 / Math.PI, 5, _stepSz);
+            const _db = bot._terrainAnalyzeDir(pos.x, pos.z, b * 180 / Math.PI, 5, _stepSz);
+            return _da.water - _db.water;
+        });
+    }
+    const _maStartAngle = 0; // unused, kept for structure
     for (let _mai = 0; _mai < 8; _mai++) {
         if (bot.interrupt_code) break;
-        const _maAngle = _maStartAngle + (_mai / 8) * Math.PI * 2;
+        const _maAngle = _maAngles[_mai];
         const _maTx = Math.round(pos.x + distance * Math.cos(_maAngle));
         const _maTz = Math.round(pos.z + distance * Math.sin(_maAngle));
         // 目標XZの地表Y推定（±10ブロック走査、チャンク未ロード時は現在Y）
