@@ -619,6 +619,7 @@ export const actionsList = [
 
             skills.log(bot, 'Expanding house ' + direction + ' by ' + amount + ' blocks using ' + (availMat || mat) + '...');
             bot._allowHouseDig = true;
+            bot._repairMode = true;
             try {
 
             let newX1 = b.x1, newZ1 = b.z1, newX2 = b.x2, newZ2 = b.z2;
@@ -771,7 +772,7 @@ export const actionsList = [
                 skills.log(bot, 'Expansion done but house may have gaps. Run !repairHouse to fix.');
             }
 
-            } finally { bot._allowHouseDig = false; }
+            } finally { bot._allowHouseDig = false; bot._repairMode = false; }
         }, false, 300)
     },
     {
