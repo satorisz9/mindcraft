@@ -2897,33 +2897,72 @@ export async function useDoor(bot, door_pos=null) {
 
 export async function goToBed(bot) {
     /**
-     * Sleep in the nearest bed.
+     * Sleep in the nearest bed. If no bed is nearby and bot has a bed in inventory,
+     * places it temporarily, sleeps through the night, then picks it back up.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
-     * @returns {Promise<boolean>} true if the bed was found, false otherwise.
+     * @returns {Promise<boolean>} true if the bot slept, false otherwise.
      * @example
      * await skills.goToBed(bot);
      **/
     const beds = bot.findBlocks({
-        matching: (block) => {
-            return block.name.includes('bed');
-        },
+        matching: (block) => block.name.includes('bed'),
         maxDistance: 32,
         count: 1
     });
+
+    // [mindaxis-patch:portable-bed] ポータブルベッド: 近くにベッドがなければインベントリから設置
+    let portableBedPos = null;
     if (beds.length === 0) {
-        log(bot, `Could not find a bed to sleep in.`);
-        return false;
+        const bedItem = bot.inventory.items().find(item => item.name.includes('_bed'));
+        if (!bedItem) {
+            log(bot, );
+            return false;
+        }
+        const pos = bot.entity.position;
+        const px = Math.floor(pos.x), py = Math.floor(pos.y), pz = Math.floor(pos.z);
+        const trySpots = [[px, py, pz], [px+1, py, pz], [px-1, py, pz], [px, py, pz+1], [px, py, pz-1]];
+        let placed = false;
+        for (const [tx, ty, tz] of trySpots) {
+            if (await placeBlock(bot, bedItem.name, tx, ty, tz)) { placed = true; break; }
+        }
+        if (!placed) {
+            log(bot, );
+            return false;
+        }
+        const newBeds = bot.findBlocks({
+            matching: (block) => block.name.includes('bed'),
+            maxDistance: 8,
+            count: 1
+        });
+        if (newBeds.length === 0) {
+            log(bot, );
+            return false;
+        }
+        beds.push(newBeds[0]);
+        portableBedPos = newBeds[0];
+        log(bot, );
     }
+
     let loc = beds[0];
     await goToPosition(bot, loc.x, loc.y, loc.z);
     const bed = bot.blockAt(loc);
-    await bot.sleep(bed);
-    log(bot, `You are in bed.`);
+    try {
+        await bot.sleep(bed);
+    } catch(e) {
+        log(bot, );
+        if (portableBedPos) await breakBlockAt(bot, portableBedPos.x, portableBedPos.y, portableBedPos.z);
+        return false;
+    }
+    log(bot, );
     /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
     while (bot.isSleeping) {
         await new Promise(resolve => setTimeout(resolve, 500));
     }
-    log(bot, `You have woken up.`);
+    log(bot, );
+    if (portableBedPos) {
+        await breakBlockAt(bot, portableBedPos.x, portableBedPos.y, portableBedPos.z);
+        log(bot, );
+    }
     return true;
 }
 

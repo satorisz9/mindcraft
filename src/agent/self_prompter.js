@@ -142,7 +142,12 @@ export class SelfPrompter {
                                     if (_time >= 12000 && _time < 13000) {
                                         planHint += ' EVENING: Go home, organize inventory, store items in chests.';
                                     } else if (_time >= 13000 || _time < 100) {
-                                        planHint += ' NIGHT: Stay inside your house. You have a bed placed at home — use !goToBed to sleep. Do NOT craft a new bed. If !goToBed fails, go home first with !goToCoordinates then try !goToBed again. NEVER build a new house or craft a new bed.';
+                                        const _hasBed = this.agent.bot.inventory.items().some(i => i.name.includes('_bed'));
+                                    if (_hasBed) {
+                                        planHint += ' NIGHT: You have a bed in your inventory. Use !goToBed to sleep wherever you are — it places the bed, sleeps through the night, then picks it back up automatically.';
+                                    } else {
+                                        planHint += ' NIGHT: Stay inside your house. You have a bed placed at home — use !goToBed to sleep. If !goToBed fails, go home first with !goToCoordinates then try !goToBed again.';
+                                    }
                                     }
                                 }
                             }
