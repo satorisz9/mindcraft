@@ -2857,10 +2857,29 @@ export async function moveAway(bot, distance) {
             const _b1 = bot.blockAt(new Vec3(_maTx, _maTy + _dy, _maTz));
             if (_b0 && _b0.solid && _b1 && !_b1.solid) { _maTy = _maTy + _dy; break; }
         }
-        const _maGoal = new pf.goals.GoalNear(_maTx, _maTy, _maTz, 5);
-        const _maTout = _mai === 0 ? _maMainTimeout : _maFallbackTimeout;
-        const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, _maTout);
-        try { await goToGoal(bot, _maGoal); } catch(_) {} finally { clearTimeout(_maTimer); }
+        // [mindaxis-patch:moveaway-segmented] 最優先方向は60ブロック区切りで分割パスファインド
+        if (_mai === 0) {
+            const _maSegSize = 60;
+            const _maNumSegs = Math.ceil(distance / _maSegSize);
+            for (let _maSeg = 1; _maSeg <= _maNumSegs && !bot.interrupt_code; _maSeg++) {
+                const _maSegDist = _maSeg * _maSegSize;
+                const _maStx = Math.round(pos.x + _maSegDist * Math.cos(_maAngle));
+                const _maStz = Math.round(pos.z + _maSegDist * Math.sin(_maAngle));
+                let _maSTy = Math.round(pos.y);
+                for (let _sdy = -10; _sdy <= 10; _sdy++) {
+                    const _b0 = bot.blockAt(new Vec3(_maStx, _maSTy + _sdy - 1, _maStz));
+                    const _b1 = bot.blockAt(new Vec3(_maStx, _maSTy + _sdy, _maStz));
+                    if (_b0 && _b0.solid && _b1 && !_b1.solid) { _maSTy = _maSTy + _sdy; break; }
+                }
+                const _maSegGoal = new pf.goals.GoalNear(_maStx, _maSTy, _maStz, 5);
+                const _maSegTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 30000);
+                try { await goToGoal(bot, _maSegGoal); } catch(_) {} finally { clearTimeout(_maSegTimer); }
+            }
+        } else {
+            const _maGoal = new pf.goals.GoalNear(_maTx, _maTy, _maTz, 5);
+            const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, _maFallbackTimeout);
+            try { await goToGoal(bot, _maGoal); } catch(_) {} finally { clearTimeout(_maTimer); }
+        }
         // 十分移動できたら終了
         if (bot.entity.position.distanceTo(pos) >= distance * 0.5) break;
     }
