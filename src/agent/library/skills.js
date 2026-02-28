@@ -2874,6 +2874,12 @@ export async function moveAway(bot, distance) {
                 const _maSegGoal = new pf.goals.GoalNear(_maStx, _maSTy, _maStz, 5);
                 const _maSegTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 30000);
                 try { await goToGoal(bot, _maSegGoal); } catch(_) {} finally { clearTimeout(_maSegTimer); }
+                // [mindaxis-patch:moveaway-water-escape] セグメント後に水中なら即 goToSurface して次セグメントへ
+                if (bot.entity.isInWater) {
+                    log(bot, 'moveAway segment ended in water — calling goToSurface...');
+                    try { await goToSurface(bot); } catch(_) {}
+                    if (bot.entity.isInWater) break; // 脱出できなければそのセグメント方向を諦める
+                }
             }
         } else {
             const _maGoal = new pf.goals.GoalNear(_maTx, _maTy, _maTz, 5);
@@ -3895,11 +3901,26 @@ export async function goToSurface(bot) {
                     bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
                     await new Promise(r => setTimeout(r, 1500));
                 } else if (land.dist <= 3) {
-                    // 近距離: スプリントOFF、短ディレイで振動防止
                     await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
-                    bot.setControlState('forward', true); bot.setControlState('sprint', false);
-                    bot.setControlState('jump', attempt % 4 === 0);
-                    await new Promise(r => setTimeout(r, 600));
+                    // [mindaxis-patch:shore-close-pf] dist<=2: pathfinder で直接岸へ (N/S振動根本解決)
+                    if (land.dist <= 2) {
+                        try {
+                            const _pfSGoal = new pf.goals.GoalNear(land.bx, land.y, land.bz, 1);
+                            const _pfSTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_e) {} }, 3000);
+                            try { await goToGoal(bot, _pfSGoal); } catch(_e) {} finally { clearTimeout(_pfSTimer); }
+                        } catch(_e) {}
+                        if (bot.entity.isInWater) {
+                            // pathfinder 失敗 → 強制ジャンプ+スプリント
+                            bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                            bot.setControlState('jump', true);
+                            await new Promise(r => setTimeout(r, 800));
+                        }
+                    } else {
+                        // dist=3: 常にジャンプ (was attempt%4)
+                        bot.setControlState('forward', true); bot.setControlState('sprint', false);
+                        bot.setControlState('jump', true);
+                        await new Promise(r => setTimeout(r, 600));
+                    }
                 } else {
                     // 遠距離: フルスピード
                     await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
