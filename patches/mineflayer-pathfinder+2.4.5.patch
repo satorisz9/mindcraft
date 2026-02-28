@@ -184,8 +184,8 @@ index a7e3505..6f9ae22 100644
      if (cost > 100) return
  
 -    if (this.getBlock(node, 0, 0, 0).liquid) return // dont go underwater
-+    // [mindaxis-patch:water-down-v2] [mindaxis-patch:water-down] 水底ダイブ防止: 下方向は高コスト
-+    if (this.getBlock(node, 0, 0, 0).liquid) cost += 10
++    // [mindaxis-patch:water-down-v3] 水中での下方向移動を完全ブロック（水面のみ経由）
++    if (this.getBlock(node, 0, 0, 0).liquid) return // dont dive underwater
  
      cost += this.getNumEntitiesAt(blockLand.position, 0, 0, 0) * this.entityCost // add cost for entities
  
