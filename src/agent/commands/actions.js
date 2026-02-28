@@ -402,6 +402,20 @@ export const actionsList = [
                 } catch(e) {}
             }
 
+            // --- 8. Recover boat (attack to break, item_collecting will pick it up) ---
+            try {
+                const _recoverBoat = boatEntity && bot.entities[boatEntity.id];
+                if (_recoverBoat) {
+                    await bot.unequip('hand').catch(() => {});
+                    for (let _bi = 0; _bi < 8; _bi++) {
+                        if (!bot.entities[boatEntity.id]) break;
+                        await bot.attack(bot.entities[boatEntity.id]);
+                        await new Promise(r => setTimeout(r, 400));
+                    }
+                    skills.log(bot, 'Boat recovered.');
+                }
+            } catch(_be) {}
+
             const fp = bot.entity.position;
             const finalDist = Math.sqrt((x - fp.x) ** 2 + (z - fp.z) ** 2);
             if (finalDist < 20) {
