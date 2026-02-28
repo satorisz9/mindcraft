@@ -617,7 +617,8 @@ export const actionsList = [
                 }
             }
 
-            const minNeeded = Math.max(20, Math.floor(blocksNeeded * 0.5));
+            // Phase 1 returns ~10 blocks, Phase 2/3 skip existing solid blocks — actual need is ~30% of estimate
+            const minNeeded = Math.max(15, Math.floor(blocksNeeded * 0.3));
             if (!availMat || availCount < minNeeded) {
                 skills.log(bot, 'Need ~' + minNeeded + ' ' + (availMat || mat) + ' to expand (est. ' + blocksNeeded + ' total). Have ' + availCount + '. Collect more building materials first!');
                 return;
