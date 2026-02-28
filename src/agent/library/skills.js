@@ -2814,17 +2814,37 @@ export async function moveAway(bot, distance) {
         }
     }
 
-    // [mindaxis-patch:moveaway-surface-first] 水中/地下なら goToSurface で脱出、pathfinder はスキップ
+    // [mindaxis-patch:moveaway-surface-first] 水中/地下なら goToSurface で脱出
     if (bot.entity.isInWater) {
         log(bot, 'Underwater detected in moveAway, surfacing first...');
         await goToSurface(bot);
-        log(bot, 'moveAway: goToSurface done, skipping pathfinder (underground pathfinding is unreliable).');
+        log(bot, 'moveAway: goToSurface done.');
         return true;
     }
-    // [mindaxis-patch:moveaway-timeout] 30秒でタイムアウト（水中A*ループ防止）
-    const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 30000);
-    try { await goToGoal(bot, inverted_goal); } catch(_e) {} finally { clearTimeout(_maTimer); }
-    let new_pos = bot.entity.position;
+
+    // [mindaxis-patch:moveaway-concrete-goal] GoalInvert → 8方向の具体座標 GoalNear に変更
+    // GoalInvert は A* 探索空間が無限大になりタイムアウトしやすい。
+    // 具体的なゴール座標を 8方向で順番に試し、8s で次方向へ切り替える。
+    const _maStartAngle = Math.random() * Math.PI * 2;
+    for (let _mai = 0; _mai < 8; _mai++) {
+        if (bot.interrupt_code) break;
+        const _maAngle = _maStartAngle + (_mai / 8) * Math.PI * 2;
+        const _maTx = Math.round(pos.x + distance * Math.cos(_maAngle));
+        const _maTz = Math.round(pos.z + distance * Math.sin(_maAngle));
+        // 目標XZの地表Y推定（±10ブロック走査、チャンク未ロード時は現在Y）
+        let _maTy = Math.round(pos.y);
+        for (let _dy = -10; _dy <= 10; _dy++) {
+            const _b0 = bot.blockAt(new Vec3(_maTx, _maTy + _dy - 1, _maTz));
+            const _b1 = bot.blockAt(new Vec3(_maTx, _maTy + _dy, _maTz));
+            if (_b0 && _b0.solid && _b1 && !_b1.solid) { _maTy = _maTy + _dy; break; }
+        }
+        const _maGoal = new pf.goals.GoalNear(_maTx, _maTy, _maTz, 5);
+        const _maTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_) {} }, 8000);
+        try { await goToGoal(bot, _maGoal); } catch(_) {} finally { clearTimeout(_maTimer); }
+        // 十分移動できたら終了
+        if (bot.entity.position.distanceTo(pos) >= distance * 0.5) break;
+    }
+    const new_pos = bot.entity.position;
     log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()}.`);
     return true;
 }
