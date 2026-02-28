@@ -635,6 +635,10 @@ export const actionsList = [
                 const bl = bot.blockAt(new Vec3(x, y, z));
                 return bl && bl.name !== 'air' && bl.name !== 'cave_air' && bl.name !== 'void_air';
             };
+            // Helper: placeBlock with error suppression (PathStopped 等で全体が中断しないように)
+            const tryPlace = async (mat, x, y, z) => {
+                try { await skills.placeBlock(bot, mat, x, y, z); } catch(_pe) {}
+            };
 
             let newX1 = b.x1, newZ1 = b.z1, newX2 = b.x2, newZ2 = b.z2;
             if (direction === 'north') { newZ1 = b.z1 - amount; }
@@ -683,7 +687,7 @@ export const actionsList = [
                 const zEnd = direction === 'north' ? b.z1 - 1 : newZ2;
                 for (let fz = zStart; fz <= zEnd; fz++) {
                     for (let fx = newX1; fx <= newX2; fx++) {
-                        await skills.placeBlock(bot, useMat, fx, floorY, fz);
+                        await tryPlace(useMat, fx, floorY, fz);
                     }
                 }
             } else {
@@ -692,7 +696,7 @@ export const actionsList = [
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
                         if (hasSolid(fx, floorY, fz)) continue; // already has floor block
-                        await skills.placeBlock(bot, useMat, fx, floorY, fz);
+                        await tryPlace(useMat, fx, floorY, fz);
                     }
                 }
             }
@@ -704,8 +708,8 @@ export const actionsList = [
                 const zEnd = direction === 'north' ? b.z1 - 1 : newZ2;
                 for (let fz = zStart; fz <= zEnd; fz++) {
                     for (let wy = floorY + 1; wy < roofY; wy++) {
-                        await skills.placeBlock(bot, useMat, b.x1, wy, fz);
-                        await skills.placeBlock(bot, useMat, b.x2, wy, fz);
+                        await tryPlace(useMat, b.x1, wy, fz);
+                        await tryPlace(useMat, b.x2, wy, fz);
                     }
                 }
             } else {
@@ -713,8 +717,8 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 - 1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let wy = floorY + 1; wy < roofY; wy++) {
-                        if (!hasSolid(fx, wy, b.z1)) await skills.placeBlock(bot, useMat, fx, wy, b.z1);
-                        if (!hasSolid(fx, wy, b.z2)) await skills.placeBlock(bot, useMat, fx, wy, b.z2);
+                        if (!hasSolid(fx, wy, b.z1)) await tryPlace(useMat, fx, wy, b.z1);
+                        if (!hasSolid(fx, wy, b.z2)) await tryPlace(useMat, fx, wy, b.z2);
                     }
                 }
             }
@@ -732,7 +736,7 @@ export const actionsList = [
                 for (let wx = newX1; wx <= newX2; wx++) {
                     for (let wy = floorY + 1; wy < roofY; wy++) {
                         if (doorOnThisWall && wx === hs.door.x && (wy - floorY) <= 2) continue;
-                        await skills.placeBlock(bot, useMat, wx, wy, wz);
+                        await tryPlace(useMat, wx, wy, wz);
                     }
                 }
             } else {
@@ -740,7 +744,7 @@ export const actionsList = [
                 for (let wz = newZ1; wz <= newZ2; wz++) {
                     for (let wy = floorY + 1; wy < roofY; wy++) {
                         if (doorOnThisWall && wz === hs.door.z && (wy - floorY) <= 2) continue;
-                        await skills.placeBlock(bot, useMat, wx, wy, wz);
+                        await tryPlace(useMat, wx, wy, wz);
                     }
                 }
             }
@@ -753,7 +757,7 @@ export const actionsList = [
                 const zEnd = direction === 'north' ? b.z1 : newZ2;
                 for (let fz = zStart; fz <= zEnd; fz++) {
                     for (let fx = newX1; fx <= newX2; fx++) {
-                        await skills.placeBlock(bot, useMat, fx, roofY, fz);
+                        if (!hasSolid(fx, roofY, fz)) await tryPlace(useMat, fx, roofY, fz);
                     }
                 }
             } else {
@@ -761,7 +765,7 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
-                        await skills.placeBlock(bot, useMat, fx, roofY, fz);
+                        if (!hasSolid(fx, roofY, fz)) await tryPlace(useMat, fx, roofY, fz);
                     }
                 }
             }
@@ -774,7 +778,7 @@ export const actionsList = [
                 else if (direction === 'south') newDoorZ = newZ2;
                 else if (direction === 'west') newDoorX = newX1;
                 else if (direction === 'east') newDoorX = newX2;
-                await skills.placeBlock(bot, 'oak_door', newDoorX, floorY + 1, newDoorZ);
+                await tryPlace('oak_door', newDoorX, floorY + 1, newDoorZ);
             }
 
             // Phase 7: Re-scan and save new bounds
