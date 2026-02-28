@@ -3901,13 +3901,25 @@ export async function goToSurface(bot) {
                     bot.setControlState('forward', true); bot.setControlState('jump', true); bot.setControlState('sprint', true);
                     await new Promise(r => setTimeout(r, 1500));
                 } else if (land.dist <= 3) {
-                    // [mindaxis-patch:shore-close-jump] 近距離は常に lookAt+sprint+jump で直接上がる
-                    // GoalNear(radius=1) は水中から「達成」扱いになるバグがあるため pathfinder を使わない
                     await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
-                    bot.setControlState('forward', true);
-                    bot.setControlState('sprint', true);
-                    bot.setControlState('jump', true);
-                    await new Promise(r => setTimeout(r, land.dist <= 1 ? 600 : 800));
+                    if (land.dist <= 2) {
+                        // [mindaxis-patch:shore-close-pf] radius=0 で正確な岸位置を指定 (水中でgoal達成しない)
+                        try {
+                            const _pfSGoal = new pf.goals.GoalNear(land.bx, land.y, land.bz, 0);
+                            const _pfSTimer = setTimeout(() => { try { bot.pathfinder.stop(); } catch(_e) {} }, 3000);
+                            try { await goToGoal(bot, _pfSGoal); } catch(_e) {} finally { clearTimeout(_pfSTimer); }
+                        } catch(_e) {}
+                        if (bot.entity.isInWater) {
+                            await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
+                            bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                            bot.setControlState('jump', true);
+                            await new Promise(r => setTimeout(r, 800));
+                        }
+                    } else {
+                        bot.setControlState('forward', true); bot.setControlState('sprint', true);
+                        bot.setControlState('jump', true);
+                        await new Promise(r => setTimeout(r, 600));
+                    }
                 } else {
                     // 遠距離: フルスピード
                     await bot.lookAt(new Vec3(land.x, cp.y + 0.5, land.z));
