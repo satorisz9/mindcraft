@@ -757,7 +757,6 @@ export const actionsList = [
                 const xEnd = direction === 'west' ? b.x1 : newX2;
                 for (let fx = xStart; fx <= xEnd; fx++) {
                     for (let fz = newZ1; fz <= newZ2; fz++) {
-                        if (hasSolid(fx, roofY, fz)) continue; // already has roof block
                         await skills.placeBlock(bot, useMat, fx, roofY, fz);
                     }
                 }
