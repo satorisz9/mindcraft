@@ -4307,7 +4307,8 @@ export async function scanStructure(bot) {
 
     // [mindaxis-patch:cramped-detect] 狭小判定
     const interiorArea = (x2 - x1 - 1) * (z2 - z1 - 1);
-    const cramped = interiorArea <= 12 && furniture.length >= 2;
+    const freeTiles = interiorArea - furniture.length;
+    const cramped = freeTiles <= 12 && furniture.length >= 2;
     result.cramped = cramped;
     result.interiorArea = interiorArea;
 
