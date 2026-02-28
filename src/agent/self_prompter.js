@@ -192,11 +192,13 @@ export class SelfPrompter {
                         }
                     }
                 } catch(_uwe) {}
-                // [mindaxis-patch:stay-out-hint] 遠出時は帰宅抑制
+                // [mindaxis-patch:stay-out-hint-v2] 遠出時は帰宅抑制（夜・インベントリ満杯・食料切れは除外）
                 try {
                     const _soBot = this.agent.bot;
                     const _soHs = _soBot._houseStructure;
-                    if (_soHs && _soHs.bounds && _soBot.entity) {
+                    const _soTime = _soBot.time && _soBot.time.timeOfDay;
+                    const _soIsNight = _soTime != null && (_soTime >= 12500 || _soTime < 100);
+                    if (!_soIsNight && _soHs && _soHs.bounds && _soBot.entity) {
                         const _soPos = _soBot.entity.position;
                         const _soHx = (_soHs.bounds.x1 + _soHs.bounds.x2) / 2;
                         const _soHz = (_soHs.bounds.z1 + _soHs.bounds.z2) / 2;
@@ -205,7 +207,7 @@ export class SelfPrompter {
                             const _soTypes = new Set(_soBot.inventory.items().map(i => i.name)).size;
                             const _soFood = _soBot.inventory.items().some(i => ['apple','bread','cooked_beef','salmon','cooked_salmon','mutton','cooked_mutton','porkchop','cooked_porkchop','carrot','potato','baked_potato','cooked_chicken','chicken'].includes(i.name));
                             if (_soTypes < 12 && _soFood) {
-                                planHint += ' STAY OUT: You are ' + Math.round(_soDist) + ' blocks from home and inventory is not full (' + _soTypes + '/12 item types). Keep exploring! Only go home when inventory is full, food is gone, or it is night.';
+                                planHint += ' STAY OUT: You are ' + Math.round(_soDist) + ' blocks from home, it is daytime, and inventory is not full (' + _soTypes + '/12 item types). Keep exploring! Do NOT go home just to deposit items. Only go home when (a) inventory reaches 12+ item types, (b) food runs out, or (c) it becomes night.';
                             }
                         }
                     }
