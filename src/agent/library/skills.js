@@ -3321,6 +3321,7 @@ async function findAndGoToVillager(bot, id) {
     // metadata villager_data has key 'villagerProfession' (not 'profession')
     const _profMeta = entity.metadata && Object.values(entity.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
     const _profId = _profMeta != null ? _profMeta.villagerProfession : -1;
+    console.log(`[vprof] id=${id} type=${entity.type} entityType=${entity.entityType} profId=${_profId} meta=${JSON.stringify(entity.metadata)};`);
     if (_profId === 0) {
         log(bot, `Villager ${id} is Unemployed (no job site block) - cannot trade. Place a job site block near them to give them a profession (e.g. composter=farmer, lectern=librarian, blast_furnace=armorer, smoker=butcher, cartography_table=cartographer, brewing_stand=cleric, barrel=fisherman, fletching_table=fletcher, loom=shepherd, grindstone=weaponsmith, smithing_table=toolsmith, stonecutter=mason).`);
         return null;
