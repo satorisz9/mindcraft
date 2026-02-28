@@ -17,6 +17,7 @@ import settings from './settings.js';
 import { Task } from './tasks/tasks.js';
 import { speak } from './speak.js';
 import { log, validateNameFormat, handleDisconnection } from './connection_handler.js';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 export class Agent {
     async start(load_mem=false, init_message=null, count_id=0) {
@@ -93,6 +94,13 @@ export class Agent {
         this.bot.on('login', () => {
             console.log(this.name, 'logged in!');
             serverProxy.login();
+            // [mindaxis-patch:death-zones-load] 起動時に死亡地点リストをロード
+            try {
+                const _dzPath = `./bots/${this.name}/death_zones.json`;
+                this.bot._deathZones = existsSync(_dzPath) ? JSON.parse(readFileSync(_dzPath, 'utf8')) : [];
+                if (this.bot._deathZones.length > 0)
+                    console.log(`[death-zones] Loaded ${this.bot._deathZones.length} danger zones`);
+            } catch(e) { this.bot._deathZones = []; }
             
             // Set skin for profile, requires Fabric Tailor. (https://modrinth.com/mod/fabrictailor)
             if (this.prompter.profile.skin)
@@ -513,6 +521,23 @@ export class Agent {
             this.bot._lastDeathTime = Date.now(); // [mindaxis-patch:death-timer]
             this.actions.cancelResume();
             this.actions.stop();
+            // [mindaxis-patch:death-zones-save] 死亡地点をスコア付きで記録
+            try {
+                const _pos = this.bot.entity.position;
+                const _cause = this.bot._pendingDeathCause || 'unknown';
+                this.bot._pendingDeathCause = null;
+                const _dzPath = `./bots/${this.name}/death_zones.json`;
+                let _zones = [];
+                try { _zones = JSON.parse(readFileSync(_dzPath, 'utf8')); } catch(e) {}
+                const _near = _zones.find(z => Math.abs(z.x-_pos.x)<8 && Math.abs(z.y-_pos.y)<8 && Math.abs(z.z-_pos.z)<8);
+                if (_near) { _near.count = (_near.count||1)+1; _near.cause = _cause; }
+                else { _zones.push({x:Math.round(_pos.x),y:Math.round(_pos.y),z:Math.round(_pos.z),cause:_cause,count:1}); }
+                _zones.sort((a,b)=>b.count-a.count);
+                if (_zones.length>30) _zones.length=30;
+                writeFileSync(_dzPath, JSON.stringify(_zones));
+                this.bot._deathZones = _zones;
+                console.log(`[death-zones] Saved death at (${Math.round(_pos.x)},${Math.round(_pos.y)},${Math.round(_pos.z)}) cause=${_cause} count=${(_near?.count||1)}`);
+            } catch(e) { console.log('[death-zones] Save error:', e.message); }
         });
         this.bot.on('kicked', (reason) => {
             if (!this._disconnectHandled) {
@@ -523,6 +548,12 @@ export class Agent {
         this.bot.on('messagestr', async (message, _, jsonMsg) => {
             if (jsonMsg.translate && jsonMsg.translate.startsWith('death') && message.startsWith(this.name)) {
                 console.log('Agent died: ', message);
+                // [mindaxis-patch:death-cause-extract] 死亡原因を抽出して death イベントに渡す
+                if (message.includes('drown')) this.bot._pendingDeathCause = 'drown';
+                else if (message.includes('lava') || message.includes('burn')) this.bot._pendingDeathCause = 'lava';
+                else if (message.includes('fall') || message.includes('fell')) this.bot._pendingDeathCause = 'fall';
+                else if (message.includes('suffocate') || message.includes('wall')) this.bot._pendingDeathCause = 'suffocate';
+                else this.bot._pendingDeathCause = 'other';
                 let death_pos = this.bot.entity.position;
                 this.memory_bank.rememberPlace('last_death_position', death_pos.x, death_pos.y, death_pos.z);
                 let death_pos_text = null;

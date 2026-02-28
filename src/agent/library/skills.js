@@ -1981,6 +1981,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         log(bot, `Missing coordinates, given x:${x} y:${y} z:${z}`);
         return false;
     }
+    // [mindaxis-patch:death-zone-nav-warn] 死亡地点への接近を警告
+    {
+        const _dz = (bot._deathZones || []).find(z => Math.sqrt((x-z.x)**2+(y-z.y)**2+(z-z.z)**2) < 15);
+        if (_dz) log(bot, `CAUTION: Navigating near previous death location (${_dz.x},${_dz.y},${_dz.z}) — cause: ${_dz.cause}×${_dz.count}. ${_dz.cause==='drown'?'Underwater hazard — abort immediately if submerged.':'Proceed carefully.'}`);
+    }
     if (bot.modes.isOn('cheat')) {
         bot.chat('/tp @s ' + x + ' ' + y + ' ' + z);
         log(bot, `Teleported to ${x}, ${y}, ${z}.`);

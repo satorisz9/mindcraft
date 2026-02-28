@@ -112,6 +112,12 @@ export class SelfPrompter {
                     planHint += ' Your dropped items have DESPAWNED (5+ minutes since death). Do NOT try to recover them. Resume normal activities and your current plan.';
                     this.agent.bot._lastDeathTime = null;
                 }
+                // [mindaxis-patch:danger-zones-hint] 死亡地点を危険ゾーンとしてAIに警告
+                const _dzones = this.agent.bot._deathZones || [];
+                if (_dzones.length > 0) {
+                    const _dzStr = _dzones.slice(0, 5).map(z => `(${z.x},${z.y},${z.z})=${z.cause}×${z.count}`).join(', ');
+                    planHint += ' KNOWN DANGER ZONES: ' + _dzStr + '. These locations have caused death before — approach with extreme caution or avoid entirely. Water zones (drown) are especially lethal; do not enter without an escape plan.';
+                }
                 // --- マクロプランヒント ---
                 try {
                     const _fs = await import('fs');
