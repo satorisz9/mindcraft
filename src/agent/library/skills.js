@@ -3321,10 +3321,7 @@ async function findAndGoToVillager(bot, id) {
     // metadata villager_data has key 'villagerProfession' (not 'profession')
     const _profMeta = entity.metadata && Object.values(entity.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
     const _profId = _profMeta != null ? _profMeta.villagerProfession : -1;
-    if (_profId === -1) {
-        log(bot, `Entity ${id} has no villager data - may be a Wandering Trader or not yet loaded. Try a different villager.`);
-        return null;
-    }
+    // _profId === -1 means no villager_data (e.g. Wandering Trader) — allow trading
     if (_profId === 0) {
         log(bot, `Villager ${id} is Unemployed (no job site block) - cannot trade. Place a job site block near them to give them a profession (e.g. composter=farmer, lectern=librarian, blast_furnace=armorer, smoker=butcher, cartography_table=cartographer, brewing_stand=cleric, barrel=fisherman, fletching_table=fletcher, loom=shepherd, grindstone=weaponsmith, smithing_table=toolsmith, stonecutter=mason).`);
         return null;
