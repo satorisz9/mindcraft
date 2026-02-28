@@ -46,8 +46,8 @@ index b38bd30..750af7e 100644
            }
          } else if (!pathUpdated) {
 +          // [mindaxis-patch:water-skip-repath-v2] [mindaxis-patch:water-skip-repath] 水中でも A* パス計算を常に実行
-+          // [mindaxis-patch:repath-timeout-v2] repath に 2s タイムアウト: 無制限ブロックで MC keepalive 切断を防ぐ
-           const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 2000)
++          // [mindaxis-patch:repath-timeout-v2] repath に 0.5s タイムアウト: event loop 詰まりで MC keepalive 切断を防ぐ
+           const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 500)
            bot.emit('path_update', results)
            path = results.path
            astartTimedout = results.status === 'partial'
