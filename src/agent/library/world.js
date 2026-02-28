@@ -235,10 +235,10 @@ export function getVillagerProfession(entity) {
         14: 'Weaponsmith'
     };
     
-    // Search metadata for the villager_data object (has 'profession' key)
-    const vd = entity.metadata && Object.values(entity.metadata).find(v => v && typeof v === 'object' && 'profession' in v);
+    // Search metadata for the villager_data object (key is 'villagerProfession')
+    const vd = entity.metadata && Object.values(entity.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
     if (vd != null) {
-        const professionName = professions[vd.profession] || 'Unknown';
+        const professionName = professions[vd.villagerProfession] || 'Unknown';
         const level = vd.level || 1;
         return `${professionName} L${level}`;
     }
