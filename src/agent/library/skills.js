@@ -3318,8 +3318,9 @@ async function findAndGoToVillager(bot, id) {
     }
 
     // [mindaxis-patch:villager-profession-check] Skip unemployed/nitwit villagers (they cannot trade)
-    const _profMeta = entity.metadata && entity.metadata[18];
-    const _profId = _profMeta != null ? (typeof _profMeta === 'object' ? _profMeta.villagerProfession : _profMeta) : -1;
+    // Search metadata for the villager_data object (key is 'profession', not 'villagerProfession')
+    const _profMeta = entity.metadata && Object.values(entity.metadata).find(v => v && typeof v === 'object' && 'profession' in v);
+    const _profId = _profMeta != null ? _profMeta.profession : -1;
     if (_profId === 0) {
         log(bot, `Villager ${id} is Unemployed (no job site block) - cannot trade. Place a job site block near them to give them a profession (e.g. composter=farmer, lectern=librarian, blast_furnace=armorer, smoker=butcher, cartography_table=cartographer, brewing_stand=cleric, barrel=fisherman, fletching_table=fletcher, loom=shepherd, grindstone=weaponsmith, smithing_table=toolsmith, stonecutter=mason).`);
         return null;
