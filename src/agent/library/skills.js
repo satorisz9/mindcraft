@@ -2144,6 +2144,8 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         }
         // [mindaxis-patch:underwater-is-underground] 水中は pathfinder に任せる（goToSurface を先に呼ばない）
         const isUnderground = !_nearHouse && headBlock && headBlock.name !== 'air' && headBlock.name !== 'cave_air' && headBlock.name !== 'water' && headBlock.name !== 'flowing_water' && headBlock.name !== 'lava';
+        // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より10ブロック以上低いなら地上優先
+        const _deepBelowTarget = !_nearHouse && yDiff > 10;
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
         let _underHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -2152,7 +2154,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             _underHouse = _cx >= _uhb.x1 && _cx <= _uhb.x2 && _cz >= _uhb.z1 && _cz <= _uhb.z2
                        && curPos.y >= (_uhb.y - 5) && curPos.y < _uhb.y;
         }
-        if (isUnderground && yDiff > 2 && !bot._pillarPreUsed) {
+        if ((isUnderground || _deepBelowTarget) && yDiff > 2 && !bot._pillarPreUsed) {
             bot._pillarPreUsed = true;
             try {
                 if (_underHouse) {
