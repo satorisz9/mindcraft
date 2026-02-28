@@ -145,7 +145,8 @@ export class SelfPrompter {
                     const _drownDeath = (_deathPos && _deathPos[1] < 63) ||
                         _dzones.some(z => _deathPos && Math.abs(z.x - _deathPos[0]) < 5 && Math.abs(z.z - _deathPos[2]) < 5 && z.cause === 'drown');
                     if (_drownDeath) {
-                        planHint += ' You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + ' (water/drown zone). Item recovery is too dangerous — do NOT go there. Items will despawn in ' + _remaining + 's but your safety is more important. Continue your current plan. // [mindaxis-patch:death-coords-hint]';
+                        const _safeY = 65;
+                        planHint += ' URGENT: You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + ' (water zone — items floating near surface). Use !goToCoordinates(' + ((_deathPos&&Math.round(_deathPos[0]))||'?') + ', ' + _safeY + ', ' + ((_deathPos&&Math.round(_deathPos[2]))||'?') + ', 8) to approach from above. Do NOT dive to y=' + ((_deathPos&&Math.round(_deathPos[1]))||'?') + '. If needed use a boat. (' + _remaining + 's left before despawn). // [mindaxis-patch:death-coords-hint]';
                     } else {
                         planHint += ' URGENT: You died ' + Math.floor((Date.now() - _deathTime)/1000) + 's ago at ' + _deathPosText + '. Use !goToCoordinates(' + ((_deathPos&&Math.round(_deathPos[0]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[1]))||'?') + ', ' + ((_deathPos&&Math.round(_deathPos[2]))||'?') + ', 2) to recover items (' + _remaining + 's left before despawn). // [mindaxis-patch:death-coords-hint]';
                     }
