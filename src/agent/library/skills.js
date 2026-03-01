@@ -3655,21 +3655,8 @@ export async function goToSurface(bot) {
         }
         // [mindaxis-patch:shore-swim-v9] 水中脱出: pathfinder優先 + 水路振動検出 + バックトラック
         bot._goToSurfaceActive = true;
-        // [mindaxis-patch:underground-water-skip-pf] 地下水路の場合 Phase 1 をスキップ → pillar-dig に直行
-        // 頭上 20 ブロック以内に solid ブロックがあれば地下と判定
-        let _isUnderground = false;
-        for (let _scanDy = 2; _scanDy <= 20; _scanDy++) {
-            const _scanBlk = bot.blockAt(new Vec3(Math.floor(pos.x), Math.floor(pos.y) + _scanDy, Math.floor(pos.z)));
-            if (_scanBlk && _scanBlk.name !== 'air' && _scanBlk.name !== 'cave_air'
-                && _scanBlk.name !== 'water' && _scanBlk.name !== 'flowing_water') {
-                _isUnderground = true; break;
-            }
-        }
-        if (_isUnderground) {
-            console.log('[swim] Underground water detected (solid block at y+' + (Math.floor(pos.y)) + ') — skipping Phase 1, using pillar-dig');
-        }
         // --- Phase 1: pathfinder で岸に移動（水中でもA*が使える） ---
-        if (!_isUnderground) {
+        {
             let _pfShore = null; let _pfBestScore = 999;
             const _pfCp = bot.entity.position;
             const _pfBx = Math.floor(_pfCp.x), _pfBz = Math.floor(_pfCp.z);
@@ -3727,13 +3714,9 @@ export async function goToSurface(bot) {
             } else {
                 console.log('[swim] No shore found within 25 blocks for pathfinder');
             }
-        } // end if (!_isUnderground)
+        } // end Phase 1
         // --- Phase 2: 手動 swim ループ（pathfinder 失敗時フォールバック） ---
-        // [mindaxis-patch:underground-skip-phase2] 地下水路では Phase 2 をスキップして pillar dig へ直行
-        if (_isUnderground) {
-            console.log('[swim] Underground: skipping Phase 2 swim loop, going to pillar dig');
-        }
-        if (!_isUnderground) {
+        {
         const _blacklistedShores = [];
         let _lastSwimPos = bot.entity.position.clone();
         let _stuckCount = 0;
@@ -3996,19 +3979,11 @@ export async function goToSurface(bot) {
             }
             if (attempt >= 49) { console.log('[swim] 50 attempts, pillar fallthrough...'); break; }
         }
-        } // end if (!_isUnderground)
+        } // end Phase 2
         bot._goToSurfaceActive = false;
         bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
-        let finalFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
-        let finalBelow = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y) - 1, Math.floor(bot.entity.position.z)));
-        let finalInWater = finalFeet && (finalFeet.name === 'water' || finalFeet.name === 'flowing_water');
-        let finalOnSolid = finalBelow && finalBelow.name !== 'air' && finalBelow.name !== 'cave_air' && finalBelow.name !== 'water' && finalBelow.name !== 'flowing_water';
-        if (!finalInWater && finalOnSolid) {
-            // [mindaxis-patch:escape-water-final-continue] 水から出ても地下なら dig-staircase へ続行
-            log(bot, 'Escaped water! Checking if at surface...');
-        }
-        log(bot, 'Could not escape water after 30 attempts. Trying pillar dig...');
-        // [mindaxis-patch:gotosurface-water-pillar-fallback] 水中脱出失敗 → ピラーダイグにフォールスルー
+        log(bot, 'Could not escape water after 30 attempts.');
+        return false;
     }
     // 地上近く（非水中 or 水中フォールスルー）なら現在位置で再評価
     const _gsWfPos = bot.entity.position;
