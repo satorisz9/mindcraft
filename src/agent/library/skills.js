@@ -1972,8 +1972,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         const _skyLightBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
         const _skyLight = _skyLightBlock ? (_skyLightBlock.skyLight ?? 15) : 15;
         const isUnderground = !_nearHouse && _skyLight < 4;
-        // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より5ブロック以上低いなら地上優先
-        const _deepBelowTarget = !_nearHouse && yDiff > 5;
+        // [mindaxis-patch:deep-cave-surface] 洞窟内で目標より5ブロック以上低いなら地上優先
+        // 水中の場合は pathfinder+BFS が水を渡れるので地上脱出不要
+        const _inWaterNow = bot.entity.isInWater
+            || (bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)))?.name ?? '').includes('water');
+        const _deepBelowTarget = !_nearHouse && !_inWaterNow && yDiff > 5;
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
         let _underHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -4011,8 +4014,8 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null, m
                     visited.add(nKey);
                     parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
-                } else if (_canSwimAt(nx, ny, nz) && maxDrop === null) {
-                    // [mindaxis-patch:bfs-no-water-surface] surface モード(maxDrop指定時)は水中を探索しない（溺死防止）
+                } else if (_canSwimAt(nx, ny, nz)) {
+                    // [mindaxis-patch:bfs-water-always] pathfinder が水を渡れるので BFS も水を探索（maxDrop 関係なく）
                     visited.add(nKey);
                     parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 3, true]);
