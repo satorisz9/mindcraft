@@ -2596,14 +2596,42 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     const movedXZ = Math.sqrt((cur.x - prevPos.x) ** 2 + (cur.z - prevPos.z) ** 2);
                     if (movedXZ < 5) {
                         stuckCount++;
-                        log(bot, `Stuck at waypoint (${stuckCount}/${MAX_STUCK}), trying detour...`);
+                        log(bot, `Stuck at waypoint (${stuckCount}/${MAX_STUCK}), trying BFS detour...`);
                         if (stuckCount >= MAX_STUCK) {
                             log(bot, `Cannot navigate after ${stuckCount} failed segments.`);
                             clearInterval(progressInterval);
                             return false;
                         }
-                        log(bot, '[detour] Trying manual navigation...');
-                        await manualWalkToward(bot, x, z, 5);
+                        // [mindaxis-patch:bfs-detour] pathfinder 失敗時は BFS walk でターゲット方向に前進
+                        const _detourPos = bot.entity.position;
+                        const _ddx = x - _detourPos.x, _ddz = z - _detourPos.z;
+                        const _dlen = Math.sqrt(_ddx*_ddx + _ddz*_ddz) || 1;
+                        const _dHeading = { x: _ddx/_dlen, z: _ddz/_dlen };
+                        const _bfsD = _bfsFurthest(bot, 80, null, _dHeading);
+                        if (_bfsD && _bfsD.path && _bfsD.path.length > 0) {
+                            console.log('[goto-trace] BFS detour: ' + _bfsD.path.length + ' steps toward (' + Math.round(x) + ',' + Math.round(z) + ')');
+                            bot.setControlState('sprint', true);
+                            for (const [nx, ny, nz] of _bfsD.path) {
+                                if (_ic()) break;
+                                const _su = ny > Math.floor(bot.entity.position.y);
+                                await bot.lookAt(new Vec3(nx+0.5, ny+(_su?1.6:0.6), nz+0.5));
+                                bot.setControlState('forward', true);
+                                if (_su || bot.entity.isInWater) bot.setControlState('jump', true);
+                                const _ss = Date.now();
+                                while (Date.now()-_ss < 800) {
+                                    if (bot.entity.position.distanceTo(new Vec3(nx+0.5,ny,nz+0.5)) < 0.9 || _ic()) break;
+                                    await new Promise(r => setTimeout(r, 50));
+                                }
+                                bot.setControlState('jump', false);
+                            }
+                            bot.setControlState('forward', false);
+                            bot.setControlState('sprint', false);
+                            // BFS で動けたならスタックカウントをリセット
+                            if (bot.entity.position.distanceTo(_detourPos) > 3) stuckCount = 0;
+                        } else {
+                            log(bot, '[detour] BFS found no path, trying manual navigation...');
+                            await manualWalkToward(bot, x, z, 5);
+                        }
                         if (_ic()) break;
                     } else {
                         stuckCount = 0;
