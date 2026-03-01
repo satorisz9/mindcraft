@@ -3347,13 +3347,18 @@ async function findAndGoToVillager(bot, id) {
             /* [mindaxis-patch:no-unstuck-pause] */ // unstuck mode deleted
             const goal = new pf.goals.GoalFollow(entity, 2);
             await goToGoal(bot, goal);
-            
-            
             log(bot, 'Successfully reached villager');
         } catch (err) {
-            log(bot, 'Failed to reach villager - pathfinding error or villager moved');
-            console.log(err);
-            return null;
+            // [mindaxis-patch:villager-reach-retry] Retry with larger follow distance before giving up
+            try {
+                const goal2 = new pf.goals.GoalFollow(entity, 5);
+                await goToGoal(bot, goal2);
+                log(bot, 'Reached close enough to villager');
+            } catch (err2) {
+                log(bot, `Failed to reach villager ${id} - they may be inside a building or inaccessible. Do NOT retry the same ID. Instead, use !moveAway(30) to find a better position, then !searchForEntity("villager", 50) to get a new villager ID.`);
+                console.log(err2);
+                return null;
+            }
         } finally {
             /* [mindaxis-patch:no-unstuck-unpause] */ // unstuck mode deleted
         }
