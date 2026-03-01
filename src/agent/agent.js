@@ -172,6 +172,17 @@ export class Agent {
                             }
                         });
                     });
+                    // チャンク読み込み時間を計測
+                    const _bot3 = this.bot;
+                    _bot3.on('chunkColumnLoad', (point) => {
+                        const _ct = performance.now();
+                        setImmediate(() => {
+                            const _ce = performance.now() - _ct;
+                            if (_ce > 10) {
+                                console.log('[lag-monitor] chunkColumnLoad processing took ' + Math.round(_ce) + 'ms at ' + point.x + ',' + point.z);
+                            }
+                        });
+                    });
                 })();
 
                 // [mindaxis-patch:water-watchdog] 水中ウォッチドッグ — 頭が5秒以上水没なら現在のコマンドを中断
