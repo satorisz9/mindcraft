@@ -416,8 +416,11 @@ export function shouldPlaceTorch(bot) {
         nearest_torch = getNearestBlock(bot, 'wall_torch', 6);
     if (!nearest_torch) {
         const block = bot.blockAt(pos);
+        // [mindaxis-patch:torch-ground-check] 足元に固体ブロックがないと松明を置けない→スキップ
+        const below = bot.blockAt(pos.offset(0, -1, 0));
+        const canSupport = below && below.physical && below.boundingBox === 'block';
         let has_torch = bot.inventory.items().find(item => item.name === 'torch');
-        return has_torch && block?.name === 'air';
+        return has_torch && block?.name === 'air' && canSupport;
     }
     return false;
 }
