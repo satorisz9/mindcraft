@@ -4176,9 +4176,10 @@ function _bfsFurthest(bot, maxRadius = 80) {
     while (queue.length > 0 && bfsCount < 12000) {
         bfsCount++;
         const [cx, cy, cz, dist, curIsWater] = queue.shift();
-        if (dist > furthest.dist || (dist === furthest.dist && furthest.isWater && !curIsWater)) {
-            furthest = { x: cx, y: cy, z: cz, dist, isWater: curIsWater };
-        }
+        // 陸地はどんな距離でも水より優先。同種なら遠い方を優先。
+        const _preferNew = (!curIsWater && furthest.isWater) ||
+            (curIsWater === furthest.isWater && dist > furthest.dist);
+        if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, isWater: curIsWater };
         if (dist >= maxRadius) continue;
         for (const [ddx, ddz] of FLAT_DIRS) {
             for (const dy of [0, 1, -1]) {
