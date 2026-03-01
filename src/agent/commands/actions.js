@@ -1024,6 +1024,14 @@ export const actionsList = [
             // [mindaxis-patch:rememberhere-nitwit-guard] 'village' はニットウィット/無職近くでは保存しない
             if (name === 'village') {
                 const _p = agent.bot.entity.position;
+                // 既に同じ場所に "village" が保存済みなら再登録しない（200ブロック以内）
+                const _saved = agent.memory_bank.recallPlace('village');
+                if (_saved) {
+                    const _dx = _p.x - _saved[0], _dz = _p.z - _saved[2];
+                    if (Math.sqrt(_dx*_dx + _dz*_dz) < 200) {
+                        return `Already saved "village" at (${Math.round(_saved[0])}, ${Math.round(_saved[1])}, ${Math.round(_saved[2])}) — within 200 blocks, no need to re-record.`;
+                    }
+                }
                 const _nearV = Object.values(agent.bot.entities).find(e =>
                     e.name === 'villager' && e.position && e.position.distanceTo(_p) < 8
                 );
