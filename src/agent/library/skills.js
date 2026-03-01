@@ -597,7 +597,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                     maxDistance: 300,
                     useExtraInfo: false
                 });
-                if (_farBlock && collected < count) {
+                if (_farBlock && collected < num) {
                     _farBlockAttempts++;
                     log(bot, `No ${blockType} within 64 blocks, found one at (${_farBlock.position.x},${_farBlock.position.y},${_farBlock.position.z}). Moving there... (attempt ${_farBlockAttempts})`);
                     await goToPosition(bot, _farBlock.position.x, _farBlock.position.y, _farBlock.position.z, 2);
