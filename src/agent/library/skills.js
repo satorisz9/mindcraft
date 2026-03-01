@@ -2219,11 +2219,17 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     const _isEnclosed = _encResults.every(Boolean);
                     console.log(`[enclosed-check] pos=(${_encX},${_encY},${_encZ}) results=[${_encResults}] enclosed=${_isEnclosed} goToSurfaceActive=${!!bot._goToSurfaceActive}`);
                     if (_isEnclosed && !bot._goToSurfaceActive) {
+                        console.log('[enclosed] Calling goToSurface...');
                         log(bot, `Enclosed by solid blocks at y=${_encY}. Calling goToSurface to dig out...`);
-                        const _surfResult = await goToSurface(bot);
-                        if (_surfResult) {
-                            log(bot, 'Surfaced from enclosure. Retrying navigation...');
-                            continue;
+                        try {
+                            const _surfResult = await goToSurface(bot);
+                            console.log(`[enclosed] goToSurface returned: ${_surfResult}`);
+                            if (_surfResult) {
+                                log(bot, 'Surfaced from enclosure. Retrying navigation...');
+                                continue;
+                            }
+                        } catch(e) {
+                            console.log(`[enclosed] goToSurface error: ${e.message}`);
                         }
                         log(bot, 'goToSurface failed after enclosure. Giving up.');
                         bot._pauseWatchdog = false;
