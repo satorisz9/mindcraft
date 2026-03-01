@@ -4026,7 +4026,7 @@ async function _goToSurfaceInner(bot) {
     console.log(`[dig-up-debug] START y=${Math.floor(_gsWfPos.y)} surfaceY=${surfaceY} inv=${bot.inventory.items().map(i=>i.name+':'+i.count).join(',')}`);
 
     function findPillarItem() {
-        // [mindaxis-patch:pillaritem-registry] レジストリで placeable block かを判定（tuff/calciteなど洞窟ブロックも対象）
+        // [mindaxis-patch:pillaritem-prefer-cheap] 安いブロック優先、原木は最後
         const _nonBlock = new Set([
             'stick', 'flint', 'salmon', 'cod', 'porkchop', 'beef', 'chicken', 'mutton',
             'bone_meal', 'feather', 'string', 'paper', 'book', 'arrow', 'emerald',
@@ -4034,17 +4034,27 @@ async function _goToSurfaceInner(bot) {
         const _badSuffix = ['pickaxe','axe','sword','shovel','hoe','helmet','chestplate',
             'leggings','boots','bucket','boat','minecart','ingot','nugget','gem',
             'dye','seed','spawn_egg'];
-        return bot.inventory.items().find(i => {
+        const _isValid = (i) => {
             if (_nonBlock.has(i.name)) return false;
             if (_badSuffix.some(s => i.name.includes(s))) return false;
-            // torch・sapling等は設置できるが足場として不適
             if (i.name.includes('torch') || i.name.includes('sapling') || i.name.includes('ladder')
                 || i.name.includes('vine') || i.name === 'lily_pad' || i.name === 'scaffolding') return false;
-            // レジストリにブロックとして登録されていれば使用可
-            // [mindaxis-patch:reserve-logs-for-craft] ピッケルがなければ原木をクラフト用に温存
             if (!bot.inventory.items().some(it => it.name.includes('pickaxe'))
                 && (i.name.includes('_log') || i.name.includes('_wood') || i.name === 'crafting_table')) return false;
             return bot.registry.blocksByName[i.name] != null;
+        };
+        // 1st: cobblestone/dirt/gravel 等の安いブロックを優先
+        const _cheapBlocks = new Set(['cobblestone','dirt','gravel','sand','stone','deepslate','cobbled_deepslate',
+            'netherrack','andesite','diorite','granite','tuff','calcite','sandstone']);
+        const items = bot.inventory.items();
+        let cheap = items.find(i => _isValid(i) && _cheapBlocks.has(i.name));
+        if (cheap) return cheap;
+        // 2nd: planks（原木よりマシ）
+        let planks = items.find(i => _isValid(i) && i.name.includes('_planks'));
+        if (planks) return planks;
+        // 3rd: それ以外（原木含む）
+        return items.find(i => _isValid(i) && !i.name.includes('_log') && !i.name.includes('_wood'))
+            || items.find(i => _isValid(i)); // 本当に最後の手段として原木
         });
     }
 
