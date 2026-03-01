@@ -3083,12 +3083,40 @@ export async function showVillagerTrades(bot, id) {
         }
         
         log(bot, `Villager has ${villager.trades.length} available trades:`);
-        stringifyTrades(bot, villager.trades).forEach((trade, i) => {
+        const _tradeStrings = stringifyTrades(bot, villager.trades);
+        _tradeStrings.forEach((trade, i) => {
             const tradeInfo = `${i + 1}: ${trade}`;
             console.log(tradeInfo);
             log(bot, tradeInfo);
         });
-        
+
+        // [mindaxis-patch:trade-memory] 取引情報を location_memory.json に永続化（再起動後もプロンプトに注入される）
+        try {
+            const _tmFs = await import('fs');
+            const _tmPath = './bots/' + bot.username + '/location_memory.json';
+            let _tmMem = {};
+            try { _tmMem = JSON.parse(_tmFs.readFileSync(_tmPath, 'utf8')); } catch(_) {}
+            if (!_tmMem.known_trades) _tmMem.known_trades = [];
+            const _pm2 = villagerEntity.metadata && Object.values(villagerEntity.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
+            const _pid2 = _pm2 != null ? _pm2.villagerProfession : -1;
+            const _pnames = {0:'unemployed',1:'armorer',2:'butcher',3:'cartographer',4:'cleric',5:'farmer',6:'fisherman',7:'fletcher',8:'leatherworker',9:'librarian',10:'mason',11:'nitwit',12:'shepherd',13:'toolsmith',14:'weaponsmith'};
+            const _vp = villagerEntity.position;
+            const _rec = {
+                id: String(id),
+                profession: _pnames[_pid2] || `profession_${_pid2}`,
+                position: { x: Math.round(_vp.x), y: Math.round(_vp.y), z: Math.round(_vp.z) },
+                trades: _tradeStrings,
+                updatedAt: new Date().toISOString()
+            };
+            const _ei = _tmMem.known_trades.findIndex(t => t.id === String(id));
+            if (_ei >= 0) _tmMem.known_trades[_ei] = _rec;
+            else _tmMem.known_trades.push(_rec);
+            _tmFs.writeFileSync(_tmPath, JSON.stringify(_tmMem, null, 2), 'utf8');
+            log(bot, `Trade memory saved: ${_rec.profession} (ID ${id}) at (${_rec.position.x}, ${_rec.position.y}, ${_rec.position.z}) — ${_rec.trades.length} trades.`);
+        } catch (_te) {
+            console.log('[trade-memory] Failed to save:', _te.message);
+        }
+
         villager.close();
         return true;
     } catch (err) {
