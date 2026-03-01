@@ -4081,9 +4081,33 @@ async function _goToSurfaceInner(bot) {
             }
             if (_hasTableInv || _hasTableNear) {
                 log(bot, '[dig-up] No pickaxe, trying to craft...');
-                const _picked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false)
-                    || await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
-                if (_picked) log(bot, '[dig-up] Pickaxe crafted!');
+                // まず stone_pickaxe を試す（cobblestone があれば）
+                let _picked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false);
+                if (!_picked) {
+                    // wooden_pickaxe → 石3つ掘り → stone_pickaxe にアップグレード
+                    _picked = await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
+                    if (_picked) {
+                        log(bot, '[dig-up] Wooden pickaxe crafted, upgrading to stone...');
+                        // 周囲の石を3つ掘って cobblestone 取得
+                        const _curP = bot.entity.position;
+                        const _cx = Math.floor(_curP.x), _cy = Math.floor(_curP.y), _cz = Math.floor(_curP.z);
+                        let _mined = 0;
+                        for (let _r = 1; _r <= 3 && _mined < 3; _r++) {
+                            for (const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0],[1,1,0],[-1,1,0],[0,1,1],[0,1,-1]]) {
+                                if (_mined >= 3) break;
+                                const _sb = bot.blockAt(new Vec3(_cx+dx*_r, _cy+dy*_r, _cz+dz*_r));
+                                if (_sb && (_sb.name === 'stone' || _sb.name === 'cobblestone' || _sb.name === 'deepslate')) {
+                                    try { await bot.tool.equipForBlock(_sb); await bot.dig(_sb); _mined++; } catch(e) {}
+                                }
+                            }
+                        }
+                        if (_mined >= 3) {
+                            const _upgraded = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false);
+                            if (_upgraded) log(bot, '[dig-up] Upgraded to stone pickaxe!');
+                        }
+                    }
+                }
+                if (_picked) log(bot, '[dig-up] Pickaxe ready!');
             }
             bot._goToSurfaceActive = false;
         }
