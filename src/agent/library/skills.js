@@ -4078,10 +4078,11 @@ async function _goToSurfaceInner(bot) {
 
         const _pilFt = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)));
         const _pilWater = _pilFt && (_pilFt.name === 'water' || _pilFt.name === 'flowing_water');
-        // [mindaxis-patch:surface-skylight-check] skyLight で地表判定（横移動で列が変わっても正確に検知）
+        // [mindaxis-patch:surface-skylight-check-v2] skyLight で地表判定（但し洞窟の天井穴で誤判定しないよう surfaceY 近傍のみ）
+        // 洞窟内でも天井に1マスの穴があれば skyLight=15 になる → surfaceY-10 以上でないと skyLight を信用しない
         const _surfSlB = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
         const _surfSkyLight = _surfSlB ? (_surfSlB.skyLight ?? 0) : 0;
-        if ((curPos.y >= surfaceY - 1 || _surfSkyLight >= 14) && !_pilWater) {
+        if ((curPos.y >= surfaceY - 1 || (_surfSkyLight >= 14 && curPos.y >= surfaceY - 10)) && !_pilWater) {
             log(bot, 'Reached surface at y=' + Math.floor(curPos.y) + ' (skyLight=' + _surfSkyLight + ')!');
             bot.setControlState('jump', false);
             await _saveCaveFallZone(step);
