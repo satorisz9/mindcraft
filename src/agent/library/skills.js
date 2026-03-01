@@ -619,6 +619,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 await goToPosition(bot, block.position.x, block.position.y, block.position.z, 2);
                 await bot.dig(block);
                 await pickupNearbyItems(bot);
+                await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup] pickup後にツール再装備
                 success = true;
             }
             else {
@@ -628,6 +629,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 if (_digDist <= 4.5) {
                     await bot.dig(block);
                     await pickupNearbyItems(bot);
+                    await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup]
                 } else {
                     await bot.collectBlock.collect(block);
                 }
@@ -2913,7 +2915,39 @@ export async function moveAway(bot, distance) {
         if (bot.interrupt_code) break;
         const target = _bfsFurthest(bot, SCAN_RADIUS);
         if (!target) {
-            log(bot, `BFS: no reachable space (hop ${hop + 1}). Trying goToSurface...`);
+            log(bot, `BFS: no reachable space (hop ${hop + 1}). Pillar climbing...`);
+            // gorge や洞窟で水平移動不可の場合、ピラージャンプで上に登ってBFS再スキャン
+            let _climbed = false;
+            const _climbStart = Date.now();
+            for (let _cs = 0; _cs < 40 && Date.now() - _climbStart < 30000; _cs++) {
+                if (bot.interrupt_code) break;
+                const _cp = bot.entity.position;
+                const _cx = Math.floor(_cp.x), _cy = Math.floor(_cp.y), _cz = Math.floor(_cp.z);
+                // 真上を最大4ブロック掘る
+                for (let _dy = 1; _dy <= 4; _dy++) {
+                    const _ub = bot.blockAt(new Vec3(_cx, _cy + _dy, _cz));
+                    if (_ub && _ub.diggable && !['air','cave_air','water','flowing_water','bedrock'].includes(_ub.name)) {
+                        try { await bot.dig(_ub); } catch(e) {}
+                    }
+                }
+                // 足元に置けるブロックを探す
+                const _pi = bot.inventory.items().find(i => ['dirt','cobblestone','netherrack'].includes(i.name))
+                    || bot.inventory.items().find(i => i.name.includes('planks') || i.name.includes('stone'));
+                if (!_pi) { log(bot, 'No blocks to pillar with.'); break; }
+                await bot.equip(_pi, 'hand');
+                bot.setControlState('jump', true);
+                await new Promise(r => setTimeout(r, 300));
+                try {
+                    const _sb = bot.blockAt(new Vec3(_cx, _cy - 1, _cz));
+                    if (_sb) await bot.placeBlock(_sb, new Vec3(0, 1, 0));
+                } catch(e) {}
+                bot.setControlState('jump', false);
+                await new Promise(r => setTimeout(r, 400));
+                // 上昇したら BFS 再スキャン
+                const _newTarget = _bfsFurthest(bot, SCAN_RADIUS);
+                if (_newTarget) { _climbed = true; break; }
+            }
+            if (_climbed) continue; // BFS が使える高さに到達 → ホップ継続
             await goToSurface(bot);
             break;
         }
