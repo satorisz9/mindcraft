@@ -3771,8 +3771,8 @@ async function _goToSurfaceInner(bot) {
         } // end Phase 2
         bot._goToSurfaceActive = false;
         bot.setControlState('forward', false); bot.setControlState('jump', false); bot.setControlState('sprint', false);
-        log(bot, 'Could not escape water after 30 attempts.');
-        return false;
+        log(bot, 'Could not escape water. Trying dig-up...');
+        // 水中脱出失敗でも dig-up にフォールスルー（return しない）
     }
     // 地上近く（非水中 or 水中フォールスルー）なら現在位置で再評価
     const _gsWfPos = bot.entity.position;
@@ -3822,6 +3822,54 @@ async function _goToSurfaceInner(bot) {
                 if (!_cbStillWater) { log(bot, '[cliff-break] Escaped water!'); return true; }
             }
             if (_cbBroke) break; // この方向で掘ったが脱出できなかった→次の方向は試さない
+        }
+    }
+    // [mindaxis-patch:cave-exit-bfs] dig-up 前に BFS で洞窟出口（skyLight >= 14）を探す
+    // 出口が見つかれば pathfinder で歩いて出る（掘り不要）
+    {
+        const _bfsPos = bot.entity.position;
+        const _bfsVisited = new Set();
+        const _bfsQ = [[Math.floor(_bfsPos.x), Math.floor(_bfsPos.y), Math.floor(_bfsPos.z), 0]];
+        const _bfsKey = (x, y, z) => `${x},${y},${z}`;
+        _bfsVisited.add(_bfsKey(Math.floor(_bfsPos.x), Math.floor(_bfsPos.y), Math.floor(_bfsPos.z)));
+        let _caveExit = null;
+        while (_bfsQ.length > 0 && !_caveExit) {
+            const [bx, by, bz, bd] = _bfsQ.shift();
+            if (bd > 80) continue;
+            // skyLight を確認（14以上 = ほぼ地上）
+            const _slB = bot.blockAt(new Vec3(bx, by + 1, bz));
+            if (_slB && (_slB.skyLight ?? 0) >= 14) { _caveExit = { x: bx, y: by, z: bz }; break; }
+            // 空気ブロックを探索（walkable + 上下1段）
+            for (const [ddx, ddy, ddz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0]]) {
+                const nx = bx+ddx, ny = by+ddy, nz = bz+ddz;
+                const _k = _bfsKey(nx, ny, nz);
+                if (_bfsVisited.has(_k)) continue;
+                _bfsVisited.add(_k);
+                const _nb = bot.blockAt(new Vec3(nx, ny, nz));
+                if (_nb && (_nb.name === 'air' || _nb.name === 'cave_air')) _bfsQ.push([nx, ny, nz, bd+1]);
+            }
+        }
+        if (_caveExit) {
+            log(bot, `Cave exit found at (${_caveExit.x}, ${_caveExit.y}, ${_caveExit.z}), navigating out...`);
+            const _exitMoves = new pf.Movements(bot);
+            _exitMoves.allow1by1towers = true;
+            bot.pathfinder.setMovements(_exitMoves);
+            try {
+                const _exitDone = new Promise((res, rej) => {
+                    const _t = setTimeout(() => { bot.pathfinder.stop(); rej(new Error('timeout')); }, 30000);
+                    bot.pathfinder.goto(new pf.goals.GoalNear(_caveExit.x, _caveExit.y, _caveExit.z, 3))
+                        .then(() => { clearTimeout(_t); res(); }).catch(e => { clearTimeout(_t); rej(e); });
+                });
+                await _exitDone;
+                bot.pathfinder.setMovements(new pf.Movements(bot));
+                const _exitPos = bot.entity.position;
+                const _exitSl = bot.blockAt(new Vec3(Math.floor(_exitPos.x), Math.floor(_exitPos.y)+1, Math.floor(_exitPos.z)));
+                if (_exitSl && (_exitSl.skyLight ?? 0) >= 14) {
+                    log(bot, 'Exited cave via BFS path!');
+                    return true;
+                }
+            } catch(e) {}
+            bot.pathfinder.setMovements(new pf.Movements(bot));
         }
     }
     log(bot, 'Digging to surface from y=' + Math.floor(_gsWfPos.y) + ' to y=' + surfaceY + '...');
