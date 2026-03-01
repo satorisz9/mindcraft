@@ -3961,9 +3961,18 @@ async function _goToSurfaceInner(bot) {
         while (_bfsQ.length > 0 && !_caveExit) {
             const [bx, by, bz, bd] = _bfsQ.shift();
             if (bd > 80) continue;
-            // skyLight を確認（14以上 = ほぼ地上）
+            // [mindaxis-patch:cave-exit-skylight-v2] skyLight + 上方向チェック（天井穴の偽陽性防止）
+            // skyLight >= 14 かつ上方 10 ブロック以内に固体ブロックが 3 個以下なら「本当の出口」
             const _slB = bot.blockAt(new Vec3(bx, by + 1, bz));
-            if (_slB && (_slB.skyLight ?? 0) >= 14) { _caveExit = { x: bx, y: by, z: bz }; break; }
+            if (_slB && (_slB.skyLight ?? 0) >= 14) {
+                let _solidAbove = 0;
+                for (let _ey = by + 2; _ey < by + 12; _ey++) {
+                    const _eb = bot.blockAt(new Vec3(bx, _ey, bz));
+                    if (_eb && _eb.name !== 'air' && _eb.name !== 'cave_air'
+                        && _eb.name !== 'water' && _eb.name !== 'flowing_water') _solidAbove++;
+                }
+                if (_solidAbove <= 3) { _caveExit = { x: bx, y: by, z: bz }; break; }
+            }
             // 空気ブロックを探索（walkable + 上下1段）
             for (const [ddx, ddy, ddz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0]]) {
                 const nx = bx+ddx, ny = by+ddy, nz = bz+ddz;
@@ -3990,14 +3999,20 @@ async function _goToSurfaceInner(bot) {
                 const _exitPos = bot.entity.position;
                 const _exitSl = bot.blockAt(new Vec3(Math.floor(_exitPos.x), Math.floor(_exitPos.y)+1, Math.floor(_exitPos.z)));
                 if (_exitSl && (_exitSl.skyLight ?? 0) >= 14) {
-                    // [mindaxis-patch:cave-exit-dry-check] 水中でないことを確認（水面開口でskyLight>=14になる偽陽性防止）
+                    // [mindaxis-patch:cave-exit-dry-check-v2] 水中でないこと + 上方に固体ブロックが少ないこと（天井穴偽陽性防止）
                     const _exitPos2 = bot.entity.position;
                     const _exitFt2 = bot.blockAt(new Vec3(Math.floor(_exitPos2.x), Math.floor(_exitPos2.y), Math.floor(_exitPos2.z)));
                     const _exitBel2 = bot.blockAt(new Vec3(Math.floor(_exitPos2.x), Math.floor(_exitPos2.y) - 1, Math.floor(_exitPos2.z)));
                     const _exitInWater2 = _exitFt2 && (_exitFt2.name === 'water' || _exitFt2.name === 'flowing_water');
                     const _exitOnLand2 = _exitBel2 && _exitBel2.name !== 'air' && _exitBel2.name !== 'cave_air'
                         && _exitBel2.name !== 'water' && _exitBel2.name !== 'flowing_water';
-                    if (!_exitInWater2 && _exitOnLand2) {
+                    let _exitSolidAbove = 0;
+                    for (let _ey = Math.floor(_exitPos2.y) + 2; _ey < Math.floor(_exitPos2.y) + 12; _ey++) {
+                        const _eb = bot.blockAt(new Vec3(Math.floor(_exitPos2.x), _ey, Math.floor(_exitPos2.z)));
+                        if (_eb && _eb.name !== 'air' && _eb.name !== 'cave_air'
+                            && _eb.name !== 'water' && _eb.name !== 'flowing_water') _exitSolidAbove++;
+                    }
+                    if (!_exitInWater2 && _exitOnLand2 && _exitSolidAbove <= 3) {
                         log(bot, 'Exited cave via BFS path!');
                         return true;
                     }
