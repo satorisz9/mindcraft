@@ -1988,11 +1988,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         const _skyLightBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
         const _skyLight = _skyLightBlock ? (_skyLightBlock.skyLight ?? 15) : 15;
         const isUnderground = !_nearHouse && _skyLight < 4;
-        // [mindaxis-patch:deep-cave-surface] 洞窟内で目標より5ブロック以上低いなら地上優先
-        // 水中の場合は pathfinder+BFS が水を渡れるので地上脱出不要
+        // [mindaxis-patch:deep-cave-surface-v2] 洞窟内で目標より5ブロック以上低いなら地上優先
+        // 水中でも地下洞窟（skyLight低い or yDiff大きい）なら脱出必要
         const _inWaterNow = bot.entity.isInWater
             || (bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)))?.name ?? '').includes('water');
-        const _deepBelowTarget = !_nearHouse && !_inWaterNow && yDiff > 5;
+        const _deepBelowTarget = !_nearHouse && yDiff > 5 && (!_inWaterNow || yDiff > 15 || _skyLight < 10);
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
         let _underHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -4041,6 +4041,9 @@ async function _goToSurfaceInner(bot) {
             if (i.name.includes('torch') || i.name.includes('sapling') || i.name.includes('ladder')
                 || i.name.includes('vine') || i.name === 'lily_pad' || i.name === 'scaffolding') return false;
             // レジストリにブロックとして登録されていれば使用可
+            // [mindaxis-patch:reserve-logs-for-craft] ピッケルがなければ原木をクラフト用に温存
+            if (!bot.inventory.items().some(it => it.name.includes('pickaxe'))
+                && (i.name.includes('_log') || i.name.includes('_wood') || i.name === 'crafting_table')) return false;
             return bot.registry.blocksByName[i.name] != null;
         });
     }
