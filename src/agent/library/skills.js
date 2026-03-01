@@ -4071,20 +4071,22 @@ async function _goToSurfaceInner(bot) {
             && targetPlaceY >= curY) {
             let pillarItem = findPillarItem();
             if (!pillarItem) {
-                // [mindaxis-patch:pillar-dig-supplement] ブロック不足時は隣接壁ブロックを掘って補充
+                // [mindaxis-patch:pillar-dig-supplement] ブロック不足時は隣接壁を2ブロック（足元+頭）掘って補充
+                // 1ブロックだと横に入れないので最低2ブロック必要
                 const _dirs = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
                 let _supplemented = false;
                 for (const _d of _dirs) {
-                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
-                    if (_wb && _wb.diggable && _wb.name !== 'air' && _wb.name !== 'cave_air'
-                        && _wb.name !== 'water' && _wb.name !== 'flowing_water'
-                        && _wb.name !== 'bedrock') {
-                        try {
-                            await bot.tool.equipForBlock(_wb);
-                            await bot.dig(_wb);
-                            _supplemented = true;
-                            break;
-                        } catch(e) {}
+                    const _wb0 = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
+                    const _wb1 = bot.blockAt(new Vec3(cx + _d.x, curY + 1, cz + _d.z));
+                    const _canDig0 = _wb0 && _wb0.diggable && _wb0.name !== 'air' && _wb0.name !== 'cave_air'
+                        && _wb0.name !== 'water' && _wb0.name !== 'flowing_water' && _wb0.name !== 'bedrock';
+                    const _canDig1 = _wb1 && _wb1.diggable && _wb1.name !== 'air' && _wb1.name !== 'cave_air'
+                        && _wb1.name !== 'water' && _wb1.name !== 'flowing_water' && _wb1.name !== 'bedrock';
+                    if (_canDig0 || _canDig1) {
+                        try { if (_canDig0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
+                        try { if (_canDig1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
+                        _supplemented = true;
+                        break;
                     }
                 }
                 if (!_supplemented) { log(bot, 'No blocks to build up.'); return false; }
@@ -4137,15 +4139,20 @@ async function _goToSurfaceInner(bot) {
                 return false;
             }
             log(bot, '[dig-up] No progress at y=' + curY + ' (streak=' + _noProgressStreak + ')');
-            // ブロックがなければ壁を1ブロックだけ掘って補充（ループごとに8ブロックではなく1ブロックに絞る）
+            // ブロックがなければ壁を2ブロック（足元+頭）掘って補充（横に入れるよう2ブロック必要）
             if (!findPillarItem()) {
                 const _dirs4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
                 for (const _d of _dirs4) {
-                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
-                    if (_wb && _wb.diggable && _wb.name !== 'air' && _wb.name !== 'cave_air'
-                        && _wb.name !== 'water' && _wb.name !== 'flowing_water'
-                        && _wb.name !== 'bedrock') {
-                        try { await bot.tool.equipForBlock(_wb); await bot.dig(_wb); break; } catch(e) {}
+                    const _wb0 = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
+                    const _wb1 = bot.blockAt(new Vec3(cx + _d.x, curY + 1, cz + _d.z));
+                    const _ok0 = _wb0 && _wb0.diggable && _wb0.name !== 'air' && _wb0.name !== 'cave_air'
+                        && _wb0.name !== 'water' && _wb0.name !== 'flowing_water' && _wb0.name !== 'bedrock';
+                    const _ok1 = _wb1 && _wb1.diggable && _wb1.name !== 'air' && _wb1.name !== 'cave_air'
+                        && _wb1.name !== 'water' && _wb1.name !== 'flowing_water' && _wb1.name !== 'bedrock';
+                    if (_ok0 || _ok1) {
+                        try { if (_ok0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
+                        try { if (_ok1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
+                        break;
                     }
                 }
             }
