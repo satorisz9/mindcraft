@@ -578,6 +578,8 @@ export class Agent {
         });
         // [mindaxis-patch:death-plan-reinsert-v1] リスポーン後にキーアイテム消失を確認してプランを再挿入
         this.bot.on('spawn', () => {
+            // [mindaxis-patch:auto-equip-on-spawn] リスポーン後に防具を自動装備
+            setTimeout(() => { try { this.bot.armorManager.equipAll(); } catch(e) {} }, 2000);
             if (!this.bot._inventoryAtDeath) return;
             const _prevInv = this.bot._inventoryAtDeath;
             this.bot._inventoryAtDeath = null;
@@ -586,9 +588,12 @@ export class Agent {
                 try {
                     // [mindaxis-patch:death-plan-reinsert-v2] diamond 個数チェック追加
                     const _KEY = [
-                        { name: 'diamond_pickaxe', phaseId: 'deep-mining', minCount: 1 },
-                        { name: 'diamond_sword',   phaseId: 'deep-mining', minCount: 1 },
-                        { name: 'diamond',         phaseId: 'deep-mining', minCount: 6 }, // 生ダイヤ6個以上を失った場合もリセット
+                        { name: 'diamond_pickaxe',  phaseId: 'deep-mining', minCount: 1 },
+                        { name: 'diamond_sword',    phaseId: 'deep-mining', minCount: 1 },
+                        { name: 'diamond_chestplate', phaseId: 'deep-mining', minCount: 1 },
+                        { name: 'diamond',          phaseId: 'deep-mining', minCount: 6 },
+                        { name: 'iron_chestplate',  phaseId: 'iron-age',    minCount: 1 },
+                        { name: 'iron_pickaxe',     phaseId: 'iron-age',    minCount: 1 },
                     ];
                     const _curInvItems = _self.bot.inventory.items();
                     const _curInv = _curInvItems.map(i => i.name);
