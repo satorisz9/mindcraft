@@ -2261,11 +2261,19 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     const checkDigProgress = () => {
         if (bot.targetDigBlock) {
             const targetBlock = bot.targetDigBlock;
-            const itemId = bot.heldItem ? bot.heldItem.type : null;
-            if (!targetBlock.canHarvest(itemId)) {
-                log(bot, `Pathfinding stopped: Cannot break ${targetBlock.name} with current tools.`);
-                bot.pathfinder.stop();
-                bot.stopDigging();
+            // [mindaxis-patch:house-dig-protect] 家の壁保護のみ — canHarvest チェックは廃止
+            // （cobblestone 等の地形ブロックを掘る場合はツール不足でも許可）
+            if (bot._houseStructure && bot._houseStructure.bounds) {
+                const hb = bot._houseStructure.bounds;
+                const bp = targetBlock.position;
+                const inHouseBounds = bp.x >= hb.x1 - 1 && bp.x <= hb.x2 + 1 &&
+                                      bp.z >= hb.z1 - 1 && bp.z <= hb.z2 + 1 &&
+                                      bp.y >= (hb.y || 69) - 1 && bp.y <= (hb.roofY || (hb.y || 69) + 6);
+                if (inHouseBounds) {
+                    log(bot, `Pathfinding stopped: House structure block ${targetBlock.name} protected.`);
+                    bot.pathfinder.stop();
+                    bot.stopDigging();
+                }
             }
         }
     };

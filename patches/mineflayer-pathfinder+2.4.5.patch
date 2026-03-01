@@ -41,10 +41,12 @@ index b38bd30..853d7ea 100644
      }
  
      if (bot.pathfinder.LOSWhenPlacingBlocks && returningPos) {
-@@ -463,16 +482,46 @@ function inject (bot) {
+@@ -463,16 +482,49 @@ function inject (bot) {
              fullStop()
            }
          } else if (!pathUpdated) {
++          // [mindaxis-patch:no-astar-restart] バックグラウンドA*実行中は再起動しない — 完全ルート探索を継続させる
++          if (!astartTimedout) {
 -          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal)
 +          // [mindaxis-patch:water-skip-repath-v2] [mindaxis-patch:water-skip-repath] 水中でも A* パス計算を常に実行
 +          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 500) // [mindaxis-patch:repath-timeout]
@@ -52,6 +54,7 @@ index b38bd30..853d7ea 100644
            path = results.path
            astartTimedout = results.status === 'partial'
 +          var _pp = path.slice(0, 5).map(function(n){return '('+n.x+','+n.y+','+n.z+')'}).join(' '); console.log('[water-nav] getPathTo: len=' + path.length + ' status=' + results.status + ' bot=(' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.y) + ',' + Math.round(bot.entity.position.z) + ') path=' + _pp)
++          }
            pathUpdated = true
          }
        }
