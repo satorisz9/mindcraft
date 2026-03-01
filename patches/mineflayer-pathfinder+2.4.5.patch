@@ -140,6 +140,8 @@ index b38bd30..853d7ea 100644
 -    if (performance.now() - lastNodeTime > 3500) {
 -      // should never take this long to go to the next node
 +    // [mindaxis-patch:water-stuck-timeout] 水中はタイムアウトを延長
++    // [mindaxis-patch:dig-stuck-timeout] 掘削中はタイマーをリセット（石 dig=7500ms > デフォルト3500ms）
++    if (bot.targetDigBlock) lastNodeTime = performance.now()
 +    const _feetB = bot.blockAt(bot.entity.position.floored())
 +    const _belowB = bot.blockAt(bot.entity.position.floored().offset(0, -1, 0))
 +    const _below2B = bot.blockAt(bot.entity.position.floored().offset(0, -2, 0))
