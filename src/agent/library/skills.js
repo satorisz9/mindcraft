@@ -4498,7 +4498,8 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null, m
                     visited.add(nKey);
                     parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
-                } else if (_canSwimAt(nx, ny, nz)) {
+                } else if (_canSwimAt(nx, ny, nz) && maxDrop === null) {
+                    // [mindaxis-patch:bfs-no-water-surface] surface モード(maxDrop指定時)は水中を探索しない（溺死防止）
                     visited.add(nKey);
                     parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 3, true]);
