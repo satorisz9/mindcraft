@@ -2901,11 +2901,10 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         } catch(_lmErr) {}
     }
     if (!block) {
-        // [mindaxis-patch:auto-explore] 木が見つからない時は自動で遠くへ探索
-        const woodTypes = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
-        if (woodTypes.includes(blockType)) {
-            log(bot, `Could not find any ${blockType} nearby. Exploring to find trees...`);
-            // ランダムな方向に100ブロック移動して探索
+        // [mindaxis-patch:auto-explore-v2] 見つからない時は鉱石以外で自動探索（即移動してから再探索）
+        const _isOreType = blockType.endsWith('_ore') || blockType.startsWith('deepslate_');
+        if (!_isOreType) {
+            log(bot, `Could not find any ${blockType} in ${range} blocks. Moving to explore...`);
             const angle = Math.random() * 2 * Math.PI;
             const distance = 80 + Math.random() * 40; // 80-120ブロック
             const pos = bot.entity.position;
@@ -2940,10 +2939,10 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         }
     }
 
-    // 全候補に到達できなかった場合は探索（木の場合のみ）
-    const woodTypes = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
-    if (woodTypes.includes(blockType)) {
-        log(bot, `All ${blockType} candidates unreachable. Exploring...`);
+    // 全候補に到達できなかった場合は探索（鉱石以外）
+    const _isOreType2 = blockType.endsWith('_ore') || blockType.startsWith('deepslate_');
+    if (!_isOreType2) {
+        log(bot, `All ${blockType} candidates unreachable. Moving to explore...`);
         const angle = Math.random() * 2 * Math.PI;
         const distance = 80 + Math.random() * 40;
         const pos = bot.entity.position;
