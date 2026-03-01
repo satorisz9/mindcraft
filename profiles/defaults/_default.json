@@ -38,7 +38,7 @@
             {"role": "user", "content": "john_goodman: (FROM OTHER BOT)Hey there! What's up?"},
             {"role": "assistant", "content": "Hey John, not much. Just saying hi."},
             {"role": "user", "content": "john_goodman: (FROM OTHER BOT)Bye!"},
-            {"role": "assistant", "content": "Bye! !endConversation('john_goodman')"}
+            {"role": "assistant", "content": "Bye. !endConversation('john_goodman')"}
         ],
 
         [
@@ -56,7 +56,7 @@
 
         [
             {"role": "user", "content": "rupert: (FROM OTHER BOT)Let's collaborate to build a house!"},
-            {"role": "assistant", "content": "Sure! I'll share information to help coordinate. Let's center the build at x:942, y:54, z:1355 !newAction(\"Build a 10x10 base of a house at location\")"},
+            {"role": "assistant", "content": "Sure, I'll share information to help coordinate. Let's center the build at x:942, y:54, z:1355. !newAction(\"Build a 10x10 base of a house at location\")"},
             {"role": "user", "content": "rupert: (FROM OTHER BOT)Alright, I'll build the walls! !newAction('Build a 10x10 wall of a house at the same location')"}
         ],
 
@@ -72,15 +72,15 @@
 
         [
             {"role": "user", "content": "d7297: look here"},
-            {"role": "assistant", "content": "Okay! !lookAtPlayer(\"d7297\", \"at\")"},
+            {"role": "assistant", "content": "Okay. !lookAtPlayer(\"d7297\", \"at\")"},
             {"role": "system", "content": "Image analysis:\nLooking at player d7297. There is a giant waterfall behind d7297."},
-            {"role": "assistant", "content": "Woo, that is a cool waterfall!"}
+            {"role": "assistant", "content": "Woo, that is a cool waterfall."}
         ],
         [
             {"role": "user", "content": "d7297: look 0 70 12 and describe what is there"},
             {"role": "assistant", "content": "Sure! !lookAtPosition(0, 70, 12)"},
             {"role": "system", "content": "Image analysis:\nLooking at position 0, 70, 12. There is a water fountain."},
-            {"role": "assistant", "content": "I see the water fountain! amazing!"}
+            {"role": "assistant", "content": "I see the water fountain. Amazing."}
         ],
 
         [
@@ -92,18 +92,18 @@
     
         [
             {"role": "user", "content": "bobby: Craft a plank"},
-            {"role": "assistant", "content": "Okay! !craftable"},
+            {"role": "assistant", "content": "Okay. !craftable"},
             {"role": "system", "content": "CRAFTABLE_ITEMS\n- spruce_planks\n- spruce_wood\n- ladder"},
             {"role": "assistant", "content": "!craftRecipe(\"spruce_planks\", 1)"},
             {"role": "system", "content": "Code Output:\nYou have crafted 4 spruce_planks.\nCode execution finished successfully."},
-            {"role": "assistant", "content": "I've crafted 4 spruce planks!"}
+            {"role": "assistant", "content": "I've crafted 4 spruce planks."}
         ],
     
         [
             {"role": "user", "content": "zZZn98: come here"},
-            {"role": "assistant", "content": "On my way! !goToPlayer(\"zZZn98\", 3)"},
+            {"role": "assistant", "content": "On my way. !goToPlayer(\"zZZn98\", 3)"},
             {"role": "system", "content": "Arrived at player."},
-            {"role": "assistant", "content": "Here!"},
+            {"role": "assistant", "content": "Here."},
             {"role": "user", "content": "zZZn98: no come right where I am"},
             {"role": "assistant", "content": "Okay, I'll come right to you. !goToPlayer(\"zZZn98\", 0)"}
         ],
@@ -115,14 +115,14 @@
     
         [
             {"role": "user", "content": "joe: Follow me!"},
-            {"role": "assistant", "content": "Sure! !followPlayer(\"joe\", 4)"},
+            {"role": "assistant", "content": "Sure. !followPlayer(\"joe\", 4)"},
             {"role": "user", "content": "joe: Not so close!"},
             {"role": "assistant", "content": "Okay, I'll keep my distance. !followPlayer(\"joe\", 3)"}
         ],
     
         [
             {"role": "user", "content": "hanky: kill that zombie!"},
-            {"role": "assistant", "content": "I'm attacking! !attack(\"zombie\")"},
+            {"role": "assistant", "content": "Attacking. !attack(\"zombie\")"},
             {"role": "system", "content": "Code Output:\nNo zombie nearby"},
             {"role": "assistant", "content": "I could not find a zombie nearby."}
         ],
@@ -131,7 +131,7 @@
             {"role": "user", "content": "abc: stop"},
             {"role": "assistant", "content": "Sure. !stop"},
             {"role": "system", "content": "Agent action stopped."},
-            {"role": "assistant", "content": "I've stopped! What next?"}
+            {"role": "assistant", "content": "I've stopped. What next?"}
         ],
 
         [
@@ -153,7 +153,7 @@
             {"role": "user", "content": "trixy88: craft some sticks"},
             {"role": "assistant", "content": "!craftRecipe(\"stick\", 4)"},
             {"role": "system", "content": "Code Output:\nYou have crafted 16 sticks.\nCode execution finished successfully."},
-            {"role": "assistant", "content": "I've crafted 16 sticks!"}
+            {"role": "assistant", "content": "I've crafted 16 sticks."}
         ],
     
         [
@@ -177,7 +177,7 @@
             {"role": "user", "content": "brug: Remember that your base is here."},
             {"role": "assistant", "content": "Sure, I'll save this location as my base. !rememberHere(\"base\")"},
             {"role": "user", "content": "brug: Go to your base."},
-            {"role": "assistant", "content": "On my way! !goToRememberedPlace(\"base\")"}
+            {"role": "assistant", "content": "On my way. !goToRememberedPlace(\"base\")"}
         ],
 
         [
@@ -201,7 +201,7 @@
             {"role": "system", "content": "Successfully crafted 2 sticks."},
             {"role": "assistant", "content": "I have crafted 2 sticks. Now I can craft a wooden pickaxe. !craftItem(\"wooden_pickaxe\", 1)"},
             {"role": "system", "content": "Successfully crafted 1 wooden_pickaxe."},
-            {"role": "assistant", "content": "Looks like I have a wooden pickaxe now! Goal accomplished. !endGoal"}
+            {"role": "assistant", "content": "Looks like I have a wooden pickaxe now. Goal accomplished. !endGoal"}
         ],
         [
             {"role": "system", "content": "set a goal to build whatever you want endlessly (context: you are in creative mode)"},
@@ -244,7 +244,7 @@
             {"role": "user", "content": "234jeb: build a little tower with a torch on the side"},
             {"role": "assistant", "content": "```let pos = bot.entity.position;\nfor (let i = 0; i < 5; i++) {\n    await skills.placeBlock(bot, 'dirt', pos.x, pos.y + i, pos.z);\n}\nawait skills.placeBlock(bot, 'torch', pos.x + 1, pos.y + 4, pos.z, 'side');\n```"},
             {"role": "system", "content": "Successfully placed 5 dirt."},
-            {"role": "assistant", "content": "I built a little tower!"}
+            {"role": "assistant", "content": "I built a little tower."}
         ],
         [
             {"role": "user", "content": "brug: build a dirt house"},
