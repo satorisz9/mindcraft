@@ -150,6 +150,30 @@ export class Agent {
                     mapServer.start(this.bot, this.name);
                 } catch (_mapErr) { console.error('[MapServer] Failed to start:', _mapErr.message); }
 
+                // [mindaxis-patch:event-loop-lag-monitor] event loop ブロック計測
+                (() => {
+                    let _lastTick = performance.now();
+                    setInterval(() => {
+                        const _now = performance.now();
+                        const _lag = _now - _lastTick - 200;
+                        if (_lag > 30) {
+                            console.log('[lag-monitor] event loop blocked for ' + Math.round(_lag) + 'ms extra');
+                        }
+                        _lastTick = _now;
+                    }, 200);
+                    // physicsTick ごとに各ハンドラの実行時間を計測
+                    const _bot2 = this.bot;
+                    _bot2.on('physicsTick', () => {
+                        const _t = performance.now();
+                        setImmediate(() => {
+                            const _elapsed = performance.now() - _t;
+                            if (_elapsed > 20) {
+                                console.log('[lag-monitor] physicsTick handlers took ' + Math.round(_elapsed) + 'ms');
+                            }
+                        });
+                    });
+                })();
+
                 // [mindaxis-patch:water-watchdog] 水中ウォッチドッグ — 頭が5秒以上水没なら現在のコマンドを中断
                 (() => {
                     let _waterTicks = 0;
