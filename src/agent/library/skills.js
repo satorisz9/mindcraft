@@ -2065,6 +2065,73 @@ async function manualWalkToward(bot, targetX, targetZ, maxSeconds) {
     return moved > 2;
 }
 
+// [mindaxis-patch:bfs-dig-down] BFS で垂直に掘り下がり地下目標へ到達
+// pathfinder は地下では使い物にならない（計算タイムアウト・partial pathループ）
+// → BFS: 真下に掘る → 深さで短距離 pathfinder
+async function _bfsDigDown(bot, targetX, targetY, targetZ) {
+    const maxSteps = Math.abs(Math.floor(bot.entity.position.y) - targetY) + 20;
+    log(bot, `[bfs-dig-down] Digging down from y=${Math.floor(bot.entity.position.y)} to y=${targetY}...`);
+
+    for (let step = 0; step < maxSteps * 2; step++) {
+        if (bot.interrupt_code) return false;
+        const pos = bot.entity.position;
+        if (pos.y <= targetY + 1.5) break;
+
+        const cx = Math.floor(pos.x), cy = Math.floor(pos.y), cz = Math.floor(pos.z);
+        const blockBelow = bot.blockAt(new Vec3(cx, cy - 1, cz));
+
+        if (!blockBelow || blockBelow.name === 'air' || blockBelow.name === 'cave_air') {
+            // 下が空気 → 落ちるのを待つ
+            await new Promise(r => setTimeout(r, 200));
+        } else if (blockBelow.name === 'lava' || blockBelow.name === 'flowing_lava') {
+            log(bot, '[bfs-dig-down] Lava below! Aborting.');
+            return false;
+        } else if (blockBelow.name === 'bedrock') {
+            log(bot, '[bfs-dig-down] Hit bedrock.');
+            break;
+        } else if (blockBelow.diggable) {
+            // 頭ブロックも掘る
+            const blockHead = bot.blockAt(new Vec3(cx, cy + 1, cz));
+            if (blockHead && blockHead.name !== 'air' && blockHead.name !== 'cave_air' && blockHead.diggable) {
+                try { await bot.dig(blockHead); } catch(e) {}
+            }
+            try {
+                await bot.tool.equipForBlock(blockBelow);
+                await bot.dig(blockBelow);
+            } catch(e) {
+                log(bot, '[bfs-dig-down] Dig error: ' + e.message);
+                await new Promise(r => setTimeout(r, 300));
+            }
+        } else {
+            log(bot, '[bfs-dig-down] Undiggable block: ' + blockBelow.name);
+            break;
+        }
+        await new Promise(r => setTimeout(r, 100));
+    }
+
+    // 深さで XZ 水平移動（短距離なら pathfinder 、失敗したら掘って進む）
+    const pos = bot.entity.position;
+    const xzDist = Math.sqrt((targetX - pos.x)**2 + (targetZ - pos.z)**2);
+    if (xzDist > 2) {
+        log(bot, `[bfs-dig-down] Horizontal nav at depth: xzDist=${Math.round(xzDist)}`);
+        try {
+            const _pfTimeoutP = new Promise((_, rej) => setTimeout(() => rej(new Error('pf-timeout')), 20000));
+            const _pfMoves = new pf.Movements(bot);
+            await Promise.race([
+                bot.pathfinder.goto(new pf.goals.GoalNear(targetX, targetY, targetZ, 2)),
+                _pfTimeoutP
+            ]);
+        } catch(e) {
+            log(bot, '[bfs-dig-down] Horizontal pathfinder failed: ' + e.message);
+        }
+        if (bot.interrupt_code) return false;
+    }
+
+    const finalDist = bot.entity.position.distanceTo(new Vec3(targetX, targetY, targetZ));
+    log(bot, `[bfs-dig-down] Done. y=${Math.floor(bot.entity.position.y)}, dist=${Math.round(finalDist)}`);
+    return finalDist <= 5;
+}
+
 export async function goToPosition(bot, x, y, z, min_distance=2) {
     // [mindaxis-patch:location-discover-call] 移動開始時に周囲の場所を自動発見
     await _discoverLocations(bot);
@@ -2294,6 +2361,32 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 log(bot, `Pre-navigation surface failed: ${e.message}`);
             }
             bot._pillarPreUsed = false;
+        }
+    }
+
+    // [mindaxis-patch:bfs-dig-down-trigger] 目標が5ブロック以上下方 → BFS 掘り下がり
+    // pathfinder は地下で使い物にならない（partial path ループ・stuck リセットで永久に届かない）
+    {
+        const _bdfCur = bot.entity.position;
+        const _bdfYDown = _bdfCur.y - y; // 正値 = 目標が下方
+        const _bdfFeet = bot.blockAt(new Vec3(Math.floor(_bdfCur.x), Math.floor(_bdfCur.y), Math.floor(_bdfCur.z)));
+        const _bdfInWater = _bdfFeet && (_bdfFeet.name === 'water' || _bdfFeet.name === 'flowing_water');
+        let _bdfNearHouse = false;
+        if (bot._houseStructure && bot._houseStructure.bounds) {
+            const _bh = bot._houseStructure.bounds;
+            _bdfNearHouse = x >= _bh.x1 - 3 && x <= _bh.x2 + 3 && z >= _bh.z1 - 3 && z <= _bh.z2 + 3;
+        }
+        if (_bdfYDown >= 5 && !_bdfInWater && !bot._bfsDigInProgress && !_bdfNearHouse) {
+            bot._bfsDigInProgress = true;
+            try {
+                const _bdfOk = await _bfsDigDown(bot, x, y, z);
+                bot._bfsDigInProgress = false;
+                if (_bdfOk) return true;
+                // 到達できなかった場合は以下の pathfinder で継続試行
+            } catch(e) {
+                log(bot, '[bfs-dig-down] Error: ' + e.message);
+                bot._bfsDigInProgress = false;
+            }
         }
     }
 
@@ -4186,7 +4279,27 @@ export async function goToSurface(bot) {
                 || blockAtTarget.name === 'water' || blockAtTarget.name === 'flowing_water')
             && targetPlaceY >= curY) {
             let pillarItem = findPillarItem();
-            if (!pillarItem) { log(bot, 'No blocks to build up.'); return false; }
+            if (!pillarItem) {
+                // [mindaxis-patch:pillar-dig-supplement] ブロック不足時は隣接壁ブロックを掘って補充
+                const _dirs = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
+                let _supplemented = false;
+                for (const _d of _dirs) {
+                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
+                    if (_wb && _wb.diggable && _wb.name !== 'air' && _wb.name !== 'cave_air'
+                        && _wb.name !== 'water' && _wb.name !== 'flowing_water'
+                        && _wb.name !== 'bedrock') {
+                        try {
+                            await bot.tool.equipForBlock(_wb);
+                            await bot.dig(_wb);
+                            _supplemented = true;
+                            break;
+                        } catch(e) {}
+                    }
+                }
+                if (!_supplemented) { log(bot, 'No blocks to build up.'); return false; }
+                pillarItem = findPillarItem();
+                if (!pillarItem) { log(bot, 'No blocks after digging supplement.'); return false; }
+            }
             await bot.equip(pillarItem, 'hand');
             bot.setControlState('jump', true);
             await new Promise(r => setTimeout(r, 300));
