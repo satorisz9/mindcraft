@@ -4006,6 +4006,7 @@ async function _goToSurfaceInner(bot) {
         }
     }
     log(bot, 'Digging to surface from y=' + Math.floor(_gsWfPos.y) + ' to y=' + surfaceY + '...');
+    console.log(`[dig-up-debug] START y=${Math.floor(_gsWfPos.y)} surfaceY=${surfaceY} inv=${bot.inventory.items().map(i=>i.name+':'+i.count).join(',')}`);
 
     function findPillarItem() {
         // [mindaxis-patch:pillaritem-registry] レジストリで placeable block かを判定（tuff/calciteなど洞窟ブロックも対象）
@@ -4094,7 +4095,8 @@ async function _goToSurfaceInner(bot) {
             const _pilAfterFt = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
             if (_pilAfterFt && _pilAfterFt.name !== 'water' && _pilAfterFt.name !== 'flowing_water') {
                 log(bot, 'Jumped out of water at y=' + Math.floor(bot.entity.position.y) + '!');
-                break; // 地面に出た → dig-up フェーズへ
+                console.log('[dig-up-debug] Out of water, continuing dig-up (NOT breaking loop)');
+                // fall through to dig-up code below (NOT break — break exits the entire loop)
             }
             continue; // まだ水中 → 横掘りせずループ継続
         }
