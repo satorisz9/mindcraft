@@ -2210,10 +2210,14 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     const _encPos = bot.entity.position;
                     const _encX = Math.floor(_encPos.x), _encY = Math.floor(_encPos.y), _encZ = Math.floor(_encPos.z);
                     const _encDirs = [[1,0],[-1,0],[0,1],[0,-1]];
-                    const _isSolidEnc = (bk) => bk && bk.name !== 'air' && bk.name !== 'cave_air' && bk.shapes && bk.shapes.length > 0;
-                    const _isEnclosed = _encDirs.every(([dx, dz]) =>
-                        (_isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY, _encZ+dz))) || _isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY+1, _encZ+dz))))
-                    );
+                    const _isSolidEnc = (bk) => bk && bk.boundingBox === 'block';
+                    const _encResults = _encDirs.map(([dx, dz]) => {
+                        const f = bot.blockAt(new Vec3(_encX+dx, _encY, _encZ+dz));
+                        const h = bot.blockAt(new Vec3(_encX+dx, _encY+1, _encZ+dz));
+                        return _isSolidEnc(f) || _isSolidEnc(h);
+                    });
+                    const _isEnclosed = _encResults.every(Boolean);
+                    console.log(`[enclosed-check] pos=(${_encX},${_encY},${_encZ}) results=[${_encResults}] enclosed=${_isEnclosed} goToSurfaceActive=${!!bot._goToSurfaceActive}`);
                     if (_isEnclosed && !bot._goToSurfaceActive) {
                         log(bot, `Enclosed by solid blocks at y=${_encY}. Calling goToSurface to dig out...`);
                         const _surfResult = await goToSurface(bot);
