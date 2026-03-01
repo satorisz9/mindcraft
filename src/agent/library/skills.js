@@ -2491,6 +2491,8 @@ export async function goToNearestEntity(bot, entityType, min_distance=2, range=6
             const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
             const _pid = _pm != null ? _pm.villagerProfession : -1;
             if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed はスキップ
+            // [mindaxis-patch:nitwit-blocked-id-skip] ブロック済みID（メタデータ未ロード時も除外）
+            if (bot._blockedVillagerIds && bot._blockedVillagerIds.has(String(e.id))) return false;
             // [mindaxis-patch:nitwit-area-skip] ニット村エリア内の村人はスキップ
             if (bot._nitwitAreas && e.position) {
                 if (bot._nitwitAreas.some(a => Math.hypot(a.x - e.position.x, a.z - e.position.z) < 50)) return false;
@@ -2945,8 +2947,13 @@ export async function activateNearestBlock(bot, type) {
  */
 async function findAndGoToVillager(bot, id) {
     id = id+"";
+    // [mindaxis-patch:nitwit-blocked-earlyreturn] ブロック済みIDは即リジェクト（ナビゲーション不要）
+    if (bot._blockedVillagerIds && bot._blockedVillagerIds.has(id)) {
+        log(bot, `Villager ${id} is permanently blocked (nitwit). Do NOT use this ID again. Find a different villager in a new area.`);
+        return null;
+    }
     const entity = bot.entities[id];
-    
+
     if (!entity) {
         log(bot, `Cannot find villager with id ${id}`);
         let entities = world.getNearbyEntities(bot, 16);
