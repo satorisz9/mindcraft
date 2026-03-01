@@ -2484,13 +2484,17 @@ export async function goToNearestEntity(bot, entityType, min_distance=2, range=6
      * @returns {Promise<boolean>} true if the entity was reached, false otherwise.
      **/
     let entity;
-    // [mindaxis-patch:nitwit-id-skip] 村人検索でニットウィット(11)/無職(0)をスキップ（エリアブラックリストは廃止）
+    // [mindaxis-patch:nitwit-id-skip] 村人検索でニットウィット(11)/無職(0)をスキップ
     if (entityType === 'villager') {
         entity = world.getNearestEntityWhere(bot, e => {
             if (e.name !== 'villager') return false;
             const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
             const _pid = _pm != null ? _pm.villagerProfession : -1;
             if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed はスキップ
+            // [mindaxis-patch:nitwit-area-skip] ニット村エリア内の村人はスキップ
+            if (bot._nitwitAreas && e.position) {
+                if (bot._nitwitAreas.some(a => Math.hypot(a.x - e.position.x, a.z - e.position.z) < 50)) return false;
+            }
             return true;
         }, range);
         if (!entity) {
@@ -2991,6 +2995,25 @@ async function findAndGoToVillager(bot, id) {
         // [mindaxis-patch:villager-blacklist] ニットウィットは永続ブラックリスト
         if (!bot._blockedVillagerIds) bot._blockedVillagerIds = new Set();
         bot._blockedVillagerIds.add(String(id));
+        // [mindaxis-patch:nitwit-location-persist] ニット発見位置を bot._nitwitAreas + location_memory に記録（再起動後も回避）
+        try {
+            const _npos = entity.position || bot.entity.position;
+            const _nx = Math.round(_npos.x), _nz = Math.round(_npos.z), _ny = Math.round(_npos.y);
+            if (!bot._nitwitAreas) bot._nitwitAreas = [];
+            if (!bot._nitwitAreas.some(v => Math.hypot(v.x - _nx, v.z - _nz) < 50)) {
+                bot._nitwitAreas.push({ x: _nx, z: _nz, y: _ny, discoveredAt: Date.now() });
+                // location_memory にも書き込み（LLM コンテキストから参照できるよう）
+                const _nfs = await import('fs');
+                const _nPath = './bots/' + bot.username + '/location_memory.json';
+                let _nlm = {};
+                try { _nlm = JSON.parse(_nfs.readFileSync(_nPath, 'utf8')); } catch(_) {}
+                if (!_nlm.places) _nlm.places = {};
+                if (!_nlm.places.nitwit_village) _nlm.places.nitwit_village = [];
+                _nlm.places.nitwit_village.push({ x: _nx, z: _nz, y: _ny, discoveredAt: Date.now() });
+                _nfs.writeFileSync(_nPath, JSON.stringify(_nlm, null, 2), 'utf8');
+                log(bot, `Nitwit village recorded at (${_nx}, ${_nz}) - will avoid this area in future.`);
+            }
+        } catch(_) {}
         log(bot, `Villager ${id} is a Nitwit - permanently cannot trade. Added to blocked list. Find a different villager.`);
         return null;
     }
