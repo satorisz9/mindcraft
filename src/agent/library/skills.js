@@ -2916,40 +2916,13 @@ export async function moveAway(bot, distance) {
         // [mindaxis-patch:bfs-refpoint] startPos を基準にして「出発点から遠い方向」に移動
         const target = _bfsFurthest(bot, SCAN_RADIUS, startPos);
         if (!target) {
-            log(bot, `BFS: no reachable space (hop ${hop + 1}). Pillar climbing...`);
-            // gorge や洞窟で水平移動不可の場合、ピラージャンプで上に登ってBFS再スキャン
-            let _climbed = false;
-            const _climbStart = Date.now();
-            for (let _cs = 0; _cs < 40 && Date.now() - _climbStart < 30000; _cs++) {
-                if (bot.interrupt_code) break;
-                const _cp = bot.entity.position;
-                const _cx = Math.floor(_cp.x), _cy = Math.floor(_cp.y), _cz = Math.floor(_cp.z);
-                // 真上を最大4ブロック掘る
-                for (let _dy = 1; _dy <= 4; _dy++) {
-                    const _ub = bot.blockAt(new Vec3(_cx, _cy + _dy, _cz));
-                    if (_ub && _ub.diggable && !['air','cave_air','water','flowing_water','bedrock'].includes(_ub.name)) {
-                        try { await bot.dig(_ub); } catch(e) {}
-                    }
-                }
-                // 足元に置けるブロックを探す
-                const _pi = bot.inventory.items().find(i => ['dirt','cobblestone','netherrack'].includes(i.name))
-                    || bot.inventory.items().find(i => i.name.includes('planks') || i.name.includes('stone'));
-                if (!_pi) { log(bot, 'No blocks to pillar with.'); break; }
-                await bot.equip(_pi, 'hand');
-                bot.setControlState('jump', true);
-                await new Promise(r => setTimeout(r, 300));
-                try {
-                    const _sb = bot.blockAt(new Vec3(_cx, _cy - 1, _cz));
-                    if (_sb) await bot.placeBlock(_sb, new Vec3(0, 1, 0));
-                } catch(e) {}
-                bot.setControlState('jump', false);
-                await new Promise(r => setTimeout(r, 400));
-                // 上昇したら BFS 再スキャン
-                const _newTarget = _bfsFurthest(bot, SCAN_RADIUS);
-                if (_newTarget) { _climbed = true; break; }
-            }
-            if (_climbed) continue; // BFS が使える高さに到達 → ホップ継続
+            // [mindaxis-patch:bfs-null-gotosurface] goToSurface に委ねる（ピラー含む）
+            log(bot, `BFS: no reachable space (hop ${hop + 1}). Calling goToSurface...`);
             await goToSurface(bot);
+            if (bot.interrupt_code) break;
+            // 地上に出たら BFS 再スキャンして継続
+            const _afterSurface = _bfsFurthest(bot, SCAN_RADIUS, startPos);
+            if (_afterSurface) { continue; }
             break;
         }
         log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
