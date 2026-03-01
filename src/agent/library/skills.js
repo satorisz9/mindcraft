@@ -541,6 +541,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
     const isLiquid = blockType === 'lava' || blockType === 'water';
 
     let collected = 0;
+    let _farBlockAttempts = 0; // [mindaxis-patch:collect-search-deeper] 無限ループ防止カウンター
 
     const movements = new pf.Movements(bot);
     movements.dontMineUnderFallingBlock = false;
@@ -589,17 +590,20 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
         }, 64, 1);
 
         if (blocks.length === 0) {
-            // [mindaxis-patch:collect-search-deeper] 近くに見つからない場合、300ブロック先まで広域検索して移動
-            const _farBlock = bot.findBlock({
-                matching: b => blocktypes.includes(b.name),
-                maxDistance: 300,
-                useExtraInfo: false
-            });
-            if (_farBlock && collected < count) {
-                log(bot, `No ${blockType} within 64 blocks, found one at (${_farBlock.position.x},${_farBlock.position.y},${_farBlock.position.z}). Moving there...`);
-                await goToPosition(bot, _farBlock.position.x, _farBlock.position.y, _farBlock.position.z, 2);
-                if (bot.interrupt_code) break;
-                continue;
+            // [mindaxis-patch:collect-search-deeper] 近くに見つからない場合、300ブロック先まで広域検索して移動（最大2回）
+            if (_farBlockAttempts < 2) {
+                const _farBlock = bot.findBlock({
+                    matching: b => blocktypes.includes(b.name),
+                    maxDistance: 300,
+                    useExtraInfo: false
+                });
+                if (_farBlock && collected < count) {
+                    _farBlockAttempts++;
+                    log(bot, `No ${blockType} within 64 blocks, found one at (${_farBlock.position.x},${_farBlock.position.y},${_farBlock.position.z}). Moving there... (attempt ${_farBlockAttempts})`);
+                    await goToPosition(bot, _farBlock.position.x, _farBlock.position.y, _farBlock.position.z, 2);
+                    if (bot.interrupt_code) break;
+                    continue;
+                }
             }
             if (collected === 0)
                 log(bot, `No ${blockType} nearby to collect.`);
@@ -629,6 +633,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             }
             else if (mc.mustCollectManually(blockType)) {
                 await goToPosition(bot, block.position.x, block.position.y, block.position.z, 2);
+                await bot.tool.equipForBlock(block); // [mindaxis-patch:reequip-before-dig] goToPosition後に再装備
                 await bot.dig(block);
                 await pickupNearbyItems(bot);
                 await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup] pickup後にツール再装備
