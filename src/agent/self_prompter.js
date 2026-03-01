@@ -182,6 +182,10 @@ export class SelfPrompter {
                                 if (_currentStep >= 0) {
                                     const _isCritical = _steps[_currentStep].critical;
                                     const _stepDesc = _steps[_currentStep].step || '';
+                                    // [mindaxis-patch:plan-prompt-sync] プランのステップに self.prompt を自動同期
+                                    if (_stepDesc && this.prompt !== _stepDesc) {
+                                        this.prompt = _stepDesc;
+                                    }
                                     const _isExploreStep = /find|search|village|villager|locate|discover|explore|探す|探し|村人|村を|見つけ|探索|発見|searchForEntity|searchForBlock/i.test(_stepDesc) || /find|search|village|villager|locate|discover|explore|探す|探し|村人|村を|見つけ|探索|発見/i.test(_plan.goal || '');
                                     const _skipRule = _isCritical
                                         ? 'This step is CRITICAL and CANNOT be skipped. But do NOT over-prepare! First !inventory to see what you already have, then !takeFromChest for missing items. Stone tools are fine if iron is not available — do NOT spend more than 2 turns gathering materials. Leave with minimum gear (stone tools + food) rather than wasting time.'
