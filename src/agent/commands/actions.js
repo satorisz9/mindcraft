@@ -1323,6 +1323,8 @@ export const actionsList = [
         params: {'id': { type: 'int', description: 'The id number of the villager that you want to trade with.' }},
         perform: runAsAction(async (agent, id) => {
             await skills.showVillagerTrades(agent.bot, id);
+            // [mindaxis-patch:villager-blacklist-persist] bot._blockedVillagerIds は history.save() で自動的に memory.json へ永続化される
+            // (history.js の save/load に blocked_nitwit_ids フィールドを追加済み)
         })
     },
     {

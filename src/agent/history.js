@@ -89,7 +89,9 @@ export class History {
                 taskStart: this.agent.task.taskStartTime,
                 last_sender: this.agent.last_sender,
                 // [mindaxis-patch:saved-places-persist] MemoryBank の saved_places を永続化
-                saved_places: this.agent.memory_bank.getJson()
+                saved_places: this.agent.memory_bank.getJson(),
+                // [mindaxis-patch:villager-blacklist-persist] ニットウィット永続ブラックリスト
+                blocked_nitwit_ids: this.agent.bot._blockedVillagerIds ? [...this.agent.bot._blockedVillagerIds] : []
             };
             writeFileSync(this.memory_fp, JSON.stringify(data, null, 2));
             console.log('Saved memory to:', this.memory_fp);
@@ -113,6 +115,11 @@ export class History {
                 this.agent.memory_bank.loadJson(data.saved_places);
                 const _spKeys = Object.keys(data.saved_places);
                 if (_spKeys.length > 0) console.log('[mindaxis] Restored saved_places:', _spKeys.join(', '));
+            }
+            // [mindaxis-patch:villager-blacklist-persist] ニットウィットIDブラックリストを復元
+            if (data.blocked_nitwit_ids && Array.isArray(data.blocked_nitwit_ids) && data.blocked_nitwit_ids.length > 0) {
+                this.agent.bot._blockedVillagerIds = new Set(data.blocked_nitwit_ids.map(String));
+                console.log('[mindaxis] Restored blocked nitwit IDs:', data.blocked_nitwit_ids.join(', '));
             }
             console.log('Loaded memory:', this.memory);
             return data;
