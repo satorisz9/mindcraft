@@ -66,6 +66,7 @@ export function initBot(username) {
 
     const bot = createBot(options);
     bot.loadPlugin(pathfinder);
+    bot.pathfinder.tickTimeout = 10; // reduce from 40ms to minimize event loop blocking during A*
     bot.loadPlugin(pvp);
     bot.loadPlugin(collectblock);
     bot.loadPlugin(autoEat);
