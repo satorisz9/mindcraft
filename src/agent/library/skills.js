@@ -1586,15 +1586,12 @@ export async function goToGoal(bot, goal) {
     let final_movements = destructiveMovements;
 
     const pathfind_timeout = 1000;
-    if (await bot.pathfinder.getPathTo(nonDestructiveMovements, goal, pathfind_timeout).status === 'success') {
+    if ((await bot.pathfinder.getPathTo(nonDestructiveMovements, goal, pathfind_timeout)).status === 'success') {
         final_movements = nonDestructiveMovements;
         log(bot, `Found non-destructive path.`);
     }
-    else if (await bot.pathfinder.getPathTo(destructiveMovements, goal, pathfind_timeout).status === 'success') {
+    else if ((await bot.pathfinder.getPathTo(destructiveMovements, goal, pathfind_timeout)).status === 'success') {
         log(bot, `Found destructive path.`);
-    }
-    else {
-        log(bot, `Path not found, but attempting to navigate anyway using destructive movements.`);
     }
 
     const doorCheckInterval = startDoorInterval(bot);
@@ -2489,20 +2486,22 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         const _ic = () => bot.interrupt_code;
         // [#18 fix] 冒頭で即チェック — 既に中断済みなら一切の処理をスキップ
         if (_ic()) return false;
-        // [mindaxis-patch:goto-total-timeout] 全体タイムアウト（90秒）— コマンドが返らないと self-prompter が回らない
+        // [mindaxis-patch:goto-total-timeout] 全体タイムアウト — 距離に比例（~400ms/block、min 90s、max 600s）
         const _gotoStartTime = Date.now();
-        const _GOTO_TOTAL_TIMEOUT = 90000;
+        if (_ic()) { clearInterval(progressInterval); return false; }
+        let totalDist = bot.entity.position.distanceTo(target);
         // [mindaxis-patch:goto-timeout-outer-scope] var でブロック外からもアクセス可能に
+        const _GOTO_TOTAL_TIMEOUT = Math.min(600000, Math.max(90000, Math.round(totalDist * 400)));
+        // 長距離の場合は self-prompter watchdog も延長して途中打ち切りを防ぐ
+        if (totalDist > 100) bot._requestWatchdogMs = _GOTO_TOTAL_TIMEOUT + 30000;
         var _checkTotalTimeout = () => {
             if (Date.now() - _gotoStartTime > _GOTO_TOTAL_TIMEOUT) {
-                log(bot, 'goToPosition total timeout (90s). Aborting navigation.');
+                log(bot, `goToPosition total timeout (${Math.round(_GOTO_TOTAL_TIMEOUT/1000)}s). Aborting navigation.`);
                 try { bot.pathfinder.stop(); } catch(_e) {}
                 return true;
             }
             return false;
         };
-        if (_ic()) { clearInterval(progressInterval); return false; }
-        let totalDist = bot.entity.position.distanceTo(target);
         // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ垂直差が大きくても直接アプローチ（往復防止）
         const _xzDist = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
         console.log('[goto-trace] totalDist=' + Math.round(totalDist) + ' xzDist=' + Math.round(_xzDist) + ' WAYPOINT_DIST=' + WAYPOINT_DIST);
