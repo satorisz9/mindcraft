@@ -4535,8 +4535,16 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
         return await goToSurface(bot);
     }
 
+    // [mindaxis-patch:escape-surface-only] BFS が洞窟に潜った場合は goToSurface にフォールバック
+    if (furthest.y < startY - 5) {
+        log(bot, `BFS target (${furthest.x},${furthest.y},${furthest.z}) is underground (startY=${startY}). Using goToSurface instead.`);
+        return await goToSurface(bot);
+    }
+
     log(bot, `Escape target: (${furthest.x},${furthest.y},${furthest.z}) — ${furthest.dist} BFS steps away.`);
-    const reached = await goToPosition(bot, furthest.x, furthest.y, furthest.z, 3);
+    // Y は現在地以上に制限（地下への pathfinder を防ぐ）
+    const _escapeY = Math.max(furthest.y, startY);
+    const reached = await goToPosition(bot, furthest.x, _escapeY, furthest.z, 3);
     if (reached) {
         log(bot, 'Escaped enclosure — now at edge of reachable space.');
         return true;
