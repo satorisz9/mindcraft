@@ -310,12 +310,16 @@ export class SelfPrompter {
                                     if (!_tile) continue;
                                     (_tile.block === 'water' || _tile.block === 'flowing_water') ? _water++ : _land++;
                                 }
-                                if (_water + _land === 0) return;
+                                // [mindaxis-patch:unexplored-hint] 未探索方向も明示
+                                if (_water + _land === 0) {
+                                    _tmResults.push(d.name + '=unexplored');
+                                    return;
+                                }
                                 const _pct = Math.round(_water / (_water + _land) * 100);
                                 _tmResults.push(d.name + '=' + (_pct >= 60 ? 'water' : _pct >= 30 ? 'mixed' : 'land'));
                             });
                             if (_tmResults.length >= 4) {
-                                planHint += ' KNOWN TERRAIN (' + Object.keys(_tmBot._terrainCache).length + ' tiles explored): ' + _tmResults.join(', ') + '. Prefer land directions for !moveAway.';
+                                planHint += ' WORLD MAP (' + Object.keys(_tmBot._terrainCache).length + ' tiles known): ' + _tmResults.join(', ') + '. "unexplored" = never visited, high chance of new resources. Prefer unexplored directions when searching for blocks/villages. Use land directions if you need stable ground.';
                             }
                         }
                     }
