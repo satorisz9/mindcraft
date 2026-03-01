@@ -3143,7 +3143,8 @@ async function findAndGoToVillager(bot, id) {
                     villager_list += `${entity.id}: baby villager\n`;
                 } else {
                     const profession = world.getVillagerProfession(entity);
-                    villager_list += `${entity.id}: ${profession}\n`;
+                    const _sleeping = entity.metadata && entity.metadata[6] === 2;
+                    villager_list += `${entity.id}: ${profession}${_sleeping ? ' (SLEEPING)' : ''}\n`;
                 }
             }
         }
@@ -3204,10 +3205,11 @@ async function findAndGoToVillager(bot, id) {
         return null;
     }
 
-    // [mindaxis-patch:villager-night-check] Check if it's nighttime (villagers sleep at night)
-    const _timeOfDay = bot.time && bot.time.timeOfDay;
-    if (_timeOfDay != null && _timeOfDay > 12542 && _timeOfDay < 23459) {
-        log(bot, `It is nighttime (time=${_timeOfDay}) - villagers are sleeping. Use !goToBed to sleep until morning, or wait for daylight.`);
+    // [mindaxis-patch:villager-sleep-pose] 村人のPoseメタデータで実際に寝ているか確認（時刻ベースの判定を廃止）
+    // Minecraft metadata index 6 = Pose (VarInt): 0=STANDING, 2=SLEEPING
+    const _villagerPose = entity.metadata ? entity.metadata[6] : undefined;
+    if (_villagerPose === 2) {
+        log(bot, `Villager ${id} is sleeping in bed. Find an awake villager instead.`);
         return null;
     }
 

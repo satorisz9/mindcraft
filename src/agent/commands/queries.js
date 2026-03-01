@@ -241,10 +241,12 @@ export const queryList = [
                         babyVillagerIds.push(entity.id);
                     } else {
                         const profession = world.getVillagerProfession(entity);
+                        // [mindaxis-patch:villager-sleep-indicator] 睡眠状態を表示（Pose metadata index 6, SLEEPING=2）
+                        const _isSleeping = entity.metadata && entity.metadata[6] === 2;
                         villagerIds.push(entity.id);
                         villagerDetails.push({
                             id: entity.id,
-                            profession: profession
+                            profession: profession + (_isSleeping ? ' SLEEPING' : '')
                         });
                     }
                 }
