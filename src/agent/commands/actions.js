@@ -963,38 +963,10 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, entity_type, range) => {
             const _reached = await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
-            // 重要エンティティに到達したらプロセス再起動に備えて位置を自動保存
-            // [mindaxis-patch:village-save-distance] 既存保存地点から300ブロック以上離れている場合のみ保存
-            // (同じ村へ戻るたびに上書きされるループを防止。Minecraft の村同士は通常300ブロック以上離れている)
-            if (_reached && (entity_type === 'villager' || entity_type === 'wandering_trader')) {
+            // village の自動保存は !showVillagerTrades で取引確認後に行う（ここでは保存しない）
+            if (_reached && entity_type === 'wandering_trader') {
                 const _p = agent.bot.entity.position;
-                const _name = entity_type === 'villager' ? 'village' : entity_type;
-                // [mindaxis-patch:village-save-profession] ニットウィット/無職は village として保存しない
-                if (entity_type === 'villager') {
-                    const _nearV = Object.values(agent.bot.entities).find(e =>
-                        e.name === 'villager' && e.position && e.position.distanceTo(_p) < 6
-                    );
-                    if (_nearV) {
-                        const _pm = _nearV.metadata && Object.values(_nearV.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
-                        const _pid = _pm != null ? _pm.villagerProfession : -1;
-                        if (_pid === 11 || _pid === 0) {
-                            skills.log(agent.bot, `Found ${_pid === 11 ? 'nitwit' : 'unemployed'} villager (profId=${_pid}) — NOT a trading village. Do NOT call !rememberHere("village") here. Move away and search in a completely different direction for a real village with traders.`);
-                            return;
-                        }
-                    }
-                }
-                const _existingLoc = agent.memory_bank.recallPlace(_name);
-                if (!_existingLoc) {
-                    agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
-                    skills.log(agent.bot, `Auto-saved location as "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
-                } else {
-                    const _dx = _p.x - _existingLoc[0], _dz = _p.z - _existingLoc[2];
-                    const _dist = Math.sqrt(_dx * _dx + _dz * _dz);
-                    if (_dist > 300) {
-                        agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
-                        skills.log(agent.bot, `Auto-updated "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}) — prev was ${Math.round(_dist)} blocks away.`);
-                    }
-                }
+                agent.memory_bank.rememberPlace('wandering_trader', _p.x, _p.y, _p.z);
             }
         })
     },
@@ -1378,9 +1350,23 @@ export const actionsList = [
         description: 'Show trades of a specified villager.',
         params: {'id': { type: 'int', description: 'The id number of the villager that you want to trade with.' }},
         perform: runAsAction(async (agent, id) => {
-            await skills.showVillagerTrades(agent.bot, id);
+            const _tradeOk = await skills.showVillagerTrades(agent.bot, id);
+            // [mindaxis-patch:village-save-on-trade] 取引オファー確認後に初めて village を保存
+            if (_tradeOk) {
+                const _p = agent.bot.entity.position;
+                const _existing = agent.memory_bank.recallPlace('village');
+                if (!_existing) {
+                    agent.memory_bank.rememberPlace('village', _p.x, _p.y, _p.z);
+                    skills.log(agent.bot, `Confirmed trader villager — saved location as "village" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
+                } else {
+                    const _dx = _p.x - _existing[0], _dz = _p.z - _existing[2];
+                    if (Math.sqrt(_dx*_dx + _dz*_dz) > 300) {
+                        agent.memory_bank.rememberPlace('village', _p.x, _p.y, _p.z);
+                        skills.log(agent.bot, `Updated "village" to (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
+                    }
+                }
+            }
             // [mindaxis-patch:villager-blacklist-persist] bot._blockedVillagerIds は history.save() で自動的に memory.json へ永続化される
-            // (history.js の save/load に blocked_nitwit_ids フィールドを追加済み)
         })
     },
     {
