@@ -1517,6 +1517,8 @@ export async function goToGoal(bot, goal) {
                 }
                 // [water-surface-walkable] 水面を陸地と同じコストにする
                 if (moves) moves.liquidCost = 0;
+                // [mindaxis-patch:safe-drop] 落下ダメージを受けない高さに制限（4→3）
+                if (moves && moves.maxDropDown > 3) moves.maxDropDown = 3;
                 return _origSetMovements(moves);
             };
             bot._wallProtectPatched = true;
