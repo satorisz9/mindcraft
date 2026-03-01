@@ -269,15 +269,29 @@ export const actionsList = [
                 skills.log(bot, 'Crafted a boat!');
             }
 
-            // --- 2. Find water nearby ---
+            // --- 2. Find SURFACE water nearby (not underground cave water) ---
             const waterBlockId = bot.registry.blocksByName['water'] ? bot.registry.blocksByName['water'].id : null;
-            let waterBlock = waterBlockId != null ? bot.findBlock({ matching: waterBlockId, maxDistance: 32 }) : null;
+            let waterBlock = null;
+            if (waterBlockId != null) {
+                // Search up to 64 blocks, filter to surface water only (air above = surface lake/river)
+                const candidates = bot.findBlocks({ matching: waterBlockId, maxDistance: 64, count: 30 });
+                for (const pos of candidates) {
+                    const above = bot.blockAt(pos.offset(0, 1, 0));
+                    if (above && (above.name === 'air' || above.name === 'cave_air')) {
+                        // Only use surface water within ±8Y of bot to avoid ravine/cave water
+                        if (Math.abs(pos.y - bot.entity.position.y) <= 8) {
+                            waterBlock = bot.blockAt(pos);
+                            break;
+                        }
+                    }
+                }
+            }
             if (!waterBlock) {
-                skills.log(bot, 'No water nearby to place boat. Use !goToCoordinates instead.');
+                skills.log(bot, 'No surface water nearby to place boat. Use !goToCoordinates instead.');
                 return;
             }
 
-            // --- 3. Walk close to water ---
+            // --- 3. Walk close to water (at surface level, not underground) ---
             const wp = waterBlock.position;
             try {
                 await skills.goToPosition(bot, wp.x, wp.y + 1, wp.z, 3);

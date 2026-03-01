@@ -53,7 +53,6 @@ index b38bd30..853d7ea 100644
            bot.emit('path_update', results)
            path = results.path
            astartTimedout = results.status === 'partial'
-+          var _pp = path.slice(0, 5).map(function(n){return '('+n.x+','+n.y+','+n.z+')'}).join(' '); console.log('[water-nav] getPathTo: len=' + path.length + ' status=' + results.status + ' bot=(' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.y) + ',' + Math.round(bot.entity.position.z) + ') path=' + _pp)
 +          }
            pathUpdated = true
          }
