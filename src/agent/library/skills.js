@@ -511,6 +511,8 @@ export async function defendSelf(bot, range=9) {
 
 
 export async function collectBlock(bot, blockType, num=1, exclude=null) {
+    // [mindaxis-patch:collect-watchdog] ore採掘はwatchdogを5分に延長
+    bot._requestWatchdogMs = 300000;
     // [mindaxis-patch:collect-timeout] 収集開始時のインベントリを記録
     const _startInvCount = bot.inventory.items().filter(i => i.name === blockType || i.name.includes(blockType.replace('_log', '_planks'))).reduce((s, i) => s + i.count, 0);
     const _collectStartTime = Date.now();
