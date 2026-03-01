@@ -3886,6 +3886,26 @@ async function _goToSurfaceInner(bot) {
     }
 
     const maxSteps = (surfaceY - Math.floor(pos.y)) + 10;
+    const _digStartPos = { x: Math.round(_gsWfPos.x), y: Math.round(_gsWfPos.y), z: Math.round(_gsWfPos.z) };
+
+    // ピラー脱出成功後に cave_fall として危険ゾーンに記録する関数
+    async function _saveCaveFallZone(stepsUsed) {
+        if (stepsUsed < 5) return; // 少し掘った程度では記録しない
+        try {
+            const _cfFs = await import('fs');
+            const _cfPath = `./bots/${bot.username}/death_zones.json`;
+            let _cfZones = [];
+            try { _cfZones = JSON.parse(_cfFs.readFileSync(_cfPath, 'utf8')); } catch(e) {}
+            const _near = _cfZones.find(z => Math.abs(z.x - _digStartPos.x) < 10 && Math.abs(z.z - _digStartPos.z) < 10);
+            if (_near) { _near.count = (_near.count || 1) + 1; _near.cause = 'cave_fall'; }
+            else { _cfZones.push({ x: _digStartPos.x, y: _digStartPos.y, z: _digStartPos.z, cause: 'cave_fall', count: 1 }); }
+            _cfZones.sort((a, b) => b.count - a.count);
+            if (_cfZones.length > 30) _cfZones.length = 30;
+            _cfFs.writeFileSync(_cfPath, JSON.stringify(_cfZones));
+            bot._deathZones = _cfZones;
+            log(bot, `[cave-fall] Saved danger zone at (${_digStartPos.x},${_digStartPos.y},${_digStartPos.z}) count=${_near?.count||1}`);
+        } catch(e) { console.log('[cave-fall] Save error:', e.message); }
+    }
 
     for (let step = 0; step < maxSteps; step++) {
         if (bot.interrupt_code) { bot.setControlState('jump', false); return false; }
@@ -3898,6 +3918,7 @@ async function _goToSurfaceInner(bot) {
         if (curPos.y >= surfaceY - 1 && !_pilWater) {
             log(bot, 'Reached surface at y=' + Math.floor(curPos.y) + '!');
             bot.setControlState('jump', false);
+            await _saveCaveFallZone(step);
             return true;
         }
         if (_pilWater && curPos.y >= surfaceY - 2) {
