@@ -2279,6 +2279,86 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     if (movedXZ < 5) {
                         stuckCount++;
                         log(bot, `Stuck at milestone (${stuckCount}/${MAX_STUCK})`);
+                        // [mindaxis-patch:stuck-pillar] スタック時にピラージャンプで高低差を超える
+                        if (stuckCount >= 2 && !_ic()) {
+                            const _sp = bot.entity.position;
+                            const _spDx = x - _sp.x, _spDz = z - _sp.z;
+                            const _spD = Math.sqrt(_spDx*_spDx + _spDz*_spDz) || 1;
+                            const _spDirX = Math.round(_spDx/_spD), _spDirZ = Math.round(_spDz/_spD);
+                            // 目標方向に壁があるか確認
+                            const _spFx = Math.floor(_sp.x), _spFy = Math.floor(_sp.y), _spFz = Math.floor(_sp.z);
+                            const _spWall = bot.blockAt(new Vec3(_spFx+_spDirX, _spFy, _spFz+_spDirZ));
+                            const _spWallH = bot.blockAt(new Vec3(_spFx+_spDirX, _spFy+1, _spFz+_spDirZ));
+                            const _spHasWall = (_spWall && _spWall.boundingBox === 'block') || (_spWallH && _spWallH.boundingBox === 'block');
+                            if (_spHasWall) {
+                                console.log(`[stuck-pillar] Wall detected, pillar jumping (${stuckCount}/${MAX_STUCK})...`);
+                                log(bot, 'Stuck — pillar jumping over obstacle...');
+                                // ピラージャンプ: 壁の高さまで上る（最大8ブロック）
+                                const _pillarItems = ['cobblestone','dirt','stone','netherrack','cobbled_deepslate','granite','diorite','andesite','sandstone','oak_planks','birch_planks','spruce_planks'];
+                                for (let _pj = 0; _pj < 8 && !_ic(); _pj++) {
+                                    // 壁がまだあるか確認
+                                    const _pjY = Math.floor(bot.entity.position.y);
+                                    const _pjWall = bot.blockAt(new Vec3(_spFx+_spDirX, _pjY, _spFz+_spDirZ));
+                                    const _pjWallH = bot.blockAt(new Vec3(_spFx+_spDirX, _pjY+1, _spFz+_spDirZ));
+                                    if (!(_pjWall && _pjWall.boundingBox === 'block') && !(_pjWallH && _pjWallH.boundingBox === 'block')) {
+                                        console.log(`[stuck-pillar] Wall cleared at y=${_pjY}, stepping forward`);
+                                        break; // 壁がなくなった→前に進める
+                                    }
+                                    // 頭上を掘る
+                                    const _pjAbove = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), _pjY+2, Math.floor(bot.entity.position.z)));
+                                    if (_pjAbove && _pjAbove.boundingBox === 'block' && _pjAbove.diggable) {
+                                        try { await bot.tool.equipForBlock(_pjAbove); await bot.dig(_pjAbove); } catch(e) {}
+                                    }
+                                    // 足元にブロック配置してジャンプ
+                                    const _pjBelow = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), _pjY-1, Math.floor(bot.entity.position.z)));
+                                    let _pjPlaced = false;
+                                    if (_pjBelow && _pjBelow.name !== 'air' && _pjBelow.name !== 'cave_air') {
+                                        // 足元に固体ブロックあり→ジャンプして足元に配置
+                                        bot.setControlState('jump', true);
+                                        await new Promise(r => setTimeout(r, 350));
+                                        for (const _itemName of _pillarItems) {
+                                            const _item = bot.inventory.items().find(i => i.name === _itemName);
+                                            if (_item) {
+                                                try {
+                                                    await bot.equip(_item, 'hand');
+                                                    const _refBlock = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y)-1, Math.floor(bot.entity.position.z)));
+                                                    if (_refBlock) { await bot.placeBlock(_refBlock, new Vec3(0, 1, 0)); _pjPlaced = true; }
+                                                } catch(e) {}
+                                                break;
+                                            }
+                                        }
+                                        bot.setControlState('jump', false);
+                                        await new Promise(r => setTimeout(r, 300));
+                                    }
+                                    if (!_pjPlaced) {
+                                        // ブロック配置できなかった → 壁を掘って前に進む
+                                        if (_pjWall && _pjWall.diggable && _pjWall.boundingBox === 'block') {
+                                            try { await bot.tool.equipForBlock(_pjWall); await bot.dig(_pjWall); } catch(e) {}
+                                        }
+                                        if (_pjWallH && _pjWallH.diggable && _pjWallH.boundingBox === 'block') {
+                                            try { await bot.tool.equipForBlock(_pjWallH); await bot.dig(_pjWallH); } catch(e) {}
+                                        }
+                                        break;
+                                    }
+                                }
+                                // 壁を超えたら前に進む
+                                const _pjFwdY = Math.floor(bot.entity.position.y);
+                                const _pjFwdF = bot.blockAt(new Vec3(_spFx+_spDirX, _pjFwdY, _spFz+_spDirZ));
+                                const _pjFwdH = bot.blockAt(new Vec3(_spFx+_spDirX, _pjFwdY+1, _spFz+_spDirZ));
+                                if (_pjFwdF && _pjFwdF.diggable && _pjFwdF.boundingBox === 'block') {
+                                    try { await bot.tool.equipForBlock(_pjFwdF); await bot.dig(_pjFwdF); } catch(e) {}
+                                }
+                                if (_pjFwdH && _pjFwdH.diggable && _pjFwdH.boundingBox === 'block') {
+                                    try { await bot.tool.equipForBlock(_pjFwdH); await bot.dig(_pjFwdH); } catch(e) {}
+                                }
+                                await bot.lookAt(new Vec3(_spFx+_spDirX+0.5, _pjFwdY+1, _spFz+_spDirZ+0.5));
+                                bot.setControlState('forward', true);
+                                await new Promise(r => setTimeout(r, 600));
+                                bot.setControlState('forward', false);
+                                stuckCount = 0; // リセットして再試行
+                                continue;
+                            }
+                        }
                         if (stuckCount >= MAX_STUCK) {
                             log(bot, 'Cannot navigate after stuck milestones.');
                             bot._pauseWatchdog = false;
