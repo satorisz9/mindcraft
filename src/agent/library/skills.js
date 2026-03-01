@@ -2582,9 +2582,38 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const dist2d = Math.sqrt(dx * dx + dz * dz);
                 const wpX = pos.x + (dx / dist2d) * WAYPOINT_DIST;
                 const wpZ = pos.z + (dz / dist2d) * WAYPOINT_DIST;
+                const prevPos = pos.clone();
+                // [mindaxis-patch:bfs-longrange] 200ブロック以上は pathfinder 不要 — BFS walk で前進
+                if (_xzRemaining > 200) {
+                    const _lrH = { x: dx/dist2d, z: dz/dist2d };
+                    const _lrT = _bfsFurthest(bot, 80, null, _lrH);
+                    if (_lrT && _lrT.path && _lrT.path.length > 0) {
+                        console.log('[goto-trace] BFS longrange: ' + _lrT.path.length + ' steps, xzRemaining=' + Math.round(_xzRemaining));
+                        bot.setControlState('sprint', true);
+                        for (const [nx, ny, nz] of _lrT.path) {
+                            if (_ic()) break;
+                            const _su = ny > Math.floor(bot.entity.position.y);
+                            await bot.lookAt(new Vec3(nx+0.5, ny+(_su?1.6:0.6), nz+0.5));
+                            bot.setControlState('forward', true);
+                            if (_su || bot.entity.isInWater) bot.setControlState('jump', true);
+                            const _ss = Date.now();
+                            while (Date.now()-_ss < 800) {
+                                if (bot.entity.position.distanceTo(new Vec3(nx+0.5,ny,nz+0.5)) < 0.9 || _ic()) break;
+                                await new Promise(r => setTimeout(r, 50));
+                            }
+                            bot.setControlState('jump', false);
+                        }
+                        bot.setControlState('forward', false);
+                        bot.setControlState('sprint', false);
+                        if (bot.entity.position.distanceTo(prevPos) > 3) stuckCount = 0;
+                        else stuckCount++;
+                        if (stuckCount >= MAX_STUCK) { log(bot, 'BFS longrange stuck, giving up.'); clearInterval(progressInterval); return false; }
+                        continue;
+                    }
+                    // BFS も失敗したら pathfinder にフォールバック
+                }
                 console.log('[goto-trace] segment to (' + Math.round(wpX) + ',' + Math.round(wpZ) + ') timeout=' + SEGMENT_TIMEOUT_MS);
                 log(bot, `Waypoint: (${Math.round(wpX)}, ${Math.round(wpZ)}), ${Math.round(remaining)} blocks left.`);
-                const prevPos = pos.clone();
                 try {
                     await goWithTimeout(new pf.goals.GoalXZ(wpX, wpZ), SEGMENT_TIMEOUT_MS); // [mindaxis-patch:waypoint-goalxz] Y不問
                     console.log('[goto-trace] segment OK, moved to (' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.z) + ')');
