@@ -556,6 +556,8 @@ export class Agent {
             this.bot._lastDeathTime = Date.now(); // [mindaxis-patch:death-timer]
             this.actions.cancelResume();
             this.actions.stop();
+            // [mindaxis-patch:death-plan-reinsert-v1] 死亡時インベントリを保存（spawn でチェック）
+            try { this.bot._inventoryAtDeath = this.bot.inventory.items().map(i => i.name); } catch(e) { this.bot._inventoryAtDeath = null; }
             // [mindaxis-patch:death-zones-save] 死亡地点をスコア付きで記録
             try {
                 const _pos = this.bot.entity.position;
@@ -574,6 +576,51 @@ export class Agent {
                 console.log(`[death-zones] Saved death at (${Math.round(_pos.x)},${Math.round(_pos.y)},${Math.round(_pos.z)}) cause=${_cause} count=${(_near?.count||1)}`);
             } catch(e) { console.log('[death-zones] Save error:', e.message); }
         });
+        // [mindaxis-patch:death-plan-reinsert-v1] リスポーン後にキーアイテム消失を確認してプランを再挿入
+        this.bot.on('spawn', () => {
+            if (!this.bot._inventoryAtDeath) return;
+            const _prevInv = this.bot._inventoryAtDeath;
+            this.bot._inventoryAtDeath = null;
+            const _self = this;
+            setTimeout(() => {
+                try {
+                    const _KEY = [
+                        { name: 'diamond_pickaxe', phaseId: 'deep-mining' },
+                        { name: 'diamond_sword',   phaseId: 'deep-mining' },
+                    ];
+                    const _curInv = _self.bot.inventory.items().map(i => i.name);
+                    let _chestItems = [];
+                    try { _chestItems = JSON.parse(readFileSync(`./bots/${_self.name}/chest_summary.json`, 'utf8')).items || []; } catch(e) {}
+                    const _planPath = `./bots/${_self.name}/current_plan.json`;
+                    if (!existsSync(_planPath)) return;
+                    let _planData;
+                    try { _planData = JSON.parse(readFileSync(_planPath, 'utf8')); } catch(e) { return; }
+                    let _changed = false;
+                    for (const _ki of _KEY) {
+                        if (!_prevInv.includes(_ki.name)) continue; // 死亡前に持っていなかった
+                        if (_curInv.includes(_ki.name) || _chestItems.includes(_ki.name)) continue; // 今も持っているかチェストにある
+                        // アイテムを失った → 対応プランを探してリセット
+                        const _pi = _planData.plans.findIndex(p => p.phaseId === _ki.phaseId);
+                        if (_pi < 0) continue;
+                        const _plan = _planData.plans[_pi];
+                        if (_plan.status !== 'completed' && _plan.status !== 'skipped') continue; // まだ未完了なので不要
+                        console.log(`[death-plan-reinsert] ${_ki.name} を死亡で失った → ${_ki.phaseId} プランをリセット`);
+                        _plan.status = 'in_progress';
+                        for (const _s of _plan.steps) { _s.done = false; }
+                        if (_planData.currentPlanIndex > _pi || _planData.plans[_planData.currentPlanIndex]?.status === 'completed') {
+                            _planData.currentPlanIndex = _pi;
+                        }
+                        _changed = true;
+                    }
+                    if (_changed) {
+                        writeFileSync(_planPath, JSON.stringify(_planData, null, 2));
+                        console.log('[death-plan-reinsert] current_plan.json を更新しました');
+                        _self.handleMessage('system', 'You died and lost key items (diamond_pickaxe or diamond_sword) that are not in your chest. The deep-mining plan has been reset. Please complete it again to re-obtain those items.');
+                    }
+                } catch(e) { console.log('[death-plan-reinsert] エラー:', e.message); }
+            }, 3000); // リスポーン後3秒待ってインベントリを確認
+        });
+
         this.bot.on('kicked', (reason) => {
             if (!this._disconnectHandled) {
                 const { msg } = handleDisconnection(this.name, reason);
