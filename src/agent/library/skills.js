@@ -4219,7 +4219,10 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
 
     const _isPassable = (x, y, z) => {
         const b = bot.blockAt(new Vec3(x, y, z));
-        return !b || b.name === 'air' || b.name === 'cave_air';
+        if (!b) return true; // unloaded chunk
+        if (b.name === 'air' || b.name === 'cave_air') return true;
+        // [mindaxis-patch:bfs-passable] collision shape がないブロック(草・花・カーペット等)も通過可能
+        return b.shapes && b.shapes.length === 0;
     };
     const _isWater = (x, y, z) => {
         const b = bot.blockAt(new Vec3(x, y, z));
