@@ -1686,8 +1686,13 @@ async function _discoverLocations(bot) {
         if (!_lm.places) _lm.places = {};
         const _pos = bot.entity.position;
         let _changed = false;
-        // 村の検出（村人がいれば村）
-        const _villagers = Object.values(bot.entities).filter(e => e.name === 'villager' && e.position.distanceTo(_pos) < 48);
+        // 村の検出（職業持ち村人が2人以上いれば村）
+        const _villagers = Object.values(bot.entities).filter(e => {
+            if (e.name !== 'villager' || !e.position || e.position.distanceTo(_pos) >= 48) return false;
+            const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
+            const _pid = _pm != null ? _pm.villagerProfession : -1;
+            return _pid !== 11 && _pid !== 0; // nitwit/unemployed は除外
+        });
         if (_villagers.length >= 2) {
             if (!_lm.places.village) _lm.places.village = [];
             const _vx = Math.round(_villagers.reduce((s,v)=>s+v.position.x,0)/_villagers.length);
