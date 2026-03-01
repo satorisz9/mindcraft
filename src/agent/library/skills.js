@@ -4066,25 +4066,27 @@ async function _goToSurfaceInner(bot) {
             continue;
         }
 
-        if (blockAtTarget && (blockAtTarget.name === 'air' || blockAtTarget.name === 'cave_air'
-                || blockAtTarget.name === 'water' || blockAtTarget.name === 'flowing_water')
-            && targetPlaceY >= curY) {
+        // [mindaxis-patch:digup-place-always] targetPlaceY >= curY 制限を撤廃
+        // ギャップがあっても blockAtTarget が空なら設置を試みる（横→縦に確実移行）
+        const _targetIsOpen = blockAtTarget && (blockAtTarget.name === 'air' || blockAtTarget.name === 'cave_air'
+            || blockAtTarget.name === 'water' || blockAtTarget.name === 'flowing_water');
+
+        if (_targetIsOpen) {
             let pillarItem = findPillarItem();
             if (!pillarItem) {
-                // [mindaxis-patch:pillar-dig-supplement] ブロック不足時は隣接壁を2ブロック（足元+頭）掘って補充
-                // 1ブロックだと横に入れないので最低2ブロック必要
+                // 材料不足: 隣接壁を2ブロック（足元+頭）掘って補充（1ブロックでは横に入れない）
                 const _dirs = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
                 let _supplemented = false;
                 for (const _d of _dirs) {
                     const _wb0 = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
                     const _wb1 = bot.blockAt(new Vec3(cx + _d.x, curY + 1, cz + _d.z));
-                    const _canDig0 = _wb0 && _wb0.diggable && _wb0.name !== 'air' && _wb0.name !== 'cave_air'
+                    const _ok0 = _wb0 && _wb0.diggable && _wb0.name !== 'air' && _wb0.name !== 'cave_air'
                         && _wb0.name !== 'water' && _wb0.name !== 'flowing_water' && _wb0.name !== 'bedrock';
-                    const _canDig1 = _wb1 && _wb1.diggable && _wb1.name !== 'air' && _wb1.name !== 'cave_air'
+                    const _ok1 = _wb1 && _wb1.diggable && _wb1.name !== 'air' && _wb1.name !== 'cave_air'
                         && _wb1.name !== 'water' && _wb1.name !== 'flowing_water' && _wb1.name !== 'bedrock';
-                    if (_canDig0 || _canDig1) {
-                        try { if (_canDig0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
-                        try { if (_canDig1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
+                    if (_ok0 || _ok1) {
+                        try { if (_ok0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
+                        try { if (_ok1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
                         _supplemented = true;
                         break;
                     }
@@ -4094,8 +4096,13 @@ async function _goToSurfaceInner(bot) {
                 if (!pillarItem) { log(bot, 'No blocks after digging supplement.'); return false; }
             }
             await bot.equip(pillarItem, 'hand');
-            bot.setControlState('jump', true);
-            await new Promise(r => setTimeout(r, 300));
+            // 足元への設置（targetPlaceY >= curY）はジャンプしながら置く
+            // ギャップ埋め（targetPlaceY < curY）は上から置くだけでよい
+            const _needJump = targetPlaceY >= curY;
+            if (_needJump) {
+                bot.setControlState('jump', true);
+                await new Promise(r => setTimeout(r, 300));
+            }
             try {
                 await bot.lookAt(standBlock.position.offset(0.5, 1.0, 0.5));
                 await bot.placeBlock(standBlock, new Vec3(0, 1, 0));
@@ -4115,16 +4122,12 @@ async function _goToSurfaceInner(bot) {
             }
             bot.setControlState('jump', false);
             await new Promise(r => setTimeout(r, 500));
-        } else if (targetPlaceY < curY) {
-            bot.setControlState('jump', true);
-            await new Promise(r => setTimeout(r, 500));
-            bot.setControlState('jump', false);
-            await new Promise(r => setTimeout(r, 300));
         } else {
+            // targetPlaceY に固体ブロックあり → ジャンプして次イテレーションで再評価
             bot.setControlState('jump', true);
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 400));
             bot.setControlState('jump', false);
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 200));
         }
 
         let newPos = bot.entity.position;
