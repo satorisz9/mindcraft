@@ -150,42 +150,29 @@ export class Agent {
                     mapServer.start(this.bot, this.name);
                 } catch (_mapErr) { console.error('[MapServer] Failed to start:', _mapErr.message); }
 
-                // [mindaxis-patch:event-loop-lag-monitor] event loop ブロック計測
+                // [mindaxis-patch:chunk-queue] map_chunk パケットを1枚ずつ setImmediate で処理
+                // → チャンクデコード（同期・重い）の間に physicsTick が割り込めるようにする
                 (() => {
-                    let _lastTick = performance.now();
-                    setInterval(() => {
-                        const _now = performance.now();
-                        const _lag = _now - _lastTick - 200;
-                        if (_lag > 30) {
-                            console.log('[lag-monitor] event loop blocked for ' + Math.round(_lag) + 'ms extra');
-                        }
-                        _lastTick = _now;
-                    }, 200);
-                    // physicsTick ごとに各ハンドラの実行時間を計測
-                    const _bot2 = this.bot;
-                    _bot2.on('physicsTick', () => {
-                        const _t = performance.now();
-                        setImmediate(() => {
-                            const _elapsed = performance.now() - _t;
-                            if (_elapsed > 20) {
-                                console.log('[lag-monitor] physicsTick handlers took ' + Math.round(_elapsed) + 'ms');
-                            }
-                        });
-                    });
-                    // チャンクパケット受信時間を計測（デコード前後）
-                    const _bot3 = this.bot;
-                    const _origDispatch = _bot3._client.emit.bind(_bot3._client);
-                    _bot3._client.emit = function(event, ...args) {
+                    const _client = this.bot._client;
+                    const _origEmit = _client.emit.bind(_client);
+                    let _chunkQueue = [];
+                    let _draining = false;
+
+                    function drainChunkQueue() {
+                        if (_chunkQueue.length === 0) { _draining = false; return; }
+                        _draining = true;
+                        const args = _chunkQueue.shift();
+                        _origEmit('map_chunk', ...args);
+                        setImmediate(drainChunkQueue);
+                    }
+
+                    _client.emit = function(event, ...args) {
                         if (event === 'map_chunk') {
-                            const _ct = performance.now();
-                            const result = _origDispatch(event, ...args);
-                            const _ce = performance.now() - _ct;
-                            if (_ce > 50) {
-                                console.log('[lag-monitor] map_chunk decode took ' + Math.round(_ce) + 'ms');
-                            }
-                            return result;
+                            _chunkQueue.push(args);
+                            if (!_draining) drainChunkQueue();
+                            return true;
                         }
-                        return _origDispatch(event, ...args);
+                        return _origEmit(event, ...args);
                     };
                 })();
 

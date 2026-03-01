@@ -2644,7 +2644,10 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         // 鉱石・深層鉱石はY制限なし（地下採掘のため）
         const _isOre = blockType.endsWith('_ore') || blockType.startsWith('deepslate_');
         const minY = _isOre ? -64 : Math.max(botY - 20, 50);
+        // [mindaxis-patch:scan-yield] ブロックスキャン前に physicsTick に処理を譲る
+        await new Promise(r => setImmediate(r));
         const candidates = world.getNearestBlocks(bot, blockType, range, 50);
+        await new Promise(r => setImmediate(r));
         console.log('[search-dbg] ' + blockType + ': ' + candidates.length + ' raw candidates within ' + range + ' blocks' + (_isOre ? ' (ore mode, no minY filter)' : ' minY=' + minY));
         const _isWater = n => n && (n.name === 'water' || n.name === 'flowing_water');
         const surfaceCandidates = candidates.filter(b => {
