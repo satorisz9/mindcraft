@@ -3155,36 +3155,9 @@ export async function moveAway(bot, distance) {
             bot._moveAwayHeading = _heading;
             console.log(`[moveAway] heading fixed: dx=${_heading.x.toFixed(2)} dz=${_heading.z.toFixed(2)}`);
         }
-        log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
-        // [mindaxis-patch:bfs-walk] BFS パスを直接歩く（pathfinder タイムアウト回避）
-        // BFS が検証済みの 1 ブロック単位の経路を lookAt + forward で走破する
-        if (target.path && target.path.length > 0) {
-            log(bot, `BFS walk: ${target.path.length} steps to (${target.x},${target.y},${target.z})`);
-            bot.setControlState('sprint', true);
-            for (const [nx, ny, nz] of target.path) {
-                if (bot.interrupt_code) break;
-                const curY = Math.floor(bot.entity.position.y);
-                const stepUp = ny > curY;
-                const inWater = bot.entity.isInWater;
-                // 水中は下向きにするとそのまま沈むため水平方向を維持
-                const lookY = inWater ? bot.entity.position.y + 0.5 : ny + (stepUp ? 1.6 : 0.6);
-                await bot.lookAt(new Vec3(nx + 0.5, lookY, nz + 0.5));
-                bot.setControlState('forward', true);
-                if (stepUp || inWater) bot.setControlState('jump', true);
-                const _stepStart = Date.now();
-                while (Date.now() - _stepStart < 800) { // [mindaxis-patch:bfs-step-timeout] 2500→800ms
-                    const d = bot.entity.position.distanceTo(new Vec3(nx + 0.5, ny, nz + 0.5));
-                    if (d < 0.9 || bot.interrupt_code) break;
-                    await new Promise(r => setTimeout(r, 50));
-                }
-                bot.setControlState('jump', false);
-            }
-            bot.setControlState('forward', false);
-            bot.setControlState('sprint', false);
-        } else {
-            // path なし（隣接など）→ 従来の goToPosition にフォールバック
-            await goToPosition(bot, target.x, target.y, target.z, 3);
-        }
+        log(bot, `BFS milestone ${hop + 1}/${MAX_HOPS}: (${target.x},${target.y},${target.z}) dist=${target.dist} inWater=${target.isWater}`);
+        // [mindaxis-patch:bfs-milestone] BFS はマイルストーン計算のみ。実移動は pathfinder に委ねる
+        await goToPosition(bot, target.x, target.y, target.z, 3);
         totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
         log(bot, `Moved ${totalMoved}/${distance} blocks total.`);
         if (totalMoved >= distance) break;
