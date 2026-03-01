@@ -3343,11 +3343,17 @@ async function findAndGoToVillager(bot, id) {
     const _profId = _profMeta != null ? _profMeta.villagerProfession : -1;
     // _profId === -1 means no villager_data (e.g. Wandering Trader) — allow trading
     if (_profId === 0) {
+        // [mindaxis-patch:villager-blacklist] 無職は一時ブラックリスト（ジョブサイト配置で変わる可能性あり）
+        if (!bot._tempBlockedVillagers) bot._tempBlockedVillagers = {};
+        bot._tempBlockedVillagers[String(id)] = Date.now();
         log(bot, `Villager ${id} is Unemployed (no job site block) - cannot trade. Place a job site block near them to give them a profession (e.g. composter=farmer, lectern=librarian, blast_furnace=armorer, smoker=butcher, cartography_table=cartographer, brewing_stand=cleric, barrel=fisherman, fletching_table=fletcher, loom=shepherd, grindstone=weaponsmith, smithing_table=toolsmith, stonecutter=mason).`);
         return null;
     }
     if (_profId === 11) {
-        log(bot, `Villager ${id} is a Nitwit - permanently cannot trade. Find a different villager.`);
+        // [mindaxis-patch:villager-blacklist] ニットウィットは永続ブラックリスト
+        if (!bot._blockedVillagerIds) bot._blockedVillagerIds = new Set();
+        bot._blockedVillagerIds.add(String(id));
+        log(bot, `Villager ${id} is a Nitwit - permanently cannot trade. Added to blocked list. Find a different villager.`);
         return null;
     }
 

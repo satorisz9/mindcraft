@@ -963,13 +963,12 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, entity_type, range) => {
             const _reached = await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
-            // 重要エンティティに到達したらプロセス再起動に備えて即座に位置を自動保存
-            if (_reached && (entity_type === 'villager' || entity_type === 'wandering_trader')) {
+            // [mindaxis-patch:no-village-autosave] 取引成功前は village を自動保存しない
+            // ニットウィットエリアへの自動保存ループを防止 → !rememberHere("village") は取引成功後に手動で呼ぶ
+            if (_reached && entity_type === 'wandering_trader') {
                 const _p = agent.bot.entity.position;
-                const _name = entity_type === 'villager' ? 'village' : entity_type;
-                if (!agent.memory_bank.recallPlace(_name)) {
-                    agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
-                    skills.log(agent.bot, `Auto-saved location as "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
+                if (!agent.memory_bank.recallPlace('wandering_trader')) {
+                    agent.memory_bank.rememberPlace('wandering_trader', _p.x, _p.y, _p.z);
                 }
             }
         })
