@@ -438,29 +438,10 @@ export class SelfPrompter {
                                 console.log('[mindaxis] LOGICAL stuck: plan ' + _lci + ' step ' + (_lstep+1) + ', ' + this._loopTurns + ' turns');
                             }
                             this._loopTurns = 0;
-                            if (_isPhysical && this.agent.bot._visionUnstuck) {
-                                // 物理スタック → vision-unstuck で画像分析
-                                let _vuCmd = '!planSkip';
-                                try {
-                                    const { createRequire: _cr3 } = await import('module');
-                                    const _req3 = _cr3(import.meta.url);
-                                    const _vu = _req3('../../../scripts/vision-unstuck.cjs');
-                                    const _bot = this.agent.bot;
-                                    const _inv = [];
-                                    try { for (const _it of _bot.inventory.items()) { _inv.push(_it.name + ' x' + _it.count); } } catch(_ie) {}
-                                    const _recentActions = [];
-                                    try { const _h = this.agent.history; if (_h && _h.turns) { for (let _ri = Math.max(0, _h.turns.length - 5); _ri < _h.turns.length; _ri++) { const _t = _h.turns[_ri]; if (_t && _t.content) _recentActions.push(typeof _t.content === 'string' ? _t.content.slice(0, 200) : String(_t.content).slice(0, 200)); } } } catch(_he) {}
-                                    _vuCmd = await _vu.analyze(_bot, {
-                                        name: this.agent.name,
-                                        position: _curPos || { x: 0, y: 0, z: 0 },
-                                        planStep: _lsText,
-                                        loopTurns: 8,
-                                        inventory: _inv.join(', ') || 'empty',
-                                        recentActions: _recentActions.length > 0 ? _recentActions : ['(none)'],
-                                    });
-                                    console.log('[mindaxis] vision-unstuck returned: ' + _vuCmd);
-                                } catch(_vuErr) { console.error('[mindaxis] vision-unstuck error:', _vuErr.message); }
-                                await this.agent.handleMessage('system', 'PHYSICAL STUCK DETECTED: You have not moved for 8 turns. Execute this command immediately: ' + _vuCmd, -1);
+                            if (_isPhysical) {
+                                // 物理スタック → moveAway で脱出
+                                console.log('[mindaxis] Physical stuck → forcing !moveAway(30)');
+                                await this.agent.handleMessage('system', 'PHYSICAL STUCK DETECTED: You have not moved for several turns. Execute: !moveAway(30)', -1);
                             } else {
                                 // 論理スタック → critical ステップなら代替案を提案、それ以外は !planSkip
                                 const _isCrit = (_lstep >= 0 && _lplan.steps[_lstep]) ? _lplan.steps[_lstep].critical : false;

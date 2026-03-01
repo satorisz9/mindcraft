@@ -150,14 +150,6 @@ export class Agent {
                     mapServer.start(this.bot, this.name);
                 } catch (_mapErr) { console.error('[MapServer] Failed to start:', _mapErr.message); }
 
-                // [mindaxis-patch:vision-unstuck-loader] vision-unstuck モジュール読み込み
-                try {
-                    const { createRequire: _cr2 } = await import('module');
-                    const _req2 = _cr2(import.meta.url);
-                    const _vu = _req2('../../../scripts/vision-unstuck.cjs');
-                    _vu.start(this.bot, this.name);
-                } catch (_vuErr) { console.error('[vision-unstuck] Failed to load:', _vuErr.message); }
-
                 // [mindaxis-patch:water-watchdog] 水中ウォッチドッグ — 頭が5秒以上水没なら現在のコマンドを中断
                 (() => {
                     let _waterTicks = 0;
