@@ -1479,11 +1479,23 @@ export async function goToGoal(bot, goal) {
         // monkey-patch: どの movements が使われても壁保護を自動適用
         if (!bot._wallProtectPatched) {
             bot._wallProtectFn = _protect;
+            // [mindaxis-patch:magma-avoid] magma_block の上を歩かない（足元が magma_block なら高コスト）
+            bot._magmaAvoidFn = (block) => {
+                const below = bot.blockAt(block.position.offset(0, -1, 0));
+                if (below && below.name === 'magma_block') return 100;
+                return 0;
+            };
             const _origSetMovements = bot.pathfinder.setMovements.bind(bot.pathfinder);
             bot.pathfinder.setMovements = function(moves) {
                 if (moves && moves.exclusionAreasBreak && bot._wallProtectFn) {
                     if (!moves.exclusionAreasBreak.includes(bot._wallProtectFn)) {
                         moves.exclusionAreasBreak.push(bot._wallProtectFn);
+                    }
+                }
+                // [mindaxis-patch:magma-avoid] magma_block の上を歩かない
+                if (moves && moves.exclusionAreasStep && bot._magmaAvoidFn) {
+                    if (!moves.exclusionAreasStep.includes(bot._magmaAvoidFn)) {
+                        moves.exclusionAreasStep.push(bot._magmaAvoidFn);
                     }
                 }
                 // [water-surface-walkable] 水面を陸地と同じコストにする
