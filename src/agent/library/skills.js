@@ -1325,12 +1325,22 @@ export async function goToGoal(bot, goal) {
      **/
 
     const nonDestructiveMovements = new pf.Movements(bot);
-    const dontBreakBlocks = ['glass', 'glass_pane'];
+    // [mindaxis-patch:terrain-dig] 構造ブロックは破壊禁止、地形ブロックは許可
+    const dontBreakBlocks = ['glass', 'glass_pane',
+        'oak_planks', 'birch_planks', 'spruce_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks',
+        'oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log',
+        'oak_door', 'birch_door', 'spruce_door', 'iron_door',
+        'chest', 'trapped_chest', 'crafting_table', 'furnace', 'blast_furnace',
+        'bed', 'white_bed', 'red_bed', 'orange_bed',
+    ];
     for (let block of dontBreakBlocks) {
-        nonDestructiveMovements.blocksCantBreak.add(mc.getBlockId(block));
+        try { nonDestructiveMovements.blocksCantBreak.add(mc.getBlockId(block)); } catch(_) {}
     }
     nonDestructiveMovements.placeCost = 2;
-    nonDestructiveMovements.digCost = 10;
+    // [mindaxis-patch:terrain-dig-cost] 地形ブロック（石・土・砂利）を掘って通行できるよう digCost を下げる
+    // 石なしピッケル: stone 掘りコスト≈70 → 70ブロック迂回より短ければ掘る
+    // ピッケルあり: stone 掘りコスト≈6 → 7ブロック迂回より短ければ掘る
+    nonDestructiveMovements.digCost = 3;
 
     const destructiveMovements = new pf.Movements(bot);
 
@@ -2211,7 +2221,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         let lastPos = bot.entity.position.clone();
         let stuckTicks = 0;
         const STUCK_CHECK_MS = 3000; // [mindaxis-patch:stuck-tolerance]
-        const STUCK_MAX = 4;
+        const STUCK_MAX = 10; // [mindaxis-patch:terrain-dig-tolerance] 山地形でのA*計算中は長めに待つ（3s×10=30s）
 
         const stuckPromise = new Promise((_, reject) => {
             hardTimer = setTimeout(() => {
