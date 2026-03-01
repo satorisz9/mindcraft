@@ -3166,7 +3166,9 @@ export async function moveAway(bot, distance) {
                 const curY = Math.floor(bot.entity.position.y);
                 const stepUp = ny > curY;
                 const inWater = bot.entity.isInWater;
-                await bot.lookAt(new Vec3(nx + 0.5, ny + (stepUp ? 1.6 : 0.6), nz + 0.5));
+                // 水中は下向きにするとそのまま沈むため水平方向を維持
+                const lookY = inWater ? bot.entity.position.y + 0.5 : ny + (stepUp ? 1.6 : 0.6);
+                await bot.lookAt(new Vec3(nx + 0.5, lookY, nz + 0.5));
                 bot.setControlState('forward', true);
                 if (stepUp || inWater) bot.setControlState('jump', true);
                 const _stepStart = Date.now();
