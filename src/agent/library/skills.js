@@ -4020,18 +4020,29 @@ async function _goToSurfaceInner(bot) {
                 break; // 排水後に再dig
 
             } else if (_baName === 'gravel' || _baName === 'sand' || _baName === 'red_sand' || _baName === 'suspicious_sand' || _baName === 'suspicious_gravel') {
-                // 落下系ブロック → 横に逃げ穴を1ブロック掘ってから素早く上を掘る
-                log(bot, `[pillar-precheck] Falling block (${_baName}) at y+${dy}, creating escape hole.`);
+                // 落下系ブロック → 横に逃げ穴を掘り、その空間に踏み込んでから次イテレーションへ
+                log(bot, `[pillar-precheck] Falling block (${_baName}) at y+${dy}, stepping sideways.`);
+                let _gravEscDx = 0, _gravEscDz = 0;
                 for (const _d of _precheck4) {
                     const _sb = bot.blockAt(new Vec3(cx+_d.x, curY, cz+_d.z));
                     const _sb2 = bot.blockAt(new Vec3(cx+_d.x, curY+1, cz+_d.z));
                     if (!_sb || _sb.name==='lava' || (_sb2 && _sb2.name==='lava')) continue;
-                    if (_sb.name==='air' || _sb.name==='cave_air') { break; } // 既に逃げ穴あり
-                    try { if (_sb.diggable) await bot.dig(_sb); } catch(e) {}
-                    try { if (_sb2 && _sb2.diggable && _sb2.name!=='air') await bot.dig(_sb2); } catch(e) {}
-                    break;
+                    if (!(_sb.name==='air' || _sb.name==='cave_air')) {
+                        try { if (_sb.diggable) await bot.dig(_sb); } catch(e) {}
+                        try { if (_sb2 && _sb2.diggable && _sb2.name!=='air') await bot.dig(_sb2); } catch(e) {}
+                    }
+                    _gravEscDx = _d.x; _gravEscDz = _d.z; break;
                 }
-                break; // 逃げ穴確保後、通常dig継続
+                if (_gravEscDx !== 0 || _gravEscDz !== 0) {
+                    // 逃げ穴に踏み込む（落下ブロックの直下から外れる）
+                    await bot.lookAt(new Vec3(cx + _gravEscDx + 0.5, curY + 0.5, cz + _gravEscDz + 0.5));
+                    bot.setControlState('forward', true);
+                    await new Promise(r => setTimeout(r, 450));
+                    bot.setControlState('forward', false);
+                    cx = Math.floor(bot.entity.position.x);
+                    cz = Math.floor(bot.entity.position.z);
+                }
+                _precheckAborted = true; // 次 iteration から新位置で再評価
             }
         }
         if (_precheckAborted) continue;
