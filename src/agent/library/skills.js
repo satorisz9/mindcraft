@@ -4022,7 +4022,8 @@ export async function goToSurface(bot) {
     const _gsWfWater = (_gsWfFt && (_gsWfFt.name === 'water' || _gsWfFt.name === 'flowing_water')) ||
                        (_gsWfBel && (_gsWfBel.name === 'water' || _gsWfBel.name === 'flowing_water'));
     // [mindaxis-patch:gotosurface-nearsurface-nowater] 水中（1ブロック下が水でも）near surface でも early return しない
-    if (_gsWfPos.y >= surfaceY - 2 && !_gsWfWater) {
+    // [mindaxis-patch:gotosurface-strict-threshold] surfaceY - 2 だと地中2ブロックでも早期終了するため surfaceY に変更
+    if (_gsWfPos.y >= surfaceY && !_gsWfWater) {
         log(bot, 'Already near surface (y=' + Math.floor(_gsWfPos.y) + ', surface=' + surfaceY + ').');
         return true;
     }
