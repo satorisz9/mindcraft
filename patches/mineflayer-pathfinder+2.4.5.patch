@@ -41,7 +41,7 @@ index b38bd30..853d7ea 100644
      }
  
      if (bot.pathfinder.LOSWhenPlacingBlocks && returningPos) {
-@@ -463,16 +482,49 @@ function inject (bot) {
+@@ -463,16 +482,48 @@ function inject (bot) {
              fullStop()
            }
          } else if (!pathUpdated) {
