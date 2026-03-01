@@ -2913,7 +2913,8 @@ export async function moveAway(bot, distance) {
 
     for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
         if (bot.interrupt_code) break;
-        const target = _bfsFurthest(bot, SCAN_RADIUS);
+        // [mindaxis-patch:bfs-refpoint] startPos を基準にして「出発点から遠い方向」に移動
+        const target = _bfsFurthest(bot, SCAN_RADIUS, startPos);
         if (!target) {
             log(bot, `BFS: no reachable space (hop ${hop + 1}). Pillar climbing...`);
             // gorge や洞窟で水平移動不可の場合、ピラージャンプで上に登ってBFS再スキャン
@@ -4186,9 +4187,13 @@ export async function goToSurface(bot) {
 // [mindaxis-patch:bfs-furthest-v1] BFS共有ヘルパー: 現在地から最も遠い到達可能点を返す
 // 歩行可能な陸地 + 水面(コスト+3)を探索。チャンク境界(blockAt=null)で自然に停止。
 // 戻り値: { x, y, z, dist, isWater } または null（スタートから5ブロック未満）
-function _bfsFurthest(bot, maxRadius = 80) {
+function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
+    // [mindaxis-patch:bfs-refpoint] refPoint 基準の最遠点選択（moveAway の往復防止）
     const pos = bot.entity.position;
     const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
+    // refPoint が指定されていれば、選択基準を refPoint からのユークリッド距離に変える
+    const _refX = refPoint ? Math.floor(refPoint.x) : startX;
+    const _refZ = refPoint ? Math.floor(refPoint.z) : startZ;
 
     const _isPassable = (x, y, z) => {
         const b = bot.blockAt(new Vec3(x, y, z));
@@ -4214,17 +4219,20 @@ function _bfsFurthest(bot, maxRadius = 80) {
     const visited = new Set();
     const queue = [[startX, startY, startZ, 0, false]];
     visited.add(`${startX},${startY},${startZ}`);
-    let furthest = { x: startX, y: startY, z: startZ, dist: 0, isWater: false };
+    const _initRefDist = Math.sqrt((startX - _refX) ** 2 + (startZ - _refZ) ** 2);
+    let furthest = { x: startX, y: startY, z: startZ, dist: 0, refDist: _initRefDist, isWater: false };
     let bfsCount = 0;
     const FLAT_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
     while (queue.length > 0 && bfsCount < 12000) {
         bfsCount++;
         const [cx, cy, cz, dist, curIsWater] = queue.shift();
-        // 陸地はどんな距離でも水より優先。同種なら遠い方を優先。
+        // 選択基準: refPoint からのユークリッド距離（refPoint 未指定なら BFS dist と同等）
+        const curRefDist = Math.sqrt((cx - _refX) ** 2 + (cz - _refZ) ** 2);
+        // 陸地はどんな距離でも水より優先。同種なら refPoint から遠い方を優先。
         const _preferNew = (!curIsWater && furthest.isWater) ||
-            (curIsWater === furthest.isWater && dist > furthest.dist);
-        if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, isWater: curIsWater };
+            (curIsWater === furthest.isWater && curRefDist > furthest.refDist);
+        if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, refDist: curRefDist, isWater: curIsWater };
         if (dist >= maxRadius) continue;
         for (const [ddx, ddz] of FLAT_DIRS) {
             for (const dy of [0, 1, -1]) {
@@ -4243,7 +4251,7 @@ function _bfsFurthest(bot, maxRadius = 80) {
             }
         }
     }
-    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} inWater=${furthest.isWater}`);
+    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} inWater=${furthest.isWater}`);
     return furthest.dist >= 5 ? furthest : null;
 }
 
