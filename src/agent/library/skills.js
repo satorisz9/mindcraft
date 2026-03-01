@@ -629,6 +629,8 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 if (_digDist > 1.5) {
                     await goToPosition(bot, block.position.x, block.position.y, block.position.z, 2);
                 }
+                // [mindaxis-patch:reequip-before-dig] goToPosition中のscaffoldでブロックを持ち替えた場合に戻す
+                await bot.tool.equipForBlock(block);
                 await bot.dig(block);
                 await pickupNearbyItems(bot);
                 await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup]
@@ -699,6 +701,7 @@ export async function pickupNearbyItems(bot) {
     while (nearestItem) {
         let movements = new pf.Movements(bot);
         movements.canDig = false;
+        movements.allow1by1towers = false; // [mindaxis-patch:pickup-no-scaffold] pickup移動中のscaffold禁止（ブロック持ち替え防止）
         bot.pathfinder.setMovements(movements);
         await goToGoal(bot, new pf.goals.GoalFollow(nearestItem, 1));
         await new Promise(resolve => setTimeout(resolve, 200));
