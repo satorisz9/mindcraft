@@ -2293,7 +2293,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     const surfaceReached = await goToSurface(bot);
                     if (surfaceReached && !_ic()) {
                         log(bot, 'Reached surface, retrying navigation...');
-                        bot._pillarFallbackUsed = false;
+                        // _pillarFallbackUsed は true のまま再帰呼び出し（再帰先での再発動を防ぐ）
                         return await goToPosition(bot, x, y, z, min_distance);
                     }
                 } catch (e) {
