@@ -1971,9 +1971,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         // sky light: 地上=15、洞窟=0、木の下でも~14 → 閾値 <4 で洞窟のみ検知
         const _skyLightBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
         const _skyLight = _skyLightBlock ? (_skyLightBlock.skyLight ?? 15) : 15;
-        const isUnderground = !_nearHouse && _skyLight < 4;
+        // y >= 58 (サーフェスレベル) なら家の中・森の下・建物内でも地下判定しない
+        const _isBelowSurface = curPos.y < 58;
+        const isUnderground = !_nearHouse && _skyLight < 4 && _isBelowSurface;
         // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より5ブロック以上低いなら地上優先
-        const _deepBelowTarget = !_nearHouse && yDiff > 5;
+        const _deepBelowTarget = !_nearHouse && yDiff > 5 && _isBelowSurface;
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
         let _underHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
