@@ -66,7 +66,6 @@ export function initBot(username) {
 
     const bot = createBot(options);
     bot.loadPlugin(pathfinder);
-    bot.pathfinder.tickTimeout = 10; // reduce from 40ms to minimize event loop blocking during A*
     bot.loadPlugin(pvp);
     bot.loadPlugin(collectblock);
     bot.loadPlugin(autoEat);
@@ -79,6 +78,12 @@ export function initBot(username) {
         mc_version = bot.version;
         mcdata = minecraftData(mc_version);
         Item = prismarine_items(mc_version);
+    });
+
+    bot.once('spawn', () => {
+        if (bot.pathfinder) {
+            bot.pathfinder.tickTimeout = 10; // reduce from 40ms to minimize event loop blocking during A*
+        }
     });
 
     return bot;
