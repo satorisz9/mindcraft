@@ -2187,24 +2187,23 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const prevPos = pos.clone();
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
-                    // headScore が低い = 崖・囲いで目標方向に進めない
+                    // headScore が低い = 崖・囲いで BFS が目標方向に進めない
+                    // → BFS を諦めて pathfinder に直接任せる（縦ピラー+掘削で突破）
                     if (_escapeAttempts < 2 && !_ic()) {
                         _escapeAttempts++;
-                        log(bot, `BFS blocked (headScore=${milestone ? milestone.headScore : 0}), escape ${_escapeAttempts}/2...`);
-                        if (_escapeAttempts === 1) {
-                            // 1回目: 上に登る（ピラージャンプ）で崖・囲いを脱出
-                            try { await goToSurface(bot); } catch(e) {}
-                        } else {
-                            // 2回目: canDig で掘りながら最遠点へ移動
-                            const _anyMs = _bfsFurthest(bot, 80);
-                            if (_anyMs && _anyMs.dist > 5) {
-                                const _digMoves = new pf.Movements(bot);
-                                _digMoves.canDig = true;
-                                bot.pathfinder.setMovements(_digMoves);
-                                try { await goWithTimeout(new pf.goals.GoalXZ(_anyMs.x, _anyMs.z), SEGMENT_TIMEOUT_MS); } catch(e) {}
-                                bot.pathfinder.setMovements(new pf.Movements(bot));
-                            }
-                        }
+                        log(bot, `BFS blocked (headScore=${milestone ? milestone.headScore : 0}), direct pathfinder attempt ${_escapeAttempts}/2...`);
+                        const _escapeMoves = new pf.Movements(bot);
+                        _escapeMoves.allow1by1towers = true;
+                        _escapeMoves.digCost = 2;   // 石壁を積極的に掘る
+                        _escapeMoves.placeCost = 1;  // ピラーを積極的に積む
+                        bot.pathfinder.setMovements(_escapeMoves);
+                        let _escaped = false;
+                        try {
+                            await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), SEGMENT_TIMEOUT_MS * 3);
+                            _escaped = true;
+                        } catch(e) {}
+                        bot.pathfinder.setMovements(new pf.Movements(bot));
+                        if (_escaped) break;
                         if (_ic()) break;
                         continue;
                     }
@@ -2970,6 +2969,24 @@ export async function activateNearestBlock(bot, type) {
  */
 async function findAndGoToVillager(bot, id) {
     id = id+"";
+    // [mindaxis-patch:nitwit-restore-on-start] 起動後初回呼び出し時に location_memory.json からニットエリアを復元
+    if (!bot._nitwitAreasLoaded) {
+        bot._nitwitAreasLoaded = true;
+        try {
+            const _rfs = await import('fs');
+            const _rPath = './bots/' + bot.username + '/location_memory.json';
+            const _rlm = JSON.parse(_rfs.readFileSync(_rPath, 'utf8'));
+            if (_rlm.places?.nitwit_village?.length) {
+                if (!bot._nitwitAreas) bot._nitwitAreas = [];
+                for (const nv of _rlm.places.nitwit_village) {
+                    if (!bot._nitwitAreas.some(a => Math.hypot(a.x - nv.x, a.z - nv.z) < 10)) {
+                        bot._nitwitAreas.push(nv);
+                    }
+                }
+                log(bot, `[nitwit-restore] Loaded ${bot._nitwitAreas.length} nitwit areas from location_memory.json`);
+            }
+        } catch(_) {}
+    }
     // [mindaxis-patch:nitwit-blocked-earlyreturn] ブロック済みIDは即リジェクト（ナビゲーション不要）
     if (bot._blockedVillagerIds && bot._blockedVillagerIds.has(id)) {
         log(bot, `Villager ${id} is permanently blocked (nitwit). Do NOT use this ID again. Find a different villager in a new area.`);
