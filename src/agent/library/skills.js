@@ -3889,8 +3889,8 @@ async function _goToSurfaceInner(bot) {
     const _digStartPos = { x: Math.round(_gsWfPos.x), y: Math.round(_gsWfPos.y), z: Math.round(_gsWfPos.z) };
 
     // ピラー脱出成功後に cave_fall として危険ゾーンに記録する関数
-    async function _saveCaveFallZone(stepsUsed) {
-        if (stepsUsed < 5) return; // 少し掘った程度では記録しない
+    async function _saveCaveFallZone(_steps) {
+        if (surfaceY - _digStartPos.y < 5) return; // 地下5ブロック未満は記録不要
         try {
             const _cfFs = await import('fs');
             const _cfPath = `./bots/${bot.username}/death_zones.json`;
