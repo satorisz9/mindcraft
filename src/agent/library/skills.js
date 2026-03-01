@@ -4104,19 +4104,21 @@ async function _goToSurfaceInner(bot) {
             return true;
         }
         if (_pilWater) {
-            // [mindaxis-patch:digup-water-jump-only] 水中では横掘り禁止。ジャンプのみで浮上する
+            // [mindaxis-patch:digup-water-exit-pillar] 水中→ジャンプ→出たらピラーコードへ直行（continue しない）
             bot.setControlState('jump', true);
             bot.setControlState('sprint', true);
             await new Promise(r => setTimeout(r, 1000));
             bot.setControlState('jump', false);
             bot.setControlState('sprint', false);
-            const _pilAfterFt = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
+            curPos = bot.entity.position; // ジャンプ後の位置を再取得
+            curY = Math.floor(curPos.y);
+            const _pilAfterFt = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)));
             if (_pilAfterFt && _pilAfterFt.name !== 'water' && _pilAfterFt.name !== 'flowing_water') {
-                log(bot, 'Jumped out of water at y=' + Math.floor(bot.entity.position.y) + '!');
-                console.log('[dig-up-debug] Out of water, continuing dig-up (NOT breaking loop)');
-                // fall through to dig-up code below (NOT break — break exits the entire loop)
+                console.log('[dig-up-debug] Out of water at y=' + curY + ', proceeding to pillar code');
+                // fall through to dig-up/pillar code below — 水から出たらすぐブロック設置して落下防止
+            } else {
+                continue; // まだ水中 → ジャンプのみ継続
             }
-            continue; // まだ水中 → 横掘りせずループ継続
         }
 
         let cx = Math.floor(curPos.x);
