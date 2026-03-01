@@ -963,12 +963,23 @@ export const actionsList = [
         },
         perform: runAsAction(async (agent, entity_type, range) => {
             const _reached = await skills.goToNearestEntity(agent.bot, entity_type, 4, range);
-            // [mindaxis-patch:no-village-autosave] 取引成功前は village を自動保存しない
-            // ニットウィットエリアへの自動保存ループを防止 → !rememberHere("village") は取引成功後に手動で呼ぶ
-            if (_reached && entity_type === 'wandering_trader') {
+            // 重要エンティティに到達したらプロセス再起動に備えて位置を自動保存
+            // [mindaxis-patch:village-save-distance] 既存保存地点から300ブロック以上離れている場合のみ保存
+            // (同じ村へ戻るたびに上書きされるループを防止。Minecraft の村同士は通常300ブロック以上離れている)
+            if (_reached && (entity_type === 'villager' || entity_type === 'wandering_trader')) {
                 const _p = agent.bot.entity.position;
-                if (!agent.memory_bank.recallPlace('wandering_trader')) {
-                    agent.memory_bank.rememberPlace('wandering_trader', _p.x, _p.y, _p.z);
+                const _name = entity_type === 'villager' ? 'village' : entity_type;
+                const _existingLoc = agent.memory_bank.recallPlace(_name);
+                if (!_existingLoc) {
+                    agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
+                    skills.log(agent.bot, `Auto-saved location as "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}).`);
+                } else {
+                    const _dx = _p.x - _existingLoc[0], _dz = _p.z - _existingLoc[2];
+                    const _dist = Math.sqrt(_dx * _dx + _dz * _dz);
+                    if (_dist > 300) {
+                        agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
+                        skills.log(agent.bot, `Auto-updated "${_name}" at (${Math.round(_p.x)}, ${Math.round(_p.y)}, ${Math.round(_p.z)}) — prev was ${Math.round(_dist)} blocks away.`);
+                    }
                 }
             }
         })
