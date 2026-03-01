@@ -1483,6 +1483,7 @@ export async function goToGoal(bot, goal) {
             bot._wallProtectFn = _protect;
             // [mindaxis-patch:magma-avoid] magma_block の上を歩かない（足元が magma_block なら高コスト）
             bot._magmaAvoidFn = (block) => {
+                if (!block || !block.position) return 0;
                 const below = bot.blockAt(block.position.offset(0, -1, 0));
                 if (below && below.name === 'magma_block') return 100;
                 return 0;
