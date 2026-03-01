@@ -4045,21 +4045,47 @@ async function _goToSurfaceInner(bot) {
         });
     }
 
-    // [mindaxis-patch:digup-craft-pickaxe] ツルハシがなければクラフトを試みてから掘削
+    // [mindaxis-patch:digup-craft-pickaxe-v2] ツルハシがなければ素材からクラフト（テーブルも自作）
     {
         const _hasPick = bot.inventory.items().some(i => i.name.includes('pickaxe'));
         if (!_hasPick) {
+            bot._goToSurfaceActive = true;
             const _invC = world.getInventoryCounts(bot);
-            const _hasTableInv = (_invC['crafting_table'] || 0) > 0;
-            const _hasTableNear = world.getNearestBlock(bot, 'crafting_table', 8);
+            let _hasTableInv = (_invC['crafting_table'] || 0) > 0;
+            let _hasTableNear = world.getNearestBlock(bot, 'crafting_table', 8);
+            // テーブルがなければ原木から作る（oak_log 3個以上で pickaxe まで可能）
+            if (!_hasTableInv && !_hasTableNear) {
+                const _logTypes = ['oak_log','birch_log','spruce_log','jungle_log','acacia_log','dark_oak_log','mangrove_log','cherry_log'];
+                const _plankTypes = ['oak_planks','birch_planks','spruce_planks','jungle_planks','acacia_planks','dark_oak_planks','mangrove_planks','cherry_planks'];
+                let _totalLogs = 0, _totalPlanks = 0;
+                for (const lt of _logTypes) _totalLogs += (_invC[lt] || 0);
+                for (const pt of _plankTypes) _totalPlanks += (_invC[pt] || 0);
+                // 必要素材: crafting_table(4) + pickaxe(3+2stick=5planks) = 9 planks = 3 logs (12 planks)
+                if (_totalLogs >= 3 || (_totalLogs >= 1 && _totalPlanks >= 5)) {
+                    console.log('[dig-up] No pickaxe or table. Crafting from logs (' + _totalLogs + ' logs, ' + _totalPlanks + ' planks)');
+                    // 原木 → 板材（3回クラフトで十分な板材を確保）
+                    for (let _ci = 0; _ci < 3 && _totalLogs > 0; _ci++) {
+                        for (const lt of _logTypes) {
+                            if ((_invC[lt] || 0) > 0) {
+                                await craftRecipe(bot, lt.replace('_log', '_planks'), 1).catch(() => {});
+                                _invC[lt] = (_invC[lt] || 0) - 1;
+                                _totalLogs--;
+                                break;
+                            }
+                        }
+                    }
+                    // crafting_table クラフト
+                    await craftRecipe(bot, 'crafting_table', 1).catch(() => {});
+                    _hasTableInv = bot.inventory.items().some(i => i.name === 'crafting_table');
+                }
+            }
             if (_hasTableInv || _hasTableNear) {
                 log(bot, '[dig-up] No pickaxe, trying to craft...');
-                bot._goToSurfaceActive = true; // 再帰呼び出し防止
                 const _picked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false)
                     || await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
-                bot._goToSurfaceActive = false;
                 if (_picked) log(bot, '[dig-up] Pickaxe crafted!');
             }
+            bot._goToSurfaceActive = false;
         }
     }
 
