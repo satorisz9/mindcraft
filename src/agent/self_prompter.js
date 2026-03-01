@@ -289,17 +289,20 @@ export class SelfPrompter {
                     // [mindaxis-patch:known-places-hint] 記憶済み場所を先に列挙 → AI が直接 goTo できる
                     const _mbMem = this.agent.memory_bank && this.agent.memory_bank.memory;
                     const _SKIP_PLACES = new Set(['last_death_position', 'home', 'base', 'shelter', 'safe_spot']);
+                    let _knownPlaceKeys = [];
                     if (_mbMem) {
                         const _knownPlaces = Object.entries(_mbMem)
                             .filter(([k]) => !_SKIP_PLACES.has(k))
-                            .map(([k, v]) => `${k}=(${Math.round(v[0])},${Math.round(v[1])},${Math.round(v[2])})`);
+                            .map(([k, v]) => { _knownPlaceKeys.push(k); return `${k}=(${Math.round(v[0])},${Math.round(v[1])},${Math.round(v[2])})`; });
                         if (_knownPlaces.length > 0) {
                             planHint += ' KNOWN LOCATIONS (use !goToRememberedPlace): ' + _knownPlaces.join(', ') + '.';
                         }
                     }
                     // --- 未探索ターゲット座標 ---
                     // [mindaxis-patch:unexplored-target] 近い順に未探索エリア中心座標を探してAIに渡す
-                    if (_tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
+                    // goal に既知の場所名が含まれる場合は未探索ヒントを出さない（既知場所優先）
+                    const _goalMentionsKnown = _knownPlaceKeys.some(k => this.prompt.toLowerCase().includes(k.toLowerCase()));
+                    if (!_goalMentionsKnown && _tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
                         const _utPos = _tmBot.entity && _tmBot.entity.position;
                         if (_utPos) {
                             const _RINGS = [200, 400, 600, 800, 1200];
