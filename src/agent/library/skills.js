@@ -4295,6 +4295,45 @@ async function _goToSurfaceInner(bot) {
 
         if (_targetIsOpen) {
             let pillarItem = findPillarItem();
+            // [mindaxis-patch:mid-loop-craft-pickaxe] ループ中にピッケルなし＋原木あり → その場でクラフト
+            if (!pillarItem && !bot.inventory.items().some(i => i.name.includes('pickaxe'))) {
+                const _invNow = world.getInventoryCounts(bot);
+                const _logTypes2 = ['oak_log','birch_log','spruce_log','jungle_log','acacia_log','dark_oak_log','mangrove_log','cherry_log'];
+                const _plankTypes2 = ['oak_planks','birch_planks','spruce_planks','jungle_planks','acacia_planks','dark_oak_planks','mangrove_planks','cherry_planks'];
+                let _tLogs = 0, _tPlanks = 0;
+                for (const lt of _logTypes2) _tLogs += (_invNow[lt] || 0);
+                for (const pt of _plankTypes2) _tPlanks += (_invNow[pt] || 0);
+                if (_tLogs >= 3 || (_tLogs >= 1 && _tPlanks >= 5)) {
+                    console.log('[dig-up] Mid-loop pickaxe craft: ' + _tLogs + ' logs, ' + _tPlanks + ' planks');
+                    bot._goToSurfaceActive = true;
+                    for (let _ci = 0; _ci < 3 && _tLogs > 0; _ci++) {
+                        for (const lt of _logTypes2) {
+                            if ((_invNow[lt] || 0) > 0) {
+                                await craftRecipe(bot, lt.replace('_log', '_planks'), 1).catch(() => {});
+                                _invNow[lt]--; _tLogs--; break;
+                            }
+                        }
+                    }
+                    await craftRecipe(bot, 'crafting_table', 1).catch(() => {});
+                    let _mcPicked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false)
+                        || await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
+                    if (_mcPicked) {
+                        console.log('[dig-up] Mid-loop pickaxe crafted!');
+                        // stone upgrade
+                        let _mcMined = 0;
+                        for (const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0]]) {
+                            if (_mcMined >= 3) break;
+                            const _sb = bot.blockAt(new Vec3(cx+dx, curY+dy, cz+dz));
+                            if (_sb && (_sb.name === 'stone' || _sb.name === 'deepslate')) {
+                                try { await bot.tool.equipForBlock(_sb); await bot.dig(_sb); _mcMined++; } catch(e) {}
+                            }
+                        }
+                        if (_mcMined >= 3) await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => {});
+                    }
+                    bot._goToSurfaceActive = false;
+                    pillarItem = findPillarItem(); // 再チェック
+                }
+            }
             if (!pillarItem) {
                 // 材料不足: 隣接壁を2ブロック（足元+頭）掘って補充（1ブロックでは横に入れない）
                 const _dirs = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
