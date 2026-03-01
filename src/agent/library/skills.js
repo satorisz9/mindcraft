@@ -2586,8 +2586,8 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 // [mindaxis-patch:bfs-longrange] 200ブロック以上は pathfinder 不要 — BFS walk で前進
                 if (_xzRemaining > 200) {
                     const _lrH = { x: dx/dist2d, z: dz/dist2d };
-                    // [mindaxis-patch:bfs-longrange-surface] maxDrop=3: 地表限定（洞窟に潜らない）
-                    const _lrT = _bfsFurthest(bot, 80, null, _lrH, 3);
+                    // [mindaxis-patch:bfs-longrange-surface] maxDrop=8: 地表限定（洞窟に潜らない、通常地形8ブロック変動は許容）
+                    const _lrT = _bfsFurthest(bot, 80, null, _lrH, 8);
                     if (_lrT && _lrT.path && _lrT.path.length > 0) {
                         console.log('[goto-trace] BFS longrange: ' + _lrT.path.length + ' steps, xzRemaining=' + Math.round(_xzRemaining));
                         bot.setControlState('sprint', true);
@@ -2633,11 +2633,12 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                             return false;
                         }
                         // [mindaxis-patch:bfs-detour] pathfinder 失敗時は BFS walk でターゲット方向に前進
+                        // [mindaxis-patch:bfs-detour-surface] maxDrop=8: 地表限定（洞窟に潜らない）
                         const _detourPos = bot.entity.position;
                         const _ddx = x - _detourPos.x, _ddz = z - _detourPos.z;
                         const _dlen = Math.sqrt(_ddx*_ddx + _ddz*_ddz) || 1;
                         const _dHeading = { x: _ddx/_dlen, z: _ddz/_dlen };
-                        const _bfsD = _bfsFurthest(bot, 80, null, _dHeading);
+                        const _bfsD = _bfsFurthest(bot, 80, null, _dHeading, 8);
                         if (_bfsD && _bfsD.path && _bfsD.path.length > 0) {
                             console.log('[goto-trace] BFS detour: ' + _bfsD.path.length + ' steps toward (' + Math.round(x) + ',' + Math.round(z) + ')');
                             bot.setControlState('sprint', true);
