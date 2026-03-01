@@ -2523,6 +2523,10 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             // [mindaxis-patch:bfs-pause-water-watchdog] 長距離移動中は水没ウォッチドッグを一時停止
             bot._pauseWatchdog = true;
             let stuckCount = 0;
+            // [mindaxis-patch:bfs-xz-progress] XZ進捗チェック: N回連続で目標に近づかなければ打ち切り
+            let _lastXZRemaining = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
+            let _noXZProgressCount = 0;
+            const _BFS_NO_PROGRESS_MAX = 5;
             while (true) {
                 if (_ic()) break;
                 const pos = bot.entity.position;
@@ -2569,6 +2573,21 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                         }
                     } else {
                         stuckCount = 0;
+                    }
+                }
+                // [mindaxis-patch:bfs-xz-progress] XZ 進捗チェック（success/failure 共通）
+                const _newXZRemaining = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
+                if (_newXZRemaining < _lastXZRemaining - 10) {
+                    _noXZProgressCount = 0;
+                    _lastXZRemaining = _newXZRemaining;
+                } else {
+                    _noXZProgressCount++;
+                    log(bot, `No XZ progress (${_noXZProgressCount}/${_BFS_NO_PROGRESS_MAX})`);
+                    if (_noXZProgressCount >= _BFS_NO_PROGRESS_MAX) {
+                        log(bot, 'Giving up: no progress toward target.');
+                        bot._pauseWatchdog = false;
+                        clearInterval(progressInterval);
+                        return false;
                     }
                 }
                 const afterDist = bot.entity.position.distanceTo(target);
