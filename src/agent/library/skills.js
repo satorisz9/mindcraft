@@ -3739,6 +3739,8 @@ export async function digDown(bot, distance = 10) {
 }
 
 export async function goToSurface(bot) {
+    // [mindaxis-patch:gotosurface-watchdog] ピラー中に watchdog で中断されないよう延長
+    bot._requestWatchdogMs = 300000;
     // [mindaxis-patch:gotosurface-pillar] v6: dig staircase upward + 水泳脱出 + 家ガード
     const pos = bot.entity.position;
 
