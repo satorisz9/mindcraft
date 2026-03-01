@@ -303,48 +303,47 @@ export class SelfPrompter {
                             planHint += ' KNOWN LOCATIONS (use !goToRememberedPlace): ' + _knownPlaces.join(', ') + '.';
                         }
                     }
-                    // --- 2D ASCII マップ ---
-                    // [mindaxis-patch:ascii-map] terrain cache を ASCII グリッドで渡す
-                    // キー形式: "worldX_worldZ" (1ブロック1エントリ)
-                    // CELL=32ブロック, 21×21グリッド = 約672×672ブロックをカバー
+                    // --- 未探索ターゲット座標 ---
+                    // [mindaxis-patch:unexplored-target] 近い順に未探索エリア中心座標を探してAIに渡す
                     if (_tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
-                        const _mapPos = _tmBot.entity && _tmBot.entity.position;
-                        if (_mapPos) {
-                            const CELL = 32, HALF = 10; // 21×21 grid
-                            const bx = Math.round(_mapPos.x / CELL) * CELL;
-                            const bz = Math.round(_mapPos.z / CELL) * CELL;
-                            const rows = [];
-                            for (let tz = bz - HALF * CELL; tz <= bz + HALF * CELL; tz += CELL) {
-                                let row = '';
-                                for (let tx = bx - HALF * CELL; tx <= bx + HALF * CELL; tx += CELL) {
-                                    if (tx === bx && tz === bz) { row += '@'; continue; }
-                                    // CELL 中央付近を数点サンプルして多数決
-                                    let _w = 0, _l = 0;
-                                    for (const [sdx, sdz] of [[0,0],[8,0],[-8,0],[0,8],[0,-8]]) {
-                                        const t = _tmBot._terrainCache[(tx+sdx) + '_' + (tz+sdz)];
-                                        if (!t) continue;
-                                        (t.block === 'water' || t.block === 'flowing_water') ? _w++ : _l++;
-                                    }
-                                    if (_w + _l === 0) row += '?';
-                                    else row += (_w > _l ? '~' : '.');
-                                }
-                                rows.push(row);
-                            }
-                            // 既知場所をマップ上に上書き
-                            if (_mbMem) {
-                                for (const [k, v] of Object.entries(_mbMem)) {
-                                    const ci = Math.round((v[0] - (bx - HALF*CELL)) / CELL);
-                                    const ri = Math.round((v[2] - (bz - HALF*CELL)) / CELL);
-                                    if (ri >= 0 && ri < rows.length && ci >= 0 && ci < rows[ri].length) {
-                                        rows[ri] = rows[ri].substring(0, ci) + k[0].toUpperCase() + rows[ri].substring(ci + 1);
+                        const _utPos = _tmBot.entity && _tmBot.entity.position;
+                        if (_utPos) {
+                            const _RINGS = [200, 400, 600, 800, 1200];
+                            const _DIRS = [
+                                {n:'N',dx:0,dz:-1},{n:'NE',dx:0.707,dz:-0.707},
+                                {n:'E',dx:1,dz:0},{n:'SE',dx:0.707,dz:0.707},
+                                {n:'S',dx:0,dz:1},{n:'SW',dx:-0.707,dz:0.707},
+                                {n:'W',dx:-1,dz:0},{n:'NW',dx:-0.707,dz:-0.707},
+                            ];
+                            // サンプル点数(11×11=121点)でエリアのキャッシュヒット率を計算
+                            const _sampleHits = (cx, cz, r) => {
+                                const step = Math.max(10, Math.floor(r / 5));
+                                let hits = 0, total = 0;
+                                for (let dx = -r/2; dx <= r/2; dx += step) {
+                                    for (let dz = -r/2; dz <= r/2; dz += step) {
+                                        total++;
+                                        if (_tmBot._terrainCache[Math.round(cx+dx) + '_' + Math.round(cz+dz)]) hits++;
                                     }
                                 }
+                                return total > 0 ? hits / total : 1;
+                            };
+                            let _utTarget = null;
+                            outer: for (const radius of _RINGS) {
+                                for (const dir of _DIRS) {
+                                    const cx = Math.round(_utPos.x + dir.dx * radius);
+                                    const cz = Math.round(_utPos.z + dir.dz * radius);
+                                    const hitRate = _sampleHits(cx, cz, Math.min(radius/2, 150));
+                                    if (hitRate < 0.1) { // 10%未満しかキャッシュにない → 未探索
+                                        _utTarget = { x: cx, z: cz, dist: radius, dir: dir.n };
+                                        break outer;
+                                    }
+                                }
                             }
-                            const _mapStr = rows.join('\n');
-                            planHint += '\n2D MAP (each char=' + CELL + 'blks, @=you, .=land, ~=water, ?=unexplored, N=top, E=right, uppercase=saved place):\n' + _mapStr
-                                + '\nSEARCH STRATEGY: (1) Target in KNOWN LOCATIONS? → !goToRememberedPlace directly.'
-                                + ' (2) Not known? → !moveAway toward "?" (unexplored) on the map.'
-                                + ' (3) No "?" nearby? → keep moving, unexplored terrain is always further out.';
+                            if (_utTarget) {
+                                planHint += ' NEAREST UNEXPLORED AREA: (' + _utTarget.x + ', ~70, ' + _utTarget.z + ')'
+                                    + ' — ' + _utTarget.dist + ' blocks ' + _utTarget.dir + ' of you.'
+                                    + ' If target not in KNOWN LOCATIONS, use !goToCoordinates(' + _utTarget.x + ', 70, ' + _utTarget.z + ', 5) to reach new terrain, then search there.';
+                            }
                         }
                     }
                 } catch(_tme) {}
