@@ -46,7 +46,21 @@ const useDelay = blockPlaceDelay > 0;
                 }
             } catch (_sfE) { /* Move コンストラクタ不可 */ }
         };
+        // [mindaxis-patch:scaffold-any-block-v1] scafoldingBlocks を初回使用時に全固体ブロックへ拡張
+        const _extraScaffoldNames = [
+            'oak_log','spruce_log','birch_log','jungle_log','acacia_log','dark_oak_log','cherry_log','mangrove_log',
+            'oak_planks','spruce_planks','birch_planks','jungle_planks','acacia_planks','dark_oak_planks','cherry_planks',
+            'granite','andesite','diorite','stone','grass_block','netherrack','soul_sand',
+        ];
         pf.Movements.prototype.getNeighbors = function(node) {
+            // 初回呼び出し時に scafoldingBlocks を拡張
+            if (!this._scafExtended && this.bot && this.bot.registry) {
+                this._scafExtended = true;
+                for (const _sn of _extraScaffoldNames) {
+                    const _si = this.bot.registry.itemsByName[_sn];
+                    if (_si && !this.scafoldingBlocks.includes(_si.id)) this.scafoldingBlocks.push(_si.id);
+                }
+            }
             const neighbors = _origGetNeighborsSF.call(this, node);
             if (this.allow1by1towers && node.remainingBlocks > 0) {
                 for (const _sfDir of [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}]) {
@@ -55,7 +69,7 @@ const useDelay = blockPlaceDelay > 0;
             }
             return neighbors;
         };
-        console.log('[mindaxis] scaffold-forward-v1: pathfinder Movements patched (2-block scaffold jump)');
+        console.log('[mindaxis] scaffold-forward-v1 + scaffold-any-block-v1: pathfinder Movements patched');
     }
 }
 
@@ -3813,16 +3827,14 @@ async function _goToSurfaceInner(bot) {
     log(bot, 'Digging to surface from y=' + Math.floor(_gsWfPos.y) + ' to y=' + surfaceY + '...');
 
     function findPillarItem() {
-        return bot.inventory.items().find(i => i.name === 'dirt')
-            || bot.inventory.items().find(i => i.name === 'cobblestone')
-            || bot.inventory.items().find(i => i.name === 'gravel')
-            || bot.inventory.items().find(i => i.name === 'granite')
-            || bot.inventory.items().find(i => i.name === 'andesite')
-            || bot.inventory.items().find(i => i.name === 'diorite')
-            || bot.inventory.items().find(i => i.name === 'sand')
-            || bot.inventory.items().find(i => i.name === 'netherrack')
-            || bot.inventory.items().find(i => i.name.includes('planks'))
-            || bot.inventory.items().find(i => i.name.includes('stone') || i.name.includes('deepslate'));
+        return bot.inventory.items().find(i =>
+            i.name === 'dirt' || i.name === 'cobblestone' || i.name === 'gravel' ||
+            i.name === 'granite' || i.name === 'andesite' || i.name === 'diorite' ||
+            i.name === 'sand' || i.name === 'netherrack' || i.name === 'soul_sand' ||
+            i.name === 'grass_block' ||
+            i.name.includes('log') || i.name.includes('planks') ||
+            i.name.includes('stone') || i.name.includes('deepslate')
+        );
     }
 
     const maxSteps = (surfaceY - Math.floor(pos.y)) + 10;
