@@ -117,9 +117,10 @@ export class History {
                 if (_spKeys.length > 0) console.log('[mindaxis] Restored saved_places:', _spKeys.join(', '));
             }
             // [mindaxis-patch:villager-blacklist-persist] ニットウィットIDブラックリストを復元
+            // bot はまだ未接続の可能性があるので agent に仮置き → bot 接続後に適用
             if (data.blocked_nitwit_ids && Array.isArray(data.blocked_nitwit_ids) && data.blocked_nitwit_ids.length > 0) {
-                this.agent.bot._blockedVillagerIds = new Set(data.blocked_nitwit_ids.map(String));
-                console.log('[mindaxis] Restored blocked nitwit IDs:', data.blocked_nitwit_ids.join(', '));
+                this.agent._pendingBlockedNitwitIds = new Set(data.blocked_nitwit_ids.map(String));
+                console.log('[mindaxis] Queued blocked nitwit IDs:', data.blocked_nitwit_ids.join(', '));
             }
             console.log('Loaded memory:', this.memory);
             return data;

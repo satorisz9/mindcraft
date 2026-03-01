@@ -101,6 +101,12 @@ export class Agent {
                 if (this.bot._deathZones.length > 0)
                     console.log(`[death-zones] Loaded ${this.bot._deathZones.length} danger zones`);
             } catch(e) { this.bot._deathZones = []; }
+            // [mindaxis-patch:villager-blacklist-restore] pending ブラックリストを bot に適用
+            if (this._pendingBlockedNitwitIds && this._pendingBlockedNitwitIds.size > 0) {
+                this.bot._blockedVillagerIds = this._pendingBlockedNitwitIds;
+                console.log('[mindaxis] Restored blocked nitwit IDs to bot:', [...this._pendingBlockedNitwitIds].join(', '));
+                this._pendingBlockedNitwitIds = null;
+            }
             
             // Set skin for profile, requires Fabric Tailor. (https://modrinth.com/mod/fabrictailor)
             if (this.prompter.profile.skin)
