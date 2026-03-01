@@ -2924,20 +2924,31 @@ export async function moveAway(bot, distance) {
     let totalMoved = 0;
     const MAX_HOPS = 6;
     const SCAN_RADIUS = 90; // チャンク内で安全にスキャンできる半径
+    // [mindaxis-patch:bfs-heading] ホップ0で決めた方向を固定し、往復を防ぐ
+    let targetFar = null; // startPos から heading 方向の仮想遠点
 
     for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
         if (bot.interrupt_code) break;
-        // [mindaxis-patch:bfs-refpoint] startPos を基準にして「出発点から遠い方向」に移動
-        const target = _bfsFurthest(bot, SCAN_RADIUS, startPos);
+        // hop0はstartPos基準、hop1以降は固定方向の仮想遠点を基準にする
+        const _refPt = (hop === 0 || !targetFar) ? startPos : targetFar;
+        const target = _bfsFurthest(bot, SCAN_RADIUS, _refPt);
         if (!target) {
             // [mindaxis-patch:bfs-null-gotosurface] goToSurface に委ねる（ピラー含む）
             log(bot, `BFS: no reachable space (hop ${hop + 1}). Calling goToSurface...`);
             await goToSurface(bot);
             if (bot.interrupt_code) break;
             // 地上に出たら BFS 再スキャンして継続
-            const _afterSurface = _bfsFurthest(bot, SCAN_RADIUS, startPos);
+            const _afterSurface = _bfsFurthest(bot, SCAN_RADIUS, _refPt);
             if (_afterSurface) { continue; }
             break;
+        }
+        // ホップ0で方向を決定して固定
+        if (hop === 0) {
+            const _hDx = target.x - startPos.x;
+            const _hDz = target.z - startPos.z;
+            const _hLen = Math.sqrt(_hDx * _hDx + _hDz * _hDz) || 1;
+            targetFar = { x: startPos.x + (_hDx / _hLen) * 10000, z: startPos.z + (_hDz / _hLen) * 10000 };
+            console.log(`[moveAway] heading fixed: dx=${(_hDx/_hLen).toFixed(2)} dz=${(_hDz/_hLen).toFixed(2)}`);
         }
         log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
         // [mindaxis-patch:bfs-walk] BFS パスを直接歩く（pathfinder タイムアウト回避）
