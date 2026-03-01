@@ -3870,8 +3870,18 @@ async function _goToSurfaceInner(bot) {
                 const _exitPos = bot.entity.position;
                 const _exitSl = bot.blockAt(new Vec3(Math.floor(_exitPos.x), Math.floor(_exitPos.y)+1, Math.floor(_exitPos.z)));
                 if (_exitSl && (_exitSl.skyLight ?? 0) >= 14) {
-                    log(bot, 'Exited cave via BFS path!');
-                    return true;
+                    // [mindaxis-patch:cave-exit-dry-check] 水中でないことを確認（水面開口でskyLight>=14になる偽陽性防止）
+                    const _exitPos2 = bot.entity.position;
+                    const _exitFt2 = bot.blockAt(new Vec3(Math.floor(_exitPos2.x), Math.floor(_exitPos2.y), Math.floor(_exitPos2.z)));
+                    const _exitBel2 = bot.blockAt(new Vec3(Math.floor(_exitPos2.x), Math.floor(_exitPos2.y) - 1, Math.floor(_exitPos2.z)));
+                    const _exitInWater2 = _exitFt2 && (_exitFt2.name === 'water' || _exitFt2.name === 'flowing_water');
+                    const _exitOnLand2 = _exitBel2 && _exitBel2.name !== 'air' && _exitBel2.name !== 'cave_air'
+                        && _exitBel2.name !== 'water' && _exitBel2.name !== 'flowing_water';
+                    if (!_exitInWater2 && _exitOnLand2) {
+                        log(bot, 'Exited cave via BFS path!');
+                        return true;
+                    }
+                    console.log('[cave-exit] False positive: still in water or not on solid ground. Continuing to dig-up.');
                 }
             } catch(e) {}
             bot.pathfinder.setMovements(new pf.Movements(bot));
