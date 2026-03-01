@@ -2310,7 +2310,13 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     {
         const curPos = bot.entity.position;
         const yDiff = y - curPos.y;
-        let headBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 2, Math.floor(curPos.z)));
+        // [mindaxis-patch:precheck-ceiling-scan] Y+2〜Y+6をスキャンして広い洞窟でも天井を検出
+        let headBlock = null;
+        for (let _dy = 2; _dy <= 6; _dy++) {
+            const _cb = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + _dy, Math.floor(curPos.z)));
+            if (!_cb || _cb.name === 'air' || _cb.name === 'cave_air') break; // 空が見えた
+            if (_cb.name !== 'water' && _cb.name !== 'flowing_water' && _cb.name !== 'lava') { headBlock = _cb; break; }
+        }
         // 家の中・近くにいる場合は「地下」判定を無効化（ドアを使うべき）
         let _nearHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -2321,8 +2327,8 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         }
         // [mindaxis-patch:underwater-is-underground] 水中は pathfinder に任せる（goToSurface を先に呼ばない）
         const isUnderground = !_nearHouse && headBlock && headBlock.name !== 'air' && headBlock.name !== 'cave_air' && headBlock.name !== 'water' && headBlock.name !== 'flowing_water' && headBlock.name !== 'lava';
-        // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より10ブロック以上低いなら地上優先
-        const _deepBelowTarget = !_nearHouse && yDiff > 10;
+        // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より5ブロック以上低いなら地上優先
+        const _deepBelowTarget = !_nearHouse && yDiff > 5;
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
         let _underHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -2380,7 +2386,9 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             const _bh = bot._houseStructure.bounds;
             _bdfNearHouse = x >= _bh.x1 - 3 && x <= _bh.x2 + 3 && z >= _bh.z1 - 3 && z <= _bh.z2 + 3;
         }
-        if (_bdfYDown >= 5 && !_bdfInWater && !bot._bfsDigInProgress && !_bdfNearHouse) {
+        // [mindaxis-patch:bfs-dig-down-xz-guard] XZ距離が近い時のみ掘り下がる（goToSurface直後に遠目標へ掘り下がるのを防止）
+        const _bdfXZ = Math.sqrt((_bdfCur.x - x)**2 + (_bdfCur.z - z)**2);
+        if (_bdfYDown >= 5 && _bdfXZ <= 20 && !_bdfInWater && !bot._bfsDigInProgress && !_bdfNearHouse) {
             bot._bfsDigInProgress = true;
             bot._pauseWatchdog = true;
             try {
