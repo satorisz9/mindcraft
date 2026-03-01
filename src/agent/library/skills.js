@@ -2928,8 +2928,10 @@ export async function moveAway(bot, distance) {
     const _actualDist = Math.round(new_pos.distanceTo(startPos));
     log(bot, `Moved away from ${startPos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
     return true;
+}
 
-    // --- 旧実装 (cheat mode のみ保持) ---
+// 旧moveAway の残骸（削除済み）
+function _moveAwayOldUnused(bot, distance) {
     const pos = bot.entity.position;
     let goal = new pf.goals.GoalNear(pos.x, pos.y, pos.z, distance);
     let inverted_goal = new pf.goals.GoalInvert(goal);
