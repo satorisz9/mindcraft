@@ -37,7 +37,7 @@
         "gl": "^8.1.6"
     },
     "scripts": {
-        "postinstall": "patch-package",
+        "postinstall": "npx --no patch-package",
         "start": "node main.js"
     },
     "devDependencies": {
