@@ -3875,14 +3875,23 @@ async function _goToSurfaceInner(bot) {
     log(bot, 'Digging to surface from y=' + Math.floor(_gsWfPos.y) + ' to y=' + surfaceY + '...');
 
     function findPillarItem() {
-        return bot.inventory.items().find(i =>
-            i.name === 'dirt' || i.name === 'cobblestone' || i.name === 'gravel' ||
-            i.name === 'granite' || i.name === 'andesite' || i.name === 'diorite' ||
-            i.name === 'sand' || i.name === 'netherrack' || i.name === 'soul_sand' ||
-            i.name === 'grass_block' ||
-            i.name.includes('log') || i.name.includes('planks') ||
-            i.name.includes('stone') || i.name.includes('deepslate')
-        );
+        // [mindaxis-patch:pillaritem-registry] レジストリで placeable block かを判定（tuff/calciteなど洞窟ブロックも対象）
+        const _nonBlock = new Set([
+            'stick', 'flint', 'salmon', 'cod', 'porkchop', 'beef', 'chicken', 'mutton',
+            'bone_meal', 'feather', 'string', 'paper', 'book', 'arrow', 'emerald',
+        ]);
+        const _badSuffix = ['pickaxe','axe','sword','shovel','hoe','helmet','chestplate',
+            'leggings','boots','bucket','boat','minecart','ingot','nugget','gem',
+            'dye','seed','spawn_egg'];
+        return bot.inventory.items().find(i => {
+            if (_nonBlock.has(i.name)) return false;
+            if (_badSuffix.some(s => i.name.includes(s))) return false;
+            // torch・sapling等は設置できるが足場として不適
+            if (i.name.includes('torch') || i.name.includes('sapling') || i.name.includes('ladder')
+                || i.name.includes('vine') || i.name === 'lily_pad' || i.name === 'scaffolding') return false;
+            // レジストリにブロックとして登録されていれば使用可
+            return bot.registry.blocksByName[i.name] != null;
+        });
     }
 
     // [mindaxis-patch:digup-craft-pickaxe] ツルハシがなければクラフトを試みてから掘削
