@@ -4055,7 +4055,6 @@ async function _goToSurfaceInner(bot) {
         // 3rd: それ以外（原木含む）
         return items.find(i => _isValid(i) && !i.name.includes('_log') && !i.name.includes('_wood'))
             || items.find(i => _isValid(i)); // 本当に最後の手段として原木
-        });
     }
 
     // [mindaxis-patch:digup-craft-pickaxe-v2] ツルハシがなければ素材からクラフト（テーブルも自作）
