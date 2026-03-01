@@ -2206,35 +2206,43 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const prevPos = pos.clone();
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
-                    // [mindaxis-patch:bfs-enclosed-gotosurface] 密閉検出: 4方向全て固体 → goToSurface で掘り出し
+                    // [mindaxis-patch:bfs-enclosed-dig] 密閉検出: 4方向全て固体 → 壁を掘って脱出
                     const _encPos = bot.entity.position;
                     const _encX = Math.floor(_encPos.x), _encY = Math.floor(_encPos.y), _encZ = Math.floor(_encPos.z);
                     const _encDirs = [[1,0],[-1,0],[0,1],[0,-1]];
                     const _isSolidEnc = (bk) => bk && bk.boundingBox === 'block';
-                    const _encResults = _encDirs.map(([dx, dz]) => {
-                        const f = bot.blockAt(new Vec3(_encX+dx, _encY, _encZ+dz));
-                        const h = bot.blockAt(new Vec3(_encX+dx, _encY+1, _encZ+dz));
-                        return _isSolidEnc(f) || _isSolidEnc(h);
-                    });
-                    const _isEnclosed = _encResults.every(Boolean);
-                    console.log(`[enclosed-check] pos=(${_encX},${_encY},${_encZ}) results=[${_encResults}] enclosed=${_isEnclosed} goToSurfaceActive=${!!bot._goToSurfaceActive}`);
-                    if (_isEnclosed && !bot._goToSurfaceActive) {
-                        console.log('[enclosed] Calling goToSurface...');
-                        log(bot, `Enclosed by solid blocks at y=${_encY}. Calling goToSurface to dig out...`);
-                        try {
-                            const _surfResult = await goToSurface(bot);
-                            console.log(`[enclosed] goToSurface returned: ${_surfResult}`);
-                            if (_surfResult) {
-                                log(bot, 'Surfaced from enclosure. Retrying navigation...');
-                                continue;
+                    const _isEnclosed = _encDirs.every(([dx, dz]) =>
+                        (_isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY, _encZ+dz))) || _isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY+1, _encZ+dz))))
+                    );
+                    if (_isEnclosed) {
+                        // 目標方向に壁を掘って脱出
+                        const _digDx = x - _encPos.x, _digDz = z - _encPos.z;
+                        const _digDist = Math.sqrt(_digDx*_digDx + _digDz*_digDz) || 1;
+                        const _digDirs = [[Math.round(_digDx/_digDist), Math.round(_digDz/_digDist)]]; // 目標方向優先
+                        for (const [ddx, ddz] of _encDirs) { if (ddx !== _digDirs[0][0] || ddz !== _digDirs[0][1]) _digDirs.push([ddx, ddz]); }
+                        let _digBroke = false;
+                        for (const [ddx, ddz] of _digDirs) {
+                            if (ddx === 0 && ddz === 0) continue;
+                            const _dbF = bot.blockAt(new Vec3(_encX+ddx, _encY, _encZ+ddz));
+                            const _dbH = bot.blockAt(new Vec3(_encX+ddx, _encY+1, _encZ+ddz));
+                            if (_dbF && _dbF.diggable && _isSolidEnc(_dbF)) {
+                                try { await bot.tool.equipForBlock(_dbF); await bot.dig(_dbF); _digBroke = true; } catch(e) {}
                             }
-                        } catch(e) {
-                            console.log(`[enclosed] goToSurface error: ${e.message}`);
+                            if (_dbH && _dbH.diggable && _isSolidEnc(_dbH)) {
+                                try { await bot.tool.equipForBlock(_dbH); await bot.dig(_dbH); _digBroke = true; } catch(e) {}
+                            }
+                            if (_digBroke) {
+                                console.log(`[enclosed-dig] Broke wall at (${_encX+ddx},${_encY},${_encZ+ddz}), stepping in...`);
+                                log(bot, `Enclosed — broke wall, stepping through...`);
+                                await bot.lookAt(new Vec3(_encX+ddx+0.5, _encY+1, _encZ+ddz+0.5));
+                                bot.setControlState('forward', true);
+                                await new Promise(r => setTimeout(r, 500));
+                                bot.setControlState('forward', false);
+                                break;
+                            }
                         }
-                        log(bot, 'goToSurface failed after enclosure. Giving up.');
-                        bot._pauseWatchdog = false;
-                        clearInterval(progressInterval);
-                        return false;
+                        if (_digBroke) continue; // 掘った後 BFS リトライ
+                        console.log('[enclosed-dig] No diggable wall found');
                     }
                     // headScore が低い = 崖・囲いで BFS が目標方向に進めない
                     // → BFS を諦めて pathfinder に直接任せる（縦ピラー+掘削で突破）
