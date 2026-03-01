@@ -191,8 +191,8 @@ export class Agent {
                                 _waterTicks++;
                                 // 5秒水没で中断
                                 if (_waterTicks >= 5 && !_bot.interrupt_code) {
-                                    // goToSurface 実行中は中断しない
-                                    if (_bot._goToSurfaceActive) { _waterTicks = 3; return; }
+                                    // goToSurface 実行中 or 長距離ナビ中は中断しない
+                                    if (_bot._goToSurfaceActive || _bot._pauseWatchdog) { _waterTicks = 3; return; }
                                     console.log('[water-watchdog] Head submerged for ' + _waterTicks + 's, interrupting current command');
                                     _bot.interrupt_code = true;
                                     _waterTicks = 0;

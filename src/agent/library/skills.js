@@ -2501,30 +2501,6 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             }
             return false;
         };
-        // [mindaxis-patch:no-water-prewalk] 水中でも pathfinder に直接任せる
-        // [water-preswim] 水中なら手動で岸まで泳いでから pathfinder
-        if (_ic()) { clearInterval(progressInterval); return false; }
-        {
-            const _wpFeet = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
-            if (_wpFeet && (_wpFeet.name === 'water' || _wpFeet.name === 'flowing_water')) {
-                console.log('[goto-trace] in water, swimming to shore first');
-                for (let _swimI = 0; _swimI < 40; _swimI++) {
-                    if (_ic() || _checkTotalTimeout()) break;
-                    const _scp = bot.entity.position;
-                    const _sfb = bot.blockAt(new Vec3(Math.floor(_scp.x), Math.floor(_scp.y), Math.floor(_scp.z)));
-                    if (!_sfb || (_sfb.name !== 'water' && _sfb.name !== 'flowing_water')) {
-                        console.log('[goto-trace] reached land after ' + _swimI + ' swim ticks');
-                        break;
-                    }
-                    await bot.lookAt(new Vec3(x, _scp.y + 0.5, z));
-                    bot.setControlState('forward', true);
-                    bot.setControlState('jump', true);
-                    await new Promise(r => setTimeout(r, 500));
-                }
-                bot.setControlState('forward', false);
-                bot.setControlState('jump', false);
-            }
-        }
         if (_ic()) { clearInterval(progressInterval); return false; }
         let totalDist = bot.entity.position.distanceTo(target);
         // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ垂直差が大きくても直接アプローチ（往復防止）
@@ -2559,6 +2535,8 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             // 手動BFS歩き(lookAt+forward)は廃止。全移動を pathfinder に委ねる
             console.log('[goto-trace] Long distance ' + Math.round(totalDist) + ' blocks, BFS milestone mode');
             log(bot, `Long distance (${Math.round(totalDist)} blocks), using BFS milestones.`);
+            // [mindaxis-patch:bfs-pause-water-watchdog] 長距離移動中は水没ウォッチドッグを一時停止
+            bot._pauseWatchdog = true;
             let stuckCount = 0;
             while (true) {
                 if (_ic()) break;
@@ -2585,6 +2563,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
                     log(bot, 'BFS: no milestone toward target. Giving up.');
+                    bot._pauseWatchdog = false;
                     clearInterval(progressInterval);
                     return false;
                 }
@@ -2600,6 +2579,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                         log(bot, `Stuck at milestone (${stuckCount}/${MAX_STUCK})`);
                         if (stuckCount >= MAX_STUCK) {
                             log(bot, 'Cannot navigate after stuck milestones.');
+                            bot._pauseWatchdog = false;
                             clearInterval(progressInterval);
                             return false;
                         }
@@ -2613,6 +2593,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     break;
                 }
             }
+            bot._pauseWatchdog = false;
         }
         if (_ic()) { clearInterval(progressInterval); return false; }
         clearInterval(progressInterval);
