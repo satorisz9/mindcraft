@@ -2206,6 +2206,26 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const prevPos = pos.clone();
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
+                    // [mindaxis-patch:bfs-enclosed-gotosurface] 密閉検出: 4方向全て固体 → goToSurface で掘り出し
+                    const _encPos = bot.entity.position;
+                    const _encX = Math.floor(_encPos.x), _encY = Math.floor(_encPos.y), _encZ = Math.floor(_encPos.z);
+                    const _encDirs = [[1,0],[-1,0],[0,1],[0,-1]];
+                    const _isSolidEnc = (bk) => bk && bk.name !== 'air' && bk.name !== 'cave_air' && bk.shapes && bk.shapes.length > 0;
+                    const _isEnclosed = _encDirs.every(([dx, dz]) =>
+                        (_isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY, _encZ+dz))) || _isSolidEnc(bot.blockAt(new Vec3(_encX+dx, _encY+1, _encZ+dz))))
+                    );
+                    if (_isEnclosed && !bot._goToSurfaceActive) {
+                        log(bot, `Enclosed by solid blocks at y=${_encY}. Calling goToSurface to dig out...`);
+                        const _surfResult = await goToSurface(bot);
+                        if (_surfResult) {
+                            log(bot, 'Surfaced from enclosure. Retrying navigation...');
+                            continue;
+                        }
+                        log(bot, 'goToSurface failed after enclosure. Giving up.');
+                        bot._pauseWatchdog = false;
+                        clearInterval(progressInterval);
+                        return false;
+                    }
                     // headScore が低い = 崖・囲いで BFS が目標方向に進めない
                     // → BFS を諦めて pathfinder に直接任せる（縦ピラー+掘削で突破）
                     if (_escapeAttempts < 2 && !_ic()) {
