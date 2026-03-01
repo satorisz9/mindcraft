@@ -2796,10 +2796,8 @@ export async function goToNearestEntity(bot, entityType, min_distance=2, range=6
             if (e.name !== 'villager') return false;
             const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
             const _pid = _pm != null ? _pm.villagerProfession : -1;
-            if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed
-            // 既知ニットウィットエリア内の村人もスキップ
-            const _nearNitwit = bot._nitwitAreas.some(na => Math.hypot(e.position.x - na.x, e.position.z - na.z) < 200);
-            return !_nearNitwit;
+            if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed のみスキップ
+            return true;
         }, range);
         if (!entity) {
             // ニットウィット/無職の場所を記録
