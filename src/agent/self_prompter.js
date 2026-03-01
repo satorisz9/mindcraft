@@ -288,9 +288,22 @@ export class SelfPrompter {
                         }
                     }
                 } catch(_fe) {}
-                // [mindaxis-patch:terrain-map-hint] 地形マップから方向別サマリーを AI に渡す
+                // [mindaxis-patch:terrain-map-hint] 地形マップ＋既知場所を AI に渡す
                 try {
                     const _tmBot = this.agent.bot;
+                    // --- 既知場所（memory_bank）をヒントに追加 ---
+                    // [mindaxis-patch:known-places-hint] 記憶済み場所を先に列挙 → AI が直接 goTo できる
+                    const _mbMem = this.agent.memory_bank && this.agent.memory_bank.memory;
+                    const _SKIP_PLACES = new Set(['last_death_position', 'home', 'base', 'shelter', 'safe_spot']);
+                    if (_mbMem) {
+                        const _knownPlaces = Object.entries(_mbMem)
+                            .filter(([k]) => !_SKIP_PLACES.has(k))
+                            .map(([k, v]) => `${k}=(${Math.round(v[0])},${Math.round(v[1])},${Math.round(v[2])})`);
+                        if (_knownPlaces.length > 0) {
+                            planHint += ' KNOWN LOCATIONS (use !goToRememberedPlace): ' + _knownPlaces.join(', ') + '.';
+                        }
+                    }
+                    // --- 地形マップから方向別サマリー ---
                     if (_tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
                         const _tmPos = _tmBot.entity && _tmBot.entity.position;
                         if (_tmPos) {
@@ -311,15 +324,15 @@ export class SelfPrompter {
                                     (_tile.block === 'water' || _tile.block === 'flowing_water') ? _water++ : _land++;
                                 }
                                 // [mindaxis-patch:unexplored-hint] 未探索方向も明示
-                                if (_water + _land === 0) {
-                                    _tmResults.push(d.name + '=unexplored');
-                                    return;
-                                }
+                                if (_water + _land === 0) { _tmResults.push(d.name + '=unexplored'); return; }
                                 const _pct = Math.round(_water / (_water + _land) * 100);
                                 _tmResults.push(d.name + '=' + (_pct >= 60 ? 'water' : _pct >= 30 ? 'mixed' : 'land'));
                             });
                             if (_tmResults.length >= 4) {
-                                planHint += ' WORLD MAP (' + Object.keys(_tmBot._terrainCache).length + ' tiles known): ' + _tmResults.join(', ') + '. "unexplored" = never visited, high chance of new resources. Prefer unexplored directions when searching for blocks/villages. Use land directions if you need stable ground.';
+                                planHint += ' WORLD MAP (' + Object.keys(_tmBot._terrainCache).length + ' tiles): ' + _tmResults.join(', ') + '.'
+                                    + ' SEARCH STRATEGY: (1) Target in KNOWN LOCATIONS above? → !goToRememberedPlace directly.'
+                                    + ' (2) Not known? → !moveAway toward "unexplored" direction to find new terrain.'
+                                    + ' (3) All explored? → !moveAway toward "land" direction.';
                             }
                         }
                     }
