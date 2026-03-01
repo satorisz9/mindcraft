@@ -4094,6 +4094,29 @@ async function _goToSurfaceInner(bot) {
             }
             if (_hasTableInv || _hasTableNear) {
                 log(bot, '[dig-up] No pickaxe, trying to craft...');
+                // [mindaxis-patch:place-table-manually] craftRecipe が設置できない場合に手動でテーブル設置
+                if (_hasTableInv && !_hasTableNear) {
+                    const _tPos = bot.entity.position;
+                    const _tx = Math.floor(_tPos.x), _ty = Math.floor(_tPos.y), _tz = Math.floor(_tPos.z);
+                    // 隣接する固体ブロック上面に設置を試みる
+                    for (const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1],[0,0]]) {
+                        const _tBase = bot.blockAt(new Vec3(_tx+dx, _ty-1, _tz+dz));
+                        const _tAbove = bot.blockAt(new Vec3(_tx+dx, _ty, _tz+dz));
+                        if (_tBase && _tBase.boundingBox === 'block'
+                            && _tAbove && (_tAbove.name === 'air' || _tAbove.name === 'cave_air')) {
+                            try {
+                                const _tableItem = bot.inventory.items().find(i => i.name === 'crafting_table');
+                                if (_tableItem) {
+                                    await bot.equip(_tableItem, 'hand');
+                                    await bot.placeBlock(_tBase, new Vec3(0, 1, 0));
+                                    console.log('[dig-up] Manually placed crafting table at ' + (_tx+dx) + ',' + _ty + ',' + (_tz+dz));
+                                    _hasTableNear = world.getNearestBlock(bot, 'crafting_table', 8);
+                                }
+                            } catch(e) { console.log('[dig-up] Table place failed: ' + e.message); }
+                            break;
+                        }
+                    }
+                }
                 // まず stone_pickaxe を試す（cobblestone があれば）
                 let _picked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false);
                 if (!_picked) {
@@ -4325,6 +4348,21 @@ async function _goToSurfaceInner(bot) {
                         }
                     }
                     await craftRecipe(bot, 'crafting_table', 1).catch(() => {});
+                    // テーブル設置（craftRecipe が失敗する環境用）
+                    if (bot.inventory.items().some(i => i.name === 'crafting_table') && !world.getNearestBlock(bot, 'crafting_table', 8)) {
+                        for (const [dx2,dz2] of [[1,0],[-1,0],[0,1],[0,-1],[0,0]]) {
+                            const _tB = bot.blockAt(new Vec3(cx+dx2, curY-1, cz+dz2));
+                            const _tA = bot.blockAt(new Vec3(cx+dx2, curY, cz+dz2));
+                            if (_tB && _tB.boundingBox === 'block' && _tA && (_tA.name === 'air' || _tA.name === 'cave_air')) {
+                                try {
+                                    await bot.equip(bot.inventory.items().find(i => i.name === 'crafting_table'), 'hand');
+                                    await bot.placeBlock(_tB, new Vec3(0, 1, 0));
+                                    console.log('[dig-up] Mid-loop: placed crafting table');
+                                } catch(e) {}
+                                break;
+                            }
+                        }
+                    }
                     let _mcPicked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false)
                         || await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
                     if (_mcPicked) {
