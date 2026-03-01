@@ -2187,15 +2187,26 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const prevPos = pos.clone();
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
-                    // headScore が低い = 目標方向に進めない → 方向を問わず最遠点へ逃げて再試行
-                    if (_escapeAttempts < 3) {
-                        const _escape = _bfsFurthest(bot, 80);
-                        if (_escape && _escape.dist > 5) {
-                            _escapeAttempts++;
-                            log(bot, `BFS blocked (headScore=${milestone ? milestone.headScore : 0}), escaping ${_escapeAttempts}/3 to (${_escape.x},${_escape.z})...`);
-                            try { await goWithTimeout(new pf.goals.GoalXZ(_escape.x, _escape.z), SEGMENT_TIMEOUT_MS); } catch(e) { if (_ic()) break; }
-                            continue;
+                    // headScore が低い = 崖・囲いで目標方向に進めない
+                    if (_escapeAttempts < 2 && !_ic()) {
+                        _escapeAttempts++;
+                        log(bot, `BFS blocked (headScore=${milestone ? milestone.headScore : 0}), escape ${_escapeAttempts}/2...`);
+                        if (_escapeAttempts === 1) {
+                            // 1回目: 上に登る（ピラージャンプ）で崖・囲いを脱出
+                            try { await goToSurface(bot); } catch(e) {}
+                        } else {
+                            // 2回目: canDig で掘りながら最遠点へ移動
+                            const _anyMs = _bfsFurthest(bot, 80);
+                            if (_anyMs && _anyMs.dist > 5) {
+                                const _digMoves = new pf.Movements(bot);
+                                _digMoves.canDig = true;
+                                bot.pathfinder.setMovements(_digMoves);
+                                try { await goWithTimeout(new pf.goals.GoalXZ(_anyMs.x, _anyMs.z), SEGMENT_TIMEOUT_MS); } catch(e) {}
+                                bot.pathfinder.setMovements(new pf.Movements(bot));
+                            }
                         }
+                        if (_ic()) break;
+                        continue;
                     }
                     log(bot, 'BFS: no path toward target. Giving up.');
                     bot._pauseWatchdog = false;
