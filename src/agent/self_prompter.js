@@ -387,7 +387,15 @@ export class SelfPrompter {
                         const _wtInWater = _wtBot.entity.isInWater
                             || (_wtFeet && (_wtFeet.name === 'water' || _wtFeet.name === 'flowing_water'));
                         if (_wtInWater) {
-                            planHint += ` WATER TRAPPED (y=${Math.round(_wtPos.y)}): You are stuck in water! Do NOT try to navigate to blocks or entities until you escape. IMMEDIATELY use: !escapeEnclosure(80) to find the exit via flood-fill scan. If that fails, try !goToSurface.`;
+                            // [mindaxis-patch:water-trap-skylight] skyLight で地下洞窟か地上の湖かを判定
+                            const _wtAbove = _wtBot.blockAt(_wtPos.floored().offset(0, 1, 0));
+                            const _wtSkyLight = _wtAbove ? (_wtAbove.skyLight ?? 15) : 15;
+                            const _wtUnderground = _wtSkyLight < 4;
+                            if (_wtUnderground) {
+                                planHint += ` UNDERGROUND WATER TRAP (y=${Math.round(_wtPos.y)}, skyLight=${_wtSkyLight}): You are trapped in an UNDERGROUND CAVE that has water in it. Do NOT craft a boat — you cannot sail underground! IMMEDIATELY use: !goToSurface to dig and climb your way out. Do NOT use !escapeEnclosure here.`;
+                            } else {
+                                planHint += ` WATER TRAPPED (y=${Math.round(_wtPos.y)}, skyLight=${_wtSkyLight}): You are stuck in surface water! Do NOT try to navigate to blocks or entities until you escape. IMMEDIATELY use: !escapeEnclosure(80) to find the exit via flood-fill scan. If that fails, try !goToSurface.`;
+                            }
                         }
                     }
                 } catch (_wte) {}
