@@ -2262,7 +2262,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     const target = new Vec3(x, y, z);
     const WAYPOINT_DIST = 30;
     const MAX_STUCK = 4;
-    const SEGMENT_TIMEOUT_MS = 25000; // [mindaxis-patch:long-distance-nav]
+    const SEGMENT_TIMEOUT_MS = 10000; // [mindaxis-patch:long-distance-nav] 短縮(25s→10s): 詰まったら早く次へ
     const DIRECT_TIMEOUT_MS = 30000;
     console.log('[goto-trace] precheck done, starting nav');
 
@@ -2926,18 +2926,33 @@ export async function moveAway(bot, distance) {
             break;
         }
         log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
-        // BFS ターゲットが水面 → 上方向に開口部がある可能性。goToSurface（ピラージャンプ）を先に試す
-        if (target.isWater) {
-            log(bot, `BFS target is water — trying goToSurface first (may pillar jump to opening above)`);
-            await goToSurface(bot);
-            if (!bot.entity.isInWater) {
-                totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
-                log(bot, `Escaped water via goToSurface. Moved ${totalMoved}/${distance} blocks.`);
-                continue; // 脱出成功、新位置からBFS再スキャン
+        // [mindaxis-patch:bfs-walk] BFS パスを直接歩く（pathfinder タイムアウト回避）
+        // BFS が検証済みの 1 ブロック単位の経路を lookAt + forward で走破する
+        if (target.path && target.path.length > 0) {
+            log(bot, `BFS walk: ${target.path.length} steps to (${target.x},${target.y},${target.z})`);
+            bot.setControlState('sprint', true);
+            for (const [nx, ny, nz] of target.path) {
+                if (bot.interrupt_code) break;
+                const curY = Math.floor(bot.entity.position.y);
+                const stepUp = ny > curY;
+                const inWater = bot.entity.isInWater;
+                await bot.lookAt(new Vec3(nx + 0.5, ny + (stepUp ? 1.6 : 0.6), nz + 0.5));
+                bot.setControlState('forward', true);
+                if (stepUp || inWater) bot.setControlState('jump', true);
+                const _stepStart = Date.now();
+                while (Date.now() - _stepStart < 2500) {
+                    const d = bot.entity.position.distanceTo(new Vec3(nx + 0.5, ny, nz + 0.5));
+                    if (d < 0.9 || bot.interrupt_code) break;
+                    await new Promise(r => setTimeout(r, 80));
+                }
+                bot.setControlState('jump', false);
             }
-            // goToSurface で脱出できなかった場合、BFS水面ターゲットへ移動して次のホップへ
+            bot.setControlState('forward', false);
+            bot.setControlState('sprint', false);
+        } else {
+            // path なし（隣接など）→ 従来の goToPosition にフォールバック
+            await goToPosition(bot, target.x, target.y, target.z, 3);
         }
-        await goToPosition(bot, target.x, target.y, target.z, 3);
         totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
         log(bot, `Moved ${totalMoved}/${distance} blocks total.`);
         if (totalMoved >= distance) break;
@@ -4159,12 +4174,13 @@ export async function goToSurface(bot) {
 
 // [mindaxis-patch:bfs-furthest-v1] BFS共有ヘルパー: 現在地から最も遠い到達可能点を返す
 // 歩行可能な陸地 + 水面(コスト+3)を探索。チャンク境界(blockAt=null)で自然に停止。
-// 戻り値: { x, y, z, dist, isWater } または null（スタートから5ブロック未満）
+// 戻り値: { x, y, z, dist, isWater, path } または null
+// path: スタート→最遠点への BFS 最短経路（各要素 [x,y,z]）
 function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
     // [mindaxis-patch:bfs-refpoint] refPoint 基準の最遠点選択（moveAway の往復防止）
+    // [mindaxis-patch:bfs-path] parent マップで経路を再構築（pathfinder 不要ナビ用）
     const pos = bot.entity.position;
     const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
-    // refPoint が指定されていれば、選択基準を refPoint からのユークリッド距離に変える
     const _refX = refPoint ? Math.floor(refPoint.x) : startX;
     const _refZ = refPoint ? Math.floor(refPoint.z) : startZ;
 
@@ -4190,8 +4206,10 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
     };
 
     const visited = new Set();
+    const parent = new Map(); // key → parent key（経路再構築用）
+    const startKey = `${startX},${startY},${startZ}`;
     const queue = [[startX, startY, startZ, 0, false]];
-    visited.add(`${startX},${startY},${startZ}`);
+    visited.add(startKey);
     const _initRefDist = Math.sqrt((startX - _refX) ** 2 + (startZ - _refZ) ** 2);
     let furthest = { x: startX, y: startY, z: startZ, dist: 0, refDist: _initRefDist, isWater: false };
     let bfsCount = 0;
@@ -4200,9 +4218,7 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
     while (queue.length > 0 && bfsCount < 12000) {
         bfsCount++;
         const [cx, cy, cz, dist, curIsWater] = queue.shift();
-        // 選択基準: refPoint からのユークリッド距離（refPoint 未指定なら BFS dist と同等）
         const curRefDist = Math.sqrt((cx - _refX) ** 2 + (cz - _refZ) ** 2);
-        // 陸地はどんな距離でも水より優先。同種なら refPoint から遠い方を優先。
         const _preferNew = (!curIsWater && furthest.isWater) ||
             (curIsWater === furthest.isWater && curRefDist > furthest.refDist);
         if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, refDist: curRefDist, isWater: curIsWater };
@@ -4216,20 +4232,31 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
                 if (visited.has(nKey)) continue;
                 if (_canStandAt(nx, ny, nz)) {
                     visited.add(nKey);
+                    parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
                 } else if (_canSwimAt(nx, ny, nz)) {
                     visited.add(nKey);
+                    parent.set(nKey, `${cx},${cy},${cz}`);
                     queue.push([nx, ny, nz, dist + 3, true]);
                 }
             }
         }
     }
-    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} initRefDist=${Math.round(_initRefDist)} inWater=${furthest.isWater}`);
-    // refPoint 指定時: 現在位置より startPos から遠い点なら dist が小さくても OK
-    if (refPoint) {
-        return (furthest.refDist > _initRefDist + 2 && furthest.dist >= 1) ? furthest : null;
+
+    // 経路再構築: furthest → start を逆順に辿る
+    const path = [];
+    let cur = `${furthest.x},${furthest.y},${furthest.z}`;
+    while (cur && cur !== startKey) {
+        const [px, py, pz] = cur.split(',').map(Number);
+        path.unshift([px, py, pz]);
+        cur = parent.get(cur) || null;
     }
-    return furthest.dist >= 5 ? furthest : null;
+
+    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} initRefDist=${Math.round(_initRefDist)} pathLen=${path.length} inWater=${furthest.isWater}`);
+    if (refPoint) {
+        return (furthest.refDist > _initRefDist + 2 && furthest.dist >= 1) ? { ...furthest, path } : null;
+    }
+    return furthest.dist >= 5 ? { ...furthest, path } : null;
 }
 
 // [mindaxis-patch:escape-enclosure-v3] escapeEnclosure は _bfsFurthest を使用
