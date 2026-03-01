@@ -2936,33 +2936,35 @@ export async function moveAway(bot, distance) {
     let totalMoved = 0;
     const MAX_HOPS = 6;
     const SCAN_RADIUS = 90; // チャンク内で安全にスキャンできる半径
-    // [mindaxis-patch:bfs-heading-v2] ホップ0で決めた方向をheading内積スコアで固定（往復防止）
-    let _heading = null; // { x, z } 正規化された進行方向ベクトル
+    // [mindaxis-patch:bfs-heading-v3] heading を bot に永続化（moveAway 再呼び出しで方向を維持）
+    // 割り込み後も同じ方向に進み続けるために bot._moveAwayHeading に保存する
+    let _heading = bot._moveAwayHeading || null;
 
     for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
         if (bot.interrupt_code) break;
-        // hop0はstartPos基準で最遠点、hop1以降はheading方向への内積スコアで探索
-        const target = hop === 0
-            ? _bfsFurthest(bot, SCAN_RADIUS, startPos)
-            : _bfsFurthest(bot, SCAN_RADIUS, null, _heading);
+        // heading が確定済みならその方向で探索、なければ startPos 基準で最遠点
+        const target = _heading
+            ? _bfsFurthest(bot, SCAN_RADIUS, null, _heading)
+            : _bfsFurthest(bot, SCAN_RADIUS, startPos);
         if (!target) {
             // [mindaxis-patch:bfs-null-gotosurface] goToSurface に委ねる（ピラー含む）
             log(bot, `BFS: no reachable space (hop ${hop + 1}). Calling goToSurface...`);
             await goToSurface(bot);
             if (bot.interrupt_code) break;
             // 地上に出たら BFS 再スキャンして継続
-            const _afterSurface = hop === 0
-                ? _bfsFurthest(bot, SCAN_RADIUS, startPos)
-                : _bfsFurthest(bot, SCAN_RADIUS, null, _heading);
+            const _afterSurface = _heading
+                ? _bfsFurthest(bot, SCAN_RADIUS, null, _heading)
+                : _bfsFurthest(bot, SCAN_RADIUS, startPos);
             if (_afterSurface) { continue; }
             break;
         }
-        // ホップ0で方向ベクトルを決定して固定
-        if (hop === 0) {
+        // heading 未確定のとき（初回呼び出しの hop0）: 方向を決定して bot に永続化
+        if (!_heading) {
             const _hDx = target.x - startPos.x;
             const _hDz = target.z - startPos.z;
             const _hLen = Math.sqrt(_hDx * _hDx + _hDz * _hDz) || 1;
             _heading = { x: _hDx / _hLen, z: _hDz / _hLen };
+            bot._moveAwayHeading = _heading;
             console.log(`[moveAway] heading fixed: dx=${_heading.x.toFixed(2)} dz=${_heading.z.toFixed(2)}`);
         }
         log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
@@ -3001,6 +3003,8 @@ export async function moveAway(bot, distance) {
     const new_pos = bot.entity.position;
     const _actualDist = Math.round(new_pos.distanceTo(startPos));
     log(bot, `Moved away from ${startPos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
+    // [mindaxis-patch:bfs-heading-v3] 目標距離に達したら heading をリセット（次回は新しい方向を決める）
+    if (_actualDist >= distance) bot._moveAwayHeading = null;
     return true;
 }
 
