@@ -2936,31 +2936,34 @@ export async function moveAway(bot, distance) {
     let totalMoved = 0;
     const MAX_HOPS = 6;
     const SCAN_RADIUS = 90; // チャンク内で安全にスキャンできる半径
-    // [mindaxis-patch:bfs-heading] ホップ0で決めた方向を固定し、往復を防ぐ
-    let targetFar = null; // startPos から heading 方向の仮想遠点
+    // [mindaxis-patch:bfs-heading-v2] ホップ0で決めた方向をheading内積スコアで固定（往復防止）
+    let _heading = null; // { x, z } 正規化された進行方向ベクトル
 
     for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
         if (bot.interrupt_code) break;
-        // hop0はstartPos基準、hop1以降は固定方向の仮想遠点を基準にする
-        const _refPt = (hop === 0 || !targetFar) ? startPos : targetFar;
-        const target = _bfsFurthest(bot, SCAN_RADIUS, _refPt);
+        // hop0はstartPos基準で最遠点、hop1以降はheading方向への内積スコアで探索
+        const target = hop === 0
+            ? _bfsFurthest(bot, SCAN_RADIUS, startPos)
+            : _bfsFurthest(bot, SCAN_RADIUS, null, _heading);
         if (!target) {
             // [mindaxis-patch:bfs-null-gotosurface] goToSurface に委ねる（ピラー含む）
             log(bot, `BFS: no reachable space (hop ${hop + 1}). Calling goToSurface...`);
             await goToSurface(bot);
             if (bot.interrupt_code) break;
             // 地上に出たら BFS 再スキャンして継続
-            const _afterSurface = _bfsFurthest(bot, SCAN_RADIUS, _refPt);
+            const _afterSurface = hop === 0
+                ? _bfsFurthest(bot, SCAN_RADIUS, startPos)
+                : _bfsFurthest(bot, SCAN_RADIUS, null, _heading);
             if (_afterSurface) { continue; }
             break;
         }
-        // ホップ0で方向を決定して固定
+        // ホップ0で方向ベクトルを決定して固定
         if (hop === 0) {
             const _hDx = target.x - startPos.x;
             const _hDz = target.z - startPos.z;
             const _hLen = Math.sqrt(_hDx * _hDx + _hDz * _hDz) || 1;
-            targetFar = { x: startPos.x + (_hDx / _hLen) * 10000, z: startPos.z + (_hDz / _hLen) * 10000 };
-            console.log(`[moveAway] heading fixed: dx=${(_hDx/_hLen).toFixed(2)} dz=${(_hDz/_hLen).toFixed(2)}`);
+            _heading = { x: _hDx / _hLen, z: _hDz / _hLen };
+            console.log(`[moveAway] heading fixed: dx=${_heading.x.toFixed(2)} dz=${_heading.z.toFixed(2)}`);
         }
         log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
         // [mindaxis-patch:bfs-walk] BFS パスを直接歩く（pathfinder タイムアウト回避）
@@ -4214,9 +4217,10 @@ export async function goToSurface(bot) {
 // 歩行可能な陸地 + 水面(コスト+3)を探索。チャンク境界(blockAt=null)で自然に停止。
 // 戻り値: { x, y, z, dist, isWater, path } または null
 // path: スタート→最遠点への BFS 最短経路（各要素 [x,y,z]）
-function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
+function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null) {
     // [mindaxis-patch:bfs-refpoint] refPoint 基準の最遠点選択（moveAway の往復防止）
     // [mindaxis-patch:bfs-path] parent マップで経路を再構築（pathfinder 不要ナビ用）
+    // [mindaxis-patch:bfs-heading-v2] headingVec が指定された場合は内積スコアで方向固定
     const pos = bot.entity.position;
     const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
     const _refX = refPoint ? Math.floor(refPoint.x) : startX;
@@ -4252,7 +4256,9 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
     const queue = [[startX, startY, startZ, 0, false]];
     visited.add(startKey);
     const _initRefDist = Math.sqrt((startX - _refX) ** 2 + (startZ - _refZ) ** 2);
-    let furthest = { x: startX, y: startY, z: startZ, dist: 0, refDist: _initRefDist, isWater: false };
+    // [mindaxis-patch:bfs-heading-v2] heading内積スコア（headingVecが指定された場合のみ使用）
+    const _headScore = headingVec ? (cx, cz) => headingVec.x * (cx - startX) + headingVec.z * (cz - startZ) : null;
+    let furthest = { x: startX, y: startY, z: startZ, dist: 0, refDist: _initRefDist, headScore: 0, isWater: false };
     let bfsCount = 0;
     const FLAT_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -4260,9 +4266,13 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
         bfsCount++;
         const [cx, cy, cz, dist, curIsWater] = queue.shift();
         const curRefDist = Math.sqrt((cx - _refX) ** 2 + (cz - _refZ) ** 2);
+        const curHeadScore = _headScore ? _headScore(cx, cz) : 0;
         const _preferNew = (!curIsWater && furthest.isWater) ||
-            (curIsWater === furthest.isWater && curRefDist > furthest.refDist);
-        if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, refDist: curRefDist, isWater: curIsWater };
+            (curIsWater === furthest.isWater && (
+                _headScore ? curHeadScore > furthest.headScore  // heading方向に最も進んだ点
+                           : curRefDist > furthest.refDist       // refPointから最も遠い点
+            ));
+        if (_preferNew) furthest = { x: cx, y: cy, z: cz, dist, refDist: curRefDist, headScore: curHeadScore, isWater: curIsWater };
         if (dist >= maxRadius) continue;
         for (const [ddx, ddz] of FLAT_DIRS) {
             for (const dy of [0, 1, -1]) {
@@ -4293,7 +4303,11 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
         cur = parent.get(cur) || null;
     }
 
-    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} initRefDist=${Math.round(_initRefDist)} pathLen=${path.length} inWater=${furthest.isWater}`);
+    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} headScore=${Math.round(furthest.headScore)} refDist=${Math.round(furthest.refDist)} initRefDist=${Math.round(_initRefDist)} pathLen=${path.length} inWater=${furthest.isWater}`);
+    if (headingVec) {
+        // [mindaxis-patch:bfs-heading-v2] heading方向に5ブロック以上進めた場合のみ有効
+        return (furthest.headScore > 5 && furthest.dist >= 1) ? { ...furthest, path } : null;
+    }
     if (refPoint) {
         return (furthest.refDist > _initRefDist + 2 && furthest.dist >= 1) ? { ...furthest, path } : null;
     }
