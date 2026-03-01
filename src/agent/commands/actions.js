@@ -985,14 +985,6 @@ export const actionsList = [
         })
     },
     {
-        name: '!moveAway',
-        description: 'Move away from the current location in any direction by a given distance.',
-        params: {'distance': { type: 'float', description: 'The distance to move away.', domain: [0, Infinity] }},
-        perform: runAsAction(async (agent, distance) => {
-            await skills.moveAway(agent.bot, distance);
-        })
-    },
-    {
         name: '!escapeEnclosure',
         description: 'Escape from an enclosed area (valley, cave, mountain trap). Uses flood-fill BFS to map the connected walkable space and navigate to its edge, then pillar-digs through obstacles if pathfinder fails. Use this when !moveAway or !goToCoordinates keep failing due to terrain.',
         params: {
