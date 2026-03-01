@@ -1692,7 +1692,7 @@ async function _discoverLocations(bot) {
             if (!_lm.places.village) _lm.places.village = [];
             const _vx = Math.round(_villagers.reduce((s,v)=>s+v.position.x,0)/_villagers.length);
             const _vz = Math.round(_villagers.reduce((s,v)=>s+v.position.z,0)/_villagers.length);
-            if (!_lm.places.village.some(v => Math.hypot(v.x-_vx, v.z-_vz)<200)) {
+            if (!_lm.places.village.some(v => Math.hypot(v.x-_vx, v.z-_vz)<50)) {
                 _lm.places.village.push({x:_vx, z:_vz, y:Math.round(_pos.y), villagers:_villagers.length, discoveredAt:Date.now()});
                 log(bot, `Discovered village at (${_vx}, ${_vz}) with ${_villagers.length} villagers!`);
                 _changed = true;
