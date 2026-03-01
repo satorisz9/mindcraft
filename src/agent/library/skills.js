@@ -3957,9 +3957,11 @@ async function _goToSurfaceInner(bot) {
 
         const _pilFt = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y), Math.floor(curPos.z)));
         const _pilWater = _pilFt && (_pilFt.name === 'water' || _pilFt.name === 'flowing_water');
-        // [mindaxis-patch:gotosurface-pillardig-nowater] 水中は reached-surface でも return しない
-        if (curPos.y >= surfaceY - 1 && !_pilWater) {
-            log(bot, 'Reached surface at y=' + Math.floor(curPos.y) + '!');
+        // [mindaxis-patch:surface-skylight-check] skyLight で地表判定（横移動で列が変わっても正確に検知）
+        const _surfSlB = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
+        const _surfSkyLight = _surfSlB ? (_surfSlB.skyLight ?? 0) : 0;
+        if ((curPos.y >= surfaceY - 1 || _surfSkyLight >= 14) && !_pilWater) {
+            log(bot, 'Reached surface at y=' + Math.floor(curPos.y) + ' (skyLight=' + _surfSkyLight + ')!');
             bot.setControlState('jump', false);
             await _saveCaveFallZone(step);
             return true;
