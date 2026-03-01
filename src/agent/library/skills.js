@@ -2899,13 +2899,37 @@ export async function followPlayer(bot, username, distance=4) {
 
 export async function moveAway(bot, distance) {
     /**
-     * Move away from current position in any direction.
-     * @param {MinecraftBot} bot, reference to the minecraft bot.
-     * @param {number} distance, the distance to move away.
-     * @returns {Promise<boolean>} true if the bot moved away, false otherwise.
-     * @example
-     * await skills.moveAway(bot, 8);
+     * Move away from current position using BFS to find the furthest reachable point.
+     * Repeats in hops until the target distance is covered.
+     * Works in any terrain: open land, enclosed spaces, water.
      **/
+    // [mindaxis-patch:moveaway-bfs-v1] BFSで到達可能な最遠点を探し、ホップして距離を稼ぐ
+    const startPos = bot.entity.position.clone();
+    let totalMoved = 0;
+    const MAX_HOPS = 6;
+    const SCAN_RADIUS = 90; // チャンク内で安全にスキャンできる半径
+
+    for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
+        if (bot.interrupt_code) break;
+        const target = _bfsFurthest(bot, SCAN_RADIUS);
+        if (!target) {
+            log(bot, `BFS: no reachable space (hop ${hop + 1}). Trying goToSurface...`);
+            await goToSurface(bot);
+            break;
+        }
+        log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist}`);
+        await goToPosition(bot, target.x, target.y, target.z, 3);
+        totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
+        log(bot, `Moved ${totalMoved}/${distance} blocks total.`);
+        if (totalMoved >= distance) break;
+    }
+
+    const new_pos = bot.entity.position;
+    const _actualDist = Math.round(new_pos.distanceTo(startPos));
+    log(bot, `Moved away from ${startPos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
+    return true;
+
+    // --- 旧実装 (cheat mode のみ保持) ---
     const pos = bot.entity.position;
     let goal = new pf.goals.GoalNear(pos.x, pos.y, pos.z, distance);
     let inverted_goal = new pf.goals.GoalInvert(goal);
@@ -4293,38 +4317,36 @@ export async function goToSurface(bot) {
     return false;
 }
 
-// [mindaxis-patch:escape-enclosure-v2] Flood fill BFS で連結空間の端を特定して脱出
-// 水面をコスト+3の歩行可能マスとして扱い、湖を越えた対岸も検出できる
-export async function escapeEnclosure(bot, maxRadius = 80) {
+// [mindaxis-patch:bfs-furthest-v1] BFS共有ヘルパー: 現在地から最も遠い到達可能点を返す
+// 歩行可能な陸地 + 水面(コスト+3)を探索。チャンク境界(blockAt=null)で自然に停止。
+// 戻り値: { x, y, z, dist, isWater } または null（スタートから5ブロック未満）
+function _bfsFurthest(bot, maxRadius = 80) {
     const pos = bot.entity.position;
     const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
-    log(bot, `Scanning connected space for escape route from (${startX},${startY},${startZ}) radius=${maxRadius}...`);
 
-    const isPassable = (x, y, z) => {
+    const _isPassable = (x, y, z) => {
         const b = bot.blockAt(new Vec3(x, y, z));
         return !b || b.name === 'air' || b.name === 'cave_air';
     };
-    const isWater = (x, y, z) => {
+    const _isWater = (x, y, z) => {
         const b = bot.blockAt(new Vec3(x, y, z));
         return b && (b.name === 'water' || b.name === 'flowing_water');
     };
-    const canStandAt = (x, y, z) => {
+    const _canStandAt = (x, y, z) => {
         const floor = bot.blockAt(new Vec3(x, y - 1, z));
         if (!floor) return false;
         const solid = floor.name !== 'air' && floor.name !== 'cave_air'
             && floor.name !== 'water' && floor.name !== 'flowing_water';
-        return solid && isPassable(x, y, z) && isPassable(x, y + 1, z);
+        return solid && _isPassable(x, y, z) && _isPassable(x, y + 1, z);
     };
-    // 水面: 足元が水 かつ 頭上が空気 → 泳げる位置（陸地コスト+3）
-    const canSwimAt = (x, y, z) => {
-        if (!isWater(x, y, z)) return false;
+    const _canSwimAt = (x, y, z) => {
+        if (!_isWater(x, y, z)) return false;
         const head = bot.blockAt(new Vec3(x, y + 1, z));
         return !head || head.name === 'air' || head.name === 'cave_air';
     };
 
-    // BFS: 歩行 + 水面泳ぎで到達できる連結空間を全探索
     const visited = new Set();
-    const queue = [[startX, startY, startZ, 0, false]]; // [x,y,z,dist,isWater]
+    const queue = [[startX, startY, startZ, 0, false]];
     visited.add(`${startX},${startY},${startZ}`);
     let furthest = { x: startX, y: startY, z: startZ, dist: 0, isWater: false };
     let bfsCount = 0;
@@ -4333,7 +4355,6 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
     while (queue.length > 0 && bfsCount < 12000) {
         bfsCount++;
         const [cx, cy, cz, dist, curIsWater] = queue.shift();
-        // 陸地優先: 同距離なら陸地を furthest に採用
         if (dist > furthest.dist || (dist === furthest.dist && furthest.isWater && !curIsWater)) {
             furthest = { x: cx, y: cy, z: cz, dist, isWater: curIsWater };
         }
@@ -4345,21 +4366,29 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
                 if (ny < -64 || ny > 320) continue;
                 const nKey = `${nx},${ny},${nz}`;
                 if (visited.has(nKey)) continue;
-                if (canStandAt(nx, ny, nz)) {
+                if (_canStandAt(nx, ny, nz)) {
                     visited.add(nKey);
                     queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
-                } else if (dy === 0 && canSwimAt(nx, ny, nz)) {
-                    // 水面: 水平移動のみ、コスト+3
+                } else if (dy === 0 && _canSwimAt(nx, ny, nz)) {
                     visited.add(nKey);
                     queue.push([nx, ny, nz, dist + 3, true]);
                 }
             }
         }
     }
-    console.log(`[escapeEnclosure] BFS: ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} inWater=${furthest.isWater}`);
+    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} inWater=${furthest.isWater}`);
+    return furthest.dist >= 5 ? furthest : null;
+}
 
-    if (furthest.dist < 5) {
-        // 到達可能空間が非常に小さい → 真上にピラージャンプ
+// [mindaxis-patch:escape-enclosure-v3] escapeEnclosure は _bfsFurthest を使用
+export async function escapeEnclosure(bot, maxRadius = 80) {
+    const pos = bot.entity.position;
+    const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
+    log(bot, `Scanning connected space for escape route from (${startX},${startY},${startZ}) radius=${maxRadius}...`);
+
+    const furthest = _bfsFurthest(bot, maxRadius);
+
+    if (!furthest) {
         log(bot, 'Enclosed space is tiny (< 5 blocks reachable). Pillar jumping straight up...');
         return await goToSurface(bot);
     }
@@ -4371,7 +4400,6 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
         return true;
     }
 
-    // pathfinder が失敗した場合 → 手動でピラー/掘削して突破
     log(bot, `Pathfinder failed to reach (${furthest.x},${furthest.z}). Pillar-digging...`);
     return await _pillarToward(bot, furthest.x, furthest.z, 40);
 }
