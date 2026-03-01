@@ -623,16 +623,15 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 success = true;
             }
             else {
-                // [mindaxis-patch:collect-direct-dig] 到達範囲内なら直接掘る（GoalLookAtBlock振動回避）
+                // [mindaxis-patch:collect-direct-dig-v2] 常に goToPosition+dig（collectBlock.collectのA*タイムアウト回避）
                 const _blockCenter = block.position.offset(0.5, 0.5, 0.5);
                 const _digDist = bot.entity.position.distanceTo(_blockCenter);
-                if (_digDist <= 4.5) {
-                    await bot.dig(block);
-                    await pickupNearbyItems(bot);
-                    await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup]
-                } else {
-                    await bot.collectBlock.collect(block);
+                if (_digDist > 1.5) {
+                    await goToPosition(bot, block.position.x, block.position.y, block.position.z, 2);
                 }
+                await bot.dig(block);
+                await pickupNearbyItems(bot);
+                await bot.tool.equipForBlock(block); // [mindaxis-patch:re-equip-after-pickup]
                 success = true;
             }
             if (success)
