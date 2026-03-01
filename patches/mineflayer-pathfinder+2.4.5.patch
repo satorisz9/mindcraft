@@ -49,7 +49,7 @@ index b38bd30..853d7ea 100644
 +          if (!astartTimedout) {
 -          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal)
 +          // [mindaxis-patch:water-skip-repath-v2] [mindaxis-patch:water-skip-repath] 水中でも A* パス計算を常に実行
-+          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, 500) // [mindaxis-patch:repath-timeout]
++          const results = bot.pathfinder.getPathTo(stateMovements, stateGoal, bot.pathfinder.tickTimeout) // [mindaxis-patch:repath-timeout]
            bot.emit('path_update', results)
            path = results.path
            astartTimedout = results.status === 'partial'
