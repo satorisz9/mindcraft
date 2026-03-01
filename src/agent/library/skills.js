@@ -2870,36 +2870,17 @@ export async function goToNearestEntity(bot, entityType, min_distance=2, range=6
      * @returns {Promise<boolean>} true if the entity was reached, false otherwise.
      **/
     let entity;
-    // [mindaxis-patch:nitwit-area-blacklist] 村人検索でニットウィット(11)/無職(0)および既知ニットウィットエリアをスキップ
+    // [mindaxis-patch:nitwit-id-skip] 村人検索でニットウィット(11)/無職(0)をスキップ（エリアブラックリストは廃止）
     if (entityType === 'villager') {
-        if (!bot._nitwitAreas) bot._nitwitAreas = [];
         entity = world.getNearestEntityWhere(bot, e => {
             if (e.name !== 'villager') return false;
             const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
             const _pid = _pm != null ? _pm.villagerProfession : -1;
-            if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed のみスキップ
+            if (_pid === 11 || _pid === 0) return false; // nitwit/unemployed はスキップ
             return true;
         }, range);
         if (!entity) {
-            // ニットウィット/無職の場所を記録
-            const _nitwit = world.getNearestEntityWhere(bot, e => {
-                if (e.name !== 'villager') return false;
-                const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
-                const _pid = _pm != null ? _pm.villagerProfession : -1;
-                return _pid === 11 || _pid === 0;
-            }, range);
-            if (_nitwit) {
-                const _np = _nitwit.position;
-                const _already = bot._nitwitAreas.some(na => Math.hypot(_np.x - na.x, _np.z - na.z) < 200);
-                if (!_already) {
-                    bot._nitwitAreas.push({ x: Math.round(_np.x), z: Math.round(_np.z) });
-                    log(bot, `[NITWIT AREA BLACKLISTED] (${Math.round(_np.x)}, ?, ${Math.round(_np.z)}) — no traders here. Total blacklisted areas: ${bot._nitwitAreas.length}.`);
-                }
-                const _naList = bot._nitwitAreas.map(na => `(${na.x},?,${na.z})`).join(', ');
-                log(bot, `No trader villager in ${range} blocks. All nearby villagers are nitwit/unemployed. BLACKLISTED AREAS: ${_naList}. Move at least 300 blocks away from these areas before searching again.`);
-            } else {
-                log(bot, `Could not find any villager in ${range} blocks. Move further and search in a new area.`);
-            }
+            log(bot, `Could not find any trader villager in ${range} blocks. Move further and search in a new area.`);
             return false;
         }
     } else {
