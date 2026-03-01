@@ -4271,8 +4271,8 @@ export async function goToSurface(bot) {
     return false;
 }
 
-// [mindaxis-patch:escape-enclosure-v1] Flood fill BFS で連結歩行空間の端を特定して脱出
-// 山・崖・洞窟などに囲まれたとき、pathfinder が失敗する前に自力で出口を見つける
+// [mindaxis-patch:escape-enclosure-v2] Flood fill BFS で連結空間の端を特定して脱出
+// 水面をコスト+3の歩行可能マスとして扱い、湖を越えた対岸も検出できる
 export async function escapeEnclosure(bot, maxRadius = 80) {
     const pos = bot.entity.position;
     const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
@@ -4282,6 +4282,10 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
         const b = bot.blockAt(new Vec3(x, y, z));
         return !b || b.name === 'air' || b.name === 'cave_air';
     };
+    const isWater = (x, y, z) => {
+        const b = bot.blockAt(new Vec3(x, y, z));
+        return b && (b.name === 'water' || b.name === 'flowing_water');
+    };
     const canStandAt = (x, y, z) => {
         const floor = bot.blockAt(new Vec3(x, y - 1, z));
         if (!floor) return false;
@@ -4289,22 +4293,31 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
             && floor.name !== 'water' && floor.name !== 'flowing_water';
         return solid && isPassable(x, y, z) && isPassable(x, y + 1, z);
     };
+    // 水面: 足元が水 かつ 頭上が空気 → 泳げる位置（陸地コスト+3）
+    const canSwimAt = (x, y, z) => {
+        if (!isWater(x, y, z)) return false;
+        const head = bot.blockAt(new Vec3(x, y + 1, z));
+        return !head || head.name === 'air' || head.name === 'cave_air';
+    };
 
-    // BFS: 歩いて到達できる連結空間を全探索（1ブロック段差も考慮）
+    // BFS: 歩行 + 水面泳ぎで到達できる連結空間を全探索
     const visited = new Set();
-    const queue = [[startX, startY, startZ, 0]];
+    const queue = [[startX, startY, startZ, 0, false]]; // [x,y,z,dist,isWater]
     visited.add(`${startX},${startY},${startZ}`);
-    let furthest = { x: startX, y: startY, z: startZ, dist: 0 };
+    let furthest = { x: startX, y: startY, z: startZ, dist: 0, isWater: false };
     let bfsCount = 0;
     const FLAT_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
     while (queue.length > 0 && bfsCount < 12000) {
         bfsCount++;
-        const [cx, cy, cz, dist] = queue.shift();
-        if (dist > furthest.dist) furthest = { x: cx, y: cy, z: cz, dist };
+        const [cx, cy, cz, dist, curIsWater] = queue.shift();
+        // 陸地優先: 同距離なら陸地を furthest に採用
+        if (dist > furthest.dist || (dist === furthest.dist && furthest.isWater && !curIsWater)) {
+            furthest = { x: cx, y: cy, z: cz, dist, isWater: curIsWater };
+        }
         if (dist >= maxRadius) continue;
         for (const [ddx, ddz] of FLAT_DIRS) {
-            for (const dy of [0, 1, -1]) { // 同レベル、1段上、1段下
+            for (const dy of [0, 1, -1]) {
                 const nx = cx + ddx, ny = cy + dy, nz = cz + ddz;
                 if (Math.abs(nx - startX) > maxRadius || Math.abs(nz - startZ) > maxRadius) continue;
                 if (ny < -64 || ny > 320) continue;
@@ -4312,12 +4325,16 @@ export async function escapeEnclosure(bot, maxRadius = 80) {
                 if (visited.has(nKey)) continue;
                 if (canStandAt(nx, ny, nz)) {
                     visited.add(nKey);
-                    queue.push([nx, ny, nz, dist + 1 + Math.abs(dy)]);
+                    queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
+                } else if (dy === 0 && canSwimAt(nx, ny, nz)) {
+                    // 水面: 水平移動のみ、コスト+3
+                    visited.add(nKey);
+                    queue.push([nx, ny, nz, dist + 3, true]);
                 }
             }
         }
     }
-    console.log(`[escapeEnclosure] BFS: ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist}`);
+    console.log(`[escapeEnclosure] BFS: ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} inWater=${furthest.isWater}`);
 
     if (furthest.dist < 5) {
         // 到達可能空間が非常に小さい → 真上にピラージャンプ
