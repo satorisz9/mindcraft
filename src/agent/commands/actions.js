@@ -969,6 +969,20 @@ export const actionsList = [
             if (_reached && (entity_type === 'villager' || entity_type === 'wandering_trader')) {
                 const _p = agent.bot.entity.position;
                 const _name = entity_type === 'villager' ? 'village' : entity_type;
+                // [mindaxis-patch:village-save-profession] ニットウィット/無職は village として保存しない
+                if (entity_type === 'villager') {
+                    const _nearV = Object.values(agent.bot.entities).find(e =>
+                        e.name === 'villager' && e.position && e.position.distanceTo(_p) < 6
+                    );
+                    if (_nearV) {
+                        const _pm = _nearV.metadata && Object.values(_nearV.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
+                        const _pid = _pm != null ? _pm.villagerProfession : -1;
+                        if (_pid === 11 || _pid === 0) {
+                            skills.log(agent.bot, `Skipping village save — nearest villager is ${_pid === 11 ? 'nitwit' : 'unemployed'} (profId=${_pid}).`);
+                            return;
+                        }
+                    }
+                }
                 const _existingLoc = agent.memory_bank.recallPlace(_name);
                 if (!_existingLoc) {
                     agent.memory_bank.rememberPlace(_name, _p.x, _p.y, _p.z);
