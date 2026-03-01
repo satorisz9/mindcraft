@@ -2586,7 +2586,8 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 // [mindaxis-patch:bfs-longrange] 200ブロック以上は pathfinder 不要 — BFS walk で前進
                 if (_xzRemaining > 200) {
                     const _lrH = { x: dx/dist2d, z: dz/dist2d };
-                    const _lrT = _bfsFurthest(bot, 80, null, _lrH);
+                    // [mindaxis-patch:bfs-longrange-surface] maxDrop=3: 地表限定（洞窟に潜らない）
+                    const _lrT = _bfsFurthest(bot, 80, null, _lrH, 3);
                     if (_lrT && _lrT.path && _lrT.path.length > 0) {
                         console.log('[goto-trace] BFS longrange: ' + _lrT.path.length + ' steps, xzRemaining=' + Math.round(_xzRemaining));
                         bot.setControlState('sprint', true);
@@ -4425,7 +4426,7 @@ async function _goToSurfaceInner(bot) {
 // 歩行可能な陸地 + 水面(コスト+3)を探索。チャンク境界(blockAt=null)で自然に停止。
 // 戻り値: { x, y, z, dist, isWater, path } または null
 // path: スタート→最遠点への BFS 最短経路（各要素 [x,y,z]）
-function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null) {
+function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null, maxDrop = null) {
     // [mindaxis-patch:bfs-refpoint] refPoint 基準の最遠点選択（moveAway の往復防止）
     // [mindaxis-patch:bfs-path] parent マップで経路を再構築（pathfinder 不要ナビ用）
     // [mindaxis-patch:bfs-heading-v2] headingVec が指定された場合は内積スコアで方向固定
@@ -4487,6 +4488,8 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null, headingVec = null) {
                 const nx = cx + ddx, ny = cy + dy, nz = cz + ddz;
                 if (Math.abs(nx - startX) > maxRadius || Math.abs(nz - startZ) > maxRadius) continue;
                 if (ny < -64 || ny > 320) continue;
+                // [mindaxis-patch:bfs-maxdrop] 地表限定モード: 開始Y より maxDrop 以上低い座標を探索しない
+                if (maxDrop !== null && ny < startY - maxDrop) continue;
                 const nKey = `${nx},${ny},${nz}`;
                 if (visited.has(nKey)) continue;
                 if (_canStandAt(nx, ny, nz)) {
