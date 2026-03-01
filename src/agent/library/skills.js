@@ -1719,13 +1719,6 @@ async function _discoverLocations(bot) {
 
 
 
-// [mindaxis-patch:manual-nav] 手動ナビゲーション：pathfinder が詰まった時のフォールバック
-// 地形を読んで jump + forward で目標方向に移動する
-// 優先順位: 階段地形を利用 → ピラージャンプで強引に移動 → 救出モード
-async function manualWalkToward(bot, targetX, targetZ, maxSeconds) {
-    const startPos = bot.entity.position.clone();
-    const startTime = Date.now();
-    const timeoutMs = maxSeconds * 1000;
 
     function isPassable(name) {
         return !name || name === 'air' || name === 'cave_air' || name === 'water'
@@ -2310,13 +2303,6 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     {
         const curPos = bot.entity.position;
         const yDiff = y - curPos.y;
-        // [mindaxis-patch:precheck-ceiling-scan] Y+2〜Y+6をスキャンして広い洞窟でも天井を検出
-        let headBlock = null;
-        for (let _dy = 2; _dy <= 6; _dy++) {
-            const _cb = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + _dy, Math.floor(curPos.z)));
-            if (!_cb || _cb.name === 'air' || _cb.name === 'cave_air') break; // 空が見えた
-            if (_cb.name !== 'water' && _cb.name !== 'flowing_water' && _cb.name !== 'lava') { headBlock = _cb; break; }
-        }
         // 家の中・近くにいる場合は「地下」判定を無効化（ドアを使うべき）
         let _nearHouse = false;
         if (bot._houseStructure && bot._houseStructure.bounds) {
@@ -2325,8 +2311,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
             _nearHouse = _cx >= _nhb.x1 - 2 && _cx <= _nhb.x2 + 2 && _cz >= _nhb.z1 - 2 && _cz <= _nhb.z2 + 2
                        && curPos.y >= _nhb.y - 2;
         }
-        // [mindaxis-patch:underwater-is-underground] 水中は pathfinder に任せる（goToSurface を先に呼ばない）
-        const isUnderground = !_nearHouse && headBlock && headBlock.name !== 'air' && headBlock.name !== 'cave_air' && headBlock.name !== 'water' && headBlock.name !== 'flowing_water' && headBlock.name !== 'lava';
+        // [mindaxis-patch:precheck-skylight] sky light で地下判定（天井高さ無関係・大洞窟でも確実に検知）
+        // sky light: 地上=15、洞窟=0、木の下でも~14 → 閾値 <4 で洞窟のみ検知
+        const _skyLightBlock = bot.blockAt(new Vec3(Math.floor(curPos.x), Math.floor(curPos.y) + 1, Math.floor(curPos.z)));
+        const _skyLight = _skyLightBlock ? (_skyLightBlock.skyLight ?? 15) : 15;
+        const isUnderground = !_nearHouse && _skyLight < 4;
         // [mindaxis-patch:deep-cave-surface] 大きな洞窟内でも目標より5ブロック以上低いなら地上優先
         const _deepBelowTarget = !_nearHouse && yDiff > 5;
         // [#22 fix] 家の直下にいる場合は横に移動してから地上へ（屋根/床破壊防止）
