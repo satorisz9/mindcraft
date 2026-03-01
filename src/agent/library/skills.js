@@ -3978,11 +3978,30 @@ async function _goToSurfaceInner(bot) {
 
         let newPos = bot.entity.position;
         if (Math.floor(newPos.y) <= curY && step > 5) {
-            log(bot, '[dig-up] No progress at y=' + curY + ', trying lateral move');
-            bot.setControlState('forward', true);
-            await new Promise(r => setTimeout(r, 300));
-            bot.setControlState('forward', false);
-            await new Promise(r => setTimeout(r, 200));
+            log(bot, '[dig-up] No progress at y=' + curY + ', digging wall for material');
+            // 壁ブロックを掘って素材を確保し、上と下をクリアにして再試行
+            const _dirs4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
+            for (const _d of _dirs4) {
+                // 横の壁ブロック (足元〜頭) を掘ってブロック確保
+                for (const _dy of [0, 1]) {
+                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY + _dy, cz + _d.z));
+                    if (_wb && _wb.diggable && _wb.name !== 'air' && _wb.name !== 'cave_air'
+                        && _wb.name !== 'water' && _wb.name !== 'flowing_water'
+                        && _wb.name !== 'bedrock') {
+                        try {
+                            await bot.tool.equipForBlock(_wb);
+                            await bot.dig(_wb);
+                        } catch(e) {}
+                    }
+                }
+            }
+            // 上も再度掘る
+            for (let _dy2 = 1; _dy2 <= 4; _dy2++) {
+                const _ab = bot.blockAt(new Vec3(cx, curY + _dy2, cz));
+                if (_ab && _ab.name !== 'air' && _ab.name !== 'cave_air' && _ab.name !== 'bedrock') {
+                    try { await bot.tool.equipForBlock(_ab); await bot.dig(_ab); } catch(e) {}
+                }
+            }
         }
     }
     log(bot, 'Failed to reach surface.');
