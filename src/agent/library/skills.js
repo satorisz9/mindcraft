@@ -7,6 +7,58 @@ import settings from "../../../settings.js";
 const blockPlaceDelay = settings.block_place_delay == null ? 0 : settings.block_place_delay;
 const useDelay = blockPlaceDelay > 0;
 
+// [mindaxis-patch:scaffold-forward-v1] pathfinder Movements に「2ブロック高い前方への scaffold-jump」を追加
+// これにより pathfinder が急な崖(2段差)を越える経路を計算できる
+{
+    const _origGetNeighborsSF = pf.Movements.prototype.getNeighbors;
+    if (_origGetNeighborsSF && !pf.Movements.prototype._scaffoldFwdPatched) {
+        pf.Movements.prototype._scaffoldFwdPatched = true;
+        // 2ブロック高い前方への移動: 足元にscaffoldを置いてジャンプ
+        pf.Movements.prototype._getMoveScaffoldFwd2 = function(node, dir, neighbors) {
+            const dx = dir.x, dz = dir.z;
+            // 足元が固体であること（空中では不可）
+            const blockBelow = this.getBlock(node, 0, -1, 0);
+            if (!blockBelow.physical) return;
+            // 開始側の頭上 (y+2) が安全
+            const headA = this.getBlock(node, 0, 2, 0);
+            if (!headA.safe) return;
+            // 目標: (dx, y+2, dz) 足元と (dx, y+3, dz) 頭が安全
+            const targetFeet = this.getBlock(node, dx, 2, dz);
+            const targetHead = this.getBlock(node, dx, 3, dz);
+            if (!targetFeet.safe || !targetHead.safe) return;
+            // scaffold を置く場所 (dx, y+1, dz) が置き換え可能
+            const scaffoldSlot = this.getBlock(node, dx, 1, dz);
+            if (!scaffoldSlot.replaceable) return;
+            const toBreak = [], toPlace = [];
+            let cost = 5; // 通常 walk より高コスト
+            cost += this.safeOrBreak(headA, toBreak);
+            cost += this.safeOrBreak(targetFeet, toBreak);
+            cost += this.safeOrBreak(targetHead, toBreak);
+            if (cost > 100) return;
+            toPlace.push(scaffoldSlot);
+            try {
+                const MoveClass = node.constructor;
+                if (MoveClass && MoveClass !== Object) {
+                    neighbors.push(new MoveClass(
+                        node.x + dx, node.y + 2, node.z + dz,
+                        node.remainingBlocks - 1, cost, toBreak, toPlace
+                    ));
+                }
+            } catch (_sfE) { /* Move コンストラクタ不可 */ }
+        };
+        pf.Movements.prototype.getNeighbors = function(node) {
+            const neighbors = _origGetNeighborsSF.call(this, node);
+            if (this.allow1by1towers && node.remainingBlocks > 0) {
+                for (const _sfDir of [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}]) {
+                    this._getMoveScaffoldFwd2(node, _sfDir, neighbors);
+                }
+            }
+            return neighbors;
+        };
+        console.log('[mindaxis] scaffold-forward-v1: pathfinder Movements patched (2-block scaffold jump)');
+    }
+}
+
 export function log(bot, message) {
     bot.output += message + '\n';
 }
@@ -4204,7 +4256,144 @@ export async function goToSurface(bot) {
     return false;
 }
 
+// [mindaxis-patch:escape-enclosure-v1] Flood fill BFS で連結歩行空間の端を特定して脱出
+// 山・崖・洞窟などに囲まれたとき、pathfinder が失敗する前に自力で出口を見つける
+export async function escapeEnclosure(bot, maxRadius = 80) {
+    const pos = bot.entity.position;
+    const startX = Math.floor(pos.x), startY = Math.floor(pos.y), startZ = Math.floor(pos.z);
+    log(bot, `Scanning connected space for escape route from (${startX},${startY},${startZ}) radius=${maxRadius}...`);
 
+    const isPassable = (x, y, z) => {
+        const b = bot.blockAt(new Vec3(x, y, z));
+        return !b || b.name === 'air' || b.name === 'cave_air';
+    };
+    const canStandAt = (x, y, z) => {
+        const floor = bot.blockAt(new Vec3(x, y - 1, z));
+        if (!floor) return false;
+        const solid = floor.name !== 'air' && floor.name !== 'cave_air'
+            && floor.name !== 'water' && floor.name !== 'flowing_water';
+        return solid && isPassable(x, y, z) && isPassable(x, y + 1, z);
+    };
+
+    // BFS: 歩いて到達できる連結空間を全探索（1ブロック段差も考慮）
+    const visited = new Set();
+    const queue = [[startX, startY, startZ, 0]];
+    visited.add(`${startX},${startY},${startZ}`);
+    let furthest = { x: startX, y: startY, z: startZ, dist: 0 };
+    let bfsCount = 0;
+    const FLAT_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+    while (queue.length > 0 && bfsCount < 12000) {
+        bfsCount++;
+        const [cx, cy, cz, dist] = queue.shift();
+        if (dist > furthest.dist) furthest = { x: cx, y: cy, z: cz, dist };
+        if (dist >= maxRadius) continue;
+        for (const [ddx, ddz] of FLAT_DIRS) {
+            for (const dy of [0, 1, -1]) { // 同レベル、1段上、1段下
+                const nx = cx + ddx, ny = cy + dy, nz = cz + ddz;
+                if (Math.abs(nx - startX) > maxRadius || Math.abs(nz - startZ) > maxRadius) continue;
+                if (ny < -64 || ny > 320) continue;
+                const nKey = `${nx},${ny},${nz}`;
+                if (visited.has(nKey)) continue;
+                if (canStandAt(nx, ny, nz)) {
+                    visited.add(nKey);
+                    queue.push([nx, ny, nz, dist + 1 + Math.abs(dy)]);
+                }
+            }
+        }
+    }
+    console.log(`[escapeEnclosure] BFS: ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist}`);
+
+    if (furthest.dist < 5) {
+        // 到達可能空間が非常に小さい → 真上にピラージャンプ
+        log(bot, 'Enclosed space is tiny (< 5 blocks reachable). Pillar jumping straight up...');
+        return await goToSurface(bot);
+    }
+
+    log(bot, `Escape target: (${furthest.x},${furthest.y},${furthest.z}) — ${furthest.dist} BFS steps away.`);
+    const reached = await goToPosition(bot, furthest.x, furthest.y, furthest.z, 3);
+    if (reached) {
+        log(bot, 'Escaped enclosure — now at edge of reachable space.');
+        return true;
+    }
+
+    // pathfinder が失敗した場合 → 手動でピラー/掘削して突破
+    log(bot, `Pathfinder failed to reach (${furthest.x},${furthest.z}). Pillar-digging...`);
+    return await _pillarToward(bot, furthest.x, furthest.z, 40);
+}
+
+// 指定方向へ手動でブロックを掘削 + ピラージャンプして前進
+async function _pillarToward(bot, targetX, targetZ, maxSteps = 30) {
+    const pos = bot.entity.position;
+    const totalDX = targetX - pos.x, totalDZ = targetZ - pos.z;
+    const totalDist = Math.sqrt(totalDX * totalDX + totalDZ * totalDZ);
+    if (totalDist < 3) return true;
+    const normDX = totalDX / totalDist, normDZ = totalDZ / totalDist;
+    const targetYaw = Math.atan2(-normDX, -normDZ);
+    const findPillarItem = () =>
+        bot.inventory.items().find(i =>
+            ['dirt', 'cobblestone', 'gravel', 'sand', 'netherrack'].includes(i.name)
+            || i.name.includes('planks') || i.name.includes('stone') || i.name.includes('log')
+        );
+
+    let lastPos = bot.entity.position.clone();
+    let noProgress = 0;
+    for (let step = 0; step < maxSteps; step++) {
+        if (bot.interrupt_code) return false;
+        const cp = bot.entity.position;
+        const distLeft = Math.sqrt((cp.x - targetX) ** 2 + (cp.z - targetZ) ** 2);
+        if (distLeft < 4) return true;
+
+        // 前方のブロックを掘る（足・頭・その上レベル）
+        const fwdX = Math.floor(cp.x + normDX * 1.2), fwdZ = Math.floor(cp.z + normDZ * 1.2);
+        const fwdY = Math.floor(cp.y);
+        for (const dy of [0, 1, 2]) {
+            const b = bot.blockAt(new Vec3(fwdX, fwdY + dy, fwdZ));
+            if (b && b.diggable && !['air','cave_air','water','flowing_water','lava','flowing_lava','bedrock'].includes(b.name)) {
+                try { await bot.dig(b); } catch (_) { }
+            }
+        }
+
+        // 前方を向いてジャンプしながら前進
+        await bot.look(targetYaw, 0);
+        bot.setControlState('forward', true);
+        bot.setControlState('sprint', true);
+        bot.setControlState('jump', true);
+        await new Promise(r => setTimeout(r, 500));
+        bot.setControlState('jump', false);
+        await new Promise(r => setTimeout(r, 300));
+        bot.setControlState('forward', false);
+        bot.setControlState('sprint', false);
+
+        const newPos = bot.entity.position;
+        const moved = Math.sqrt((newPos.x - lastPos.x) ** 2 + (newPos.z - lastPos.z) ** 2);
+        if (moved < 0.5) {
+            noProgress++;
+            if (noProgress >= 3) {
+                // 詰まり → 足元にブロックを置いてピラージャンプで1段上へ
+                const pillarItem = findPillarItem();
+                if (pillarItem) {
+                    const standBlock = bot.blockAt(new Vec3(Math.floor(cp.x), Math.floor(cp.y) - 1, Math.floor(cp.z)));
+                    if (standBlock && standBlock.physical) {
+                        try {
+                            await bot.equip(pillarItem, 'hand');
+                            bot.setControlState('jump', true);
+                            await new Promise(r => setTimeout(r, 250));
+                            await bot.placeBlock(standBlock, new Vec3(0, 1, 0));
+                            await new Promise(r => setTimeout(r, 400));
+                            bot.setControlState('jump', false);
+                        } catch (_) { }
+                    }
+                }
+                noProgress = 0;
+            }
+        } else {
+            noProgress = 0;
+        }
+        lastPos = newPos.clone();
+    }
+    return false;
+}
 
 export async function scanStructure(bot) {
     // [mindaxis-patch:scan-structure] レイキャスト方式で家の構造を検出

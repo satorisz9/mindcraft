@@ -1007,6 +1007,16 @@ export const actionsList = [
         })
     },
     {
+        name: '!escapeEnclosure',
+        description: 'Escape from an enclosed area (valley, cave, mountain trap). Uses flood-fill BFS to map the connected walkable space and navigate to its edge, then pillar-digs through obstacles if pathfinder fails. Use this when !moveAway or !goToCoordinates keep failing due to terrain.',
+        params: {
+            'radius': { type: 'float', description: 'Search radius in blocks (default 80).', domain: [20, 200] }
+        },
+        perform: runAsAction(async (agent, radius = 80) => {
+            await skills.escapeEnclosure(agent.bot, radius);
+        })
+    },
+    {
         name: '!rememberHere',
         description: 'Save the current location with a given name.',
         params: {'name': { type: 'string', description: 'The name to remember the location as.' }},
