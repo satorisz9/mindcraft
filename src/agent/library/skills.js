@@ -3885,6 +3885,24 @@ async function _goToSurfaceInner(bot) {
         );
     }
 
+    // [mindaxis-patch:digup-craft-pickaxe] ツルハシがなければクラフトを試みてから掘削
+    {
+        const _hasPick = bot.inventory.items().some(i => i.name.includes('pickaxe'));
+        if (!_hasPick) {
+            const _invC = world.getInventoryCounts(bot);
+            const _hasTableInv = (_invC['crafting_table'] || 0) > 0;
+            const _hasTableNear = world.getNearestBlock(bot, 'crafting_table', 8);
+            if (_hasTableInv || _hasTableNear) {
+                log(bot, '[dig-up] No pickaxe, trying to craft...');
+                bot._goToSurfaceActive = true; // 再帰呼び出し防止
+                const _picked = await craftRecipe(bot, 'stone_pickaxe', 1).catch(() => false)
+                    || await craftRecipe(bot, 'wooden_pickaxe', 1).catch(() => false);
+                bot._goToSurfaceActive = false;
+                if (_picked) log(bot, '[dig-up] Pickaxe crafted!');
+            }
+        }
+    }
+
     const maxSteps = (surfaceY - Math.floor(pos.y)) + 10;
     const _digStartPos = { x: Math.round(_gsWfPos.x), y: Math.round(_gsWfPos.y), z: Math.round(_gsWfPos.z) };
 
