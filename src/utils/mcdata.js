@@ -80,11 +80,6 @@ export function initBot(username) {
         Item = prismarine_items(mc_version);
     });
 
-    bot.once('spawn', () => {
-        if (bot.pathfinder) {
-            bot.pathfinder.tickTimeout = 10; // reduce from 40ms to minimize event loop blocking during A*
-        }
-    });
 
     return bot;
 }
