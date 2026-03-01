@@ -3761,6 +3761,7 @@ async function _goToSurfaceInner(bot) {
                 && block.name !== 'water' && block.name !== 'flowing_water'
                 && block.name !== 'lava' && block.name !== 'flowing_lava'
                 && block.name !== 'bedrock') {
+                try { await bot.tool.equipForBlock(block); } catch(e) {}
                 try { await bot.dig(block); } catch (e) {}
                 if (bot.interrupt_code) { bot.setControlState('jump', false); return false; }
                 await new Promise(r => setTimeout(r, 50));
