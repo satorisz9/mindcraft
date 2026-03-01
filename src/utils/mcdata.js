@@ -59,7 +59,6 @@ export function initBot(username) {
         port: settings.port,
         auth: settings.auth,
         version: mc_version,
-        maxCatchupTicks: 1,
     }
     if (!mc_version || mc_version === "auto") {
         delete options.version;
