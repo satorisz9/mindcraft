@@ -2555,8 +2555,10 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 }
             }
         } else {
-            console.log('[goto-trace] Long distance ' + Math.round(totalDist) + ' blocks');
-            log(bot, `Long distance (${Math.round(totalDist)} blocks), using waypoints.`);
+            // [mindaxis-patch:bfs-milestone-unified] 長距離: BFS マイルストーン → pathfinder を統一パターンで繰り返す
+            // 手動BFS歩き(lookAt+forward)は廃止。全移動を pathfinder に委ねる
+            console.log('[goto-trace] Long distance ' + Math.round(totalDist) + ' blocks, BFS milestone mode');
+            log(bot, `Long distance (${Math.round(totalDist)} blocks), using BFS milestones.`);
             let stuckCount = 0;
             while (true) {
                 if (_ic()) break;
@@ -2564,128 +2566,50 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const pos = bot.entity.position;
                 const remaining = pos.distanceTo(target);
                 const _xzRemaining = Math.sqrt((x - pos.x)**2 + (z - pos.z)**2);
-                console.log('[goto-trace] waypoint loop: remaining=' + Math.round(remaining) + ' xzRemaining=' + Math.round(_xzRemaining) + ' pos=(' + Math.round(pos.x) + ',' + Math.round(pos.y) + ',' + Math.round(pos.z) + ')');
                 if (remaining <= min_distance + 1) break;
-                // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ直接アプローチ（垂直移動で往復防止）
-                if (remaining <= WAYPOINT_DIST * 1.5 || _xzRemaining <= WAYPOINT_DIST) {
-                    console.log('[goto-trace] final approach');
+                // 最終アプローチ: pathfinder で直行
+                if (_xzRemaining <= WAYPOINT_DIST) {
                     try {
                         await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
                     } catch (e) {
                         if (_ic()) break;
-                        console.log('[goto-trace] final approach failed: ' + e.message);
                         log(bot, `Final approach failed: ${e.message}`);
                     }
                     break;
                 }
-                const dx = x - pos.x;
-                const dz = z - pos.z;
-                const dist2d = Math.sqrt(dx * dx + dz * dz);
-                const wpX = pos.x + (dx / dist2d) * WAYPOINT_DIST;
-                const wpZ = pos.z + (dz / dist2d) * WAYPOINT_DIST;
+                // BFS でマイルストーンを計算（目標方向・地表限定）
+                const dx = x - pos.x, dz = z - pos.z;
+                const dist2d = Math.sqrt(dx*dx + dz*dz) || 1;
+                const heading = { x: dx/dist2d, z: dz/dist2d };
                 const prevPos = pos.clone();
-                // [mindaxis-patch:bfs-longrange] 200ブロック以上は pathfinder 不要 — BFS walk で前進
-                if (_xzRemaining > 200) {
-                    const _lrH = { x: dx/dist2d, z: dz/dist2d };
-                    // [mindaxis-patch:bfs-longrange-surface] maxDrop=8: 地表限定（洞窟に潜らない、通常地形8ブロック変動は許容）
-                    const _lrT = _bfsFurthest(bot, 80, null, _lrH, 8);
-                    if (_lrT && _lrT.path && _lrT.path.length > 0) {
-                        console.log('[goto-trace] BFS longrange: ' + _lrT.path.length + ' steps, xzRemaining=' + Math.round(_xzRemaining));
-                        bot.setControlState('sprint', true);
-                        for (const [nx, ny, nz] of _lrT.path) {
-                            if (_ic()) break;
-                            const _su = ny > Math.floor(bot.entity.position.y);
-                            await bot.lookAt(new Vec3(nx+0.5, ny+(_su?1.6:0.6), nz+0.5));
-                            bot.setControlState('forward', true);
-                            if (_su || bot.entity.isInWater) bot.setControlState('jump', true);
-                            const _ss = Date.now();
-                            while (Date.now()-_ss < 800) {
-                                if (bot.entity.position.distanceTo(new Vec3(nx+0.5,ny,nz+0.5)) < 0.9 || _ic()) break;
-                                await new Promise(r => setTimeout(r, 50));
-                            }
-                            bot.setControlState('jump', false);
-                        }
-                        bot.setControlState('forward', false);
-                        bot.setControlState('sprint', false);
-                        if (bot.entity.position.distanceTo(prevPos) > 3) stuckCount = 0;
-                        else stuckCount++;
-                        if (stuckCount >= MAX_STUCK) { log(bot, 'BFS longrange stuck, giving up.'); clearInterval(progressInterval); return false; }
-                        continue;
-                    }
-                    // BFS も失敗したら pathfinder にフォールバック
+                const milestone = _bfsFurthest(bot, 80, null, heading, 8);
+                if (!milestone || milestone.headScore < 5) {
+                    log(bot, 'BFS: no milestone toward target. Giving up.');
+                    clearInterval(progressInterval);
+                    return false;
                 }
-                // [mindaxis-patch:milestone-v1] pathfinder ゴールを BFS で到達可能な地点（マイルストーン）に補正
-                // naive wpX/wpZ（30ブロック先の直線点）は水・崖の上になりうるので、
-                // BFS で heading 方向に実際に歩ける最遠点を探してゴールに使う
-                const _msH = { x: dx/dist2d, z: dz/dist2d };
-                const _ms = _bfsFurthest(bot, 40, null, _msH, 8);
-                const _msX = (_ms && _ms.headScore > 5) ? _ms.x : wpX;
-                const _msZ = (_ms && _ms.headScore > 5) ? _ms.z : wpZ;
-                if (_ms && _ms.headScore > 5) {
-                    console.log('[goto-trace] milestone BFS: (' + Math.round(_msX) + ',' + Math.round(_msZ) + ') headScore=' + Math.round(_ms.headScore));
-                } else {
-                    console.log('[goto-trace] milestone BFS failed, using naive waypoint (' + Math.round(wpX) + ',' + Math.round(wpZ) + ')');
-                }
-                console.log('[goto-trace] segment to (' + Math.round(_msX) + ',' + Math.round(_msZ) + ') timeout=' + SEGMENT_TIMEOUT_MS);
-                log(bot, `Waypoint: (${Math.round(_msX)}, ${Math.round(_msZ)}), ${Math.round(remaining)} blocks left.`);
+                log(bot, `Milestone: (${milestone.x}, ${milestone.z}), ${Math.round(_xzRemaining)} blocks left.`);
                 try {
-                    await goWithTimeout(new pf.goals.GoalXZ(_msX, _msZ), SEGMENT_TIMEOUT_MS); // [mindaxis-patch:milestone-v1]
-                    console.log('[goto-trace] segment OK, moved to (' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.z) + ')');
+                    await goWithTimeout(new pf.goals.GoalXZ(milestone.x, milestone.z), SEGMENT_TIMEOUT_MS);
                     stuckCount = 0;
                 } catch (e) {
-                    console.log('[goto-trace] segment FAILED: ' + e.message);
                     if (_ic()) break;
-                    const cur = bot.entity.position;
-                    const movedXZ = Math.sqrt((cur.x - prevPos.x) ** 2 + (cur.z - prevPos.z) ** 2);
+                    const movedXZ = Math.sqrt((bot.entity.position.x - prevPos.x)**2 + (bot.entity.position.z - prevPos.z)**2);
                     if (movedXZ < 5) {
                         stuckCount++;
-                        log(bot, `Stuck at waypoint (${stuckCount}/${MAX_STUCK}), trying BFS detour...`);
+                        log(bot, `Stuck at milestone (${stuckCount}/${MAX_STUCK})`);
                         if (stuckCount >= MAX_STUCK) {
-                            log(bot, `Cannot navigate after ${stuckCount} failed segments.`);
+                            log(bot, 'Cannot navigate after stuck milestones.');
                             clearInterval(progressInterval);
                             return false;
                         }
-                        // [mindaxis-patch:bfs-detour] pathfinder 失敗時は BFS walk でターゲット方向に前進
-                        // [mindaxis-patch:bfs-detour-surface] maxDrop=8: 地表限定（洞窟に潜らない）
-                        const _detourPos = bot.entity.position;
-                        const _ddx = x - _detourPos.x, _ddz = z - _detourPos.z;
-                        const _dlen = Math.sqrt(_ddx*_ddx + _ddz*_ddz) || 1;
-                        const _dHeading = { x: _ddx/_dlen, z: _ddz/_dlen };
-                        const _bfsD = _bfsFurthest(bot, 80, null, _dHeading, 8);
-                        if (_bfsD && _bfsD.path && _bfsD.path.length > 0) {
-                            console.log('[goto-trace] BFS detour: ' + _bfsD.path.length + ' steps toward (' + Math.round(x) + ',' + Math.round(z) + ')');
-                            bot.setControlState('sprint', true);
-                            for (const [nx, ny, nz] of _bfsD.path) {
-                                if (_ic()) break;
-                                const _su = ny > Math.floor(bot.entity.position.y);
-                                await bot.lookAt(new Vec3(nx+0.5, ny+(_su?1.6:0.6), nz+0.5));
-                                bot.setControlState('forward', true);
-                                if (_su || bot.entity.isInWater) bot.setControlState('jump', true);
-                                const _ss = Date.now();
-                                while (Date.now()-_ss < 800) {
-                                    if (bot.entity.position.distanceTo(new Vec3(nx+0.5,ny,nz+0.5)) < 0.9 || _ic()) break;
-                                    await new Promise(r => setTimeout(r, 50));
-                                }
-                                bot.setControlState('jump', false);
-                            }
-                            bot.setControlState('forward', false);
-                            bot.setControlState('sprint', false);
-                            // BFS で動けたならスタックカウントをリセット
-                            if (bot.entity.position.distanceTo(_detourPos) > 3) stuckCount = 0;
-                        } else {
-                            log(bot, '[detour] BFS found no path, trying manual navigation...');
-                            await manualWalkToward(bot, x, z, 5);
-                        }
-                        if (_ic()) break;
                     } else {
                         stuckCount = 0;
                     }
-                    continue;
                 }
-                // [#13 fix] オーバーシュート検出: 目標から離れたらループ中断
                 const afterDist = bot.entity.position.distanceTo(target);
                 if (afterDist > remaining + 5) {
-                    log(bot, `Overshoot detected (${Math.round(remaining)} → ${Math.round(afterDist)}). Switching to final approach.`);
+                    log(bot, `Overshoot detected. Switching to final approach.`);
                     break;
                 }
             }
@@ -3114,60 +3038,23 @@ export async function followPlayer(bot, username, distance=4) {
 
 
 export async function moveAway(bot, distance) {
-    /**
-     * Move away from current position using BFS to find the furthest reachable point.
-     * Repeats in hops until the target distance is covered.
-     * Works in any terrain: open land, enclosed spaces, water.
-     **/
-    // [mindaxis-patch:moveaway-bfs-v1] BFSで到達可能な最遠点を探し、ホップして距離を稼ぐ
+    // [mindaxis-patch:moveaway-simplified] 目的地を決めて goToPosition に委ねる
+    // goToPosition が BFS マイルストーン → pathfinder を内部で処理する
     const startPos = bot.entity.position.clone();
-    let totalMoved = 0;
-    const MAX_HOPS = 6;
-    const SCAN_RADIUS = 90; // チャンク内で安全にスキャンできる半径
-    // [mindaxis-patch:bfs-heading-v3] heading を bot に永続化（moveAway 再呼び出しで方向を維持）
-    // 割り込み後も同じ方向に進み続けるために bot._moveAwayHeading に保存する
-    let _heading = bot._moveAwayHeading || null;
-
-    for (let hop = 0; hop < MAX_HOPS && totalMoved < distance; hop++) {
-        if (bot.interrupt_code) break;
-        // heading が確定済みならその方向で探索、なければ startPos 基準で最遠点
-        const target = _heading
-            ? _bfsFurthest(bot, SCAN_RADIUS, null, _heading)
-            : _bfsFurthest(bot, SCAN_RADIUS, startPos);
-        if (!target) {
-            // [mindaxis-patch:bfs-null-gotosurface] goToSurface に委ねる（ピラー含む）
-            log(bot, `BFS: no reachable space (hop ${hop + 1}). Calling goToSurface...`);
-            await goToSurface(bot);
-            if (bot.interrupt_code) break;
-            // 地上に出たら BFS 再スキャンして継続
-            const _afterSurface = _heading
-                ? _bfsFurthest(bot, SCAN_RADIUS, null, _heading)
-                : _bfsFurthest(bot, SCAN_RADIUS, startPos);
-            if (_afterSurface) { continue; }
-            break;
-        }
-        // heading 未確定のとき（初回呼び出しの hop0）: 方向を決定して bot に永続化
-        if (!_heading) {
-            const _hDx = target.x - startPos.x;
-            const _hDz = target.z - startPos.z;
-            const _hLen = Math.sqrt(_hDx * _hDx + _hDz * _hDz) || 1;
-            _heading = { x: _hDx / _hLen, z: _hDz / _hLen };
-            bot._moveAwayHeading = _heading;
-            console.log(`[moveAway] heading fixed: dx=${_heading.x.toFixed(2)} dz=${_heading.z.toFixed(2)}`);
-        }
-        log(bot, `BFS milestone ${hop + 1}/${MAX_HOPS}: (${target.x},${target.y},${target.z}) dist=${target.dist} inWater=${target.isWater}`);
-        // [mindaxis-patch:bfs-milestone] BFS はマイルストーン計算のみ。実移動は pathfinder に委ねる
-        await goToPosition(bot, target.x, target.y, target.z, 3);
-        totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
-        log(bot, `Moved ${totalMoved}/${distance} blocks total.`);
-        if (totalMoved >= distance) break;
+    // 前回の heading を維持（同方向に探索を続ける）、なければランダム
+    let heading = bot._moveAwayHeading;
+    if (!heading) {
+        const angle = Math.random() * 2 * Math.PI;
+        heading = { x: Math.cos(angle), z: Math.sin(angle) };
+        bot._moveAwayHeading = heading;
     }
-
-    const new_pos = bot.entity.position;
-    const _actualDist = Math.round(new_pos.distanceTo(startPos));
-    log(bot, `Moved away from ${startPos.floored()} to ${new_pos.floored()} (${_actualDist} blocks).`);
-    // [mindaxis-patch:bfs-heading-v3] 目標距離に達したら heading をリセット（次回は新しい方向を決める）
-    if (_actualDist >= distance) bot._moveAwayHeading = null;
+    const targetX = Math.round(startPos.x + heading.x * distance);
+    const targetZ = Math.round(startPos.z + heading.z * distance);
+    log(bot, `Moving away: target=(${targetX}, ${targetZ}), distance=${distance}`);
+    await goToPosition(bot, targetX, Math.round(startPos.y), targetZ, 3);
+    const actualDist = Math.round(bot.entity.position.distanceTo(startPos));
+    log(bot, `Moved away ${actualDist} blocks.`);
+    if (actualDist >= distance * 0.8) bot._moveAwayHeading = null;
     return true;
 }
 
