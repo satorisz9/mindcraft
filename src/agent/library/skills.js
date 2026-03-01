@@ -3925,6 +3925,7 @@ async function _goToSurfaceInner(bot) {
         } catch(e) { console.log('[cave-fall] Save error:', e.message); }
     }
 
+    let _noProgressStreak = 0; // [mindaxis-patch:digup-noprogress-streak] 連続無進行カウント
     for (let step = 0; step < maxSteps; step++) {
         if (bot.interrupt_code) { bot.setControlState('jump', false); return false; }
         let curPos = bot.entity.position;
@@ -4116,26 +4117,31 @@ async function _goToSurfaceInner(bot) {
         }
 
         let newPos = bot.entity.position;
-        if (Math.floor(newPos.y) <= curY && step > 5) {
-            log(bot, '[dig-up] No progress at y=' + curY + ', digging wall for material');
-            // 壁ブロックを掘って素材を確保し、上と下をクリアにして再試行
-            const _dirs4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
-            for (const _d of _dirs4) {
-                // 横の壁ブロック (足元〜頭) を掘ってブロック確保
-                for (const _dy of [0, 1]) {
-                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY + _dy, cz + _d.z));
+        if (Math.floor(newPos.y) > curY) {
+            _noProgressStreak = 0; // 上昇したのでリセット
+        } else if (step > 3) {
+            _noProgressStreak++;
+            // [mindaxis-patch:digup-noprogress-streak] 無進行が続く場合のみ壁を1ブロック掘る
+            if (_noProgressStreak > 10) {
+                log(bot, '[dig-up] No progress ' + _noProgressStreak + ' steps, giving up.');
+                bot.setControlState('jump', false);
+                return false;
+            }
+            log(bot, '[dig-up] No progress at y=' + curY + ' (streak=' + _noProgressStreak + ')');
+            // ブロックがなければ壁を1ブロックだけ掘って補充（ループごとに8ブロックではなく1ブロックに絞る）
+            if (!findPillarItem()) {
+                const _dirs4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
+                for (const _d of _dirs4) {
+                    const _wb = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
                     if (_wb && _wb.diggable && _wb.name !== 'air' && _wb.name !== 'cave_air'
                         && _wb.name !== 'water' && _wb.name !== 'flowing_water'
                         && _wb.name !== 'bedrock') {
-                        try {
-                            await bot.tool.equipForBlock(_wb);
-                            await bot.dig(_wb);
-                        } catch(e) {}
+                        try { await bot.tool.equipForBlock(_wb); await bot.dig(_wb); break; } catch(e) {}
                     }
                 }
             }
-            // 上も再度掘る
-            for (let _dy2 = 1; _dy2 <= 4; _dy2++) {
+            // 上も念のため再掘削
+            for (let _dy2 = 1; _dy2 <= 3; _dy2++) {
                 const _ab = bot.blockAt(new Vec3(cx, curY + _dy2, cz));
                 if (_ab && _ab.name !== 'air' && _ab.name !== 'cave_air' && _ab.name !== 'bedrock') {
                     try { await bot.tool.equipForBlock(_ab); await bot.dig(_ab); } catch(e) {}
