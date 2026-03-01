@@ -2407,8 +2407,10 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         }
         if (_ic()) { clearInterval(progressInterval); return false; }
         let totalDist = bot.entity.position.distanceTo(target);
-        console.log('[goto-trace] totalDist=' + Math.round(totalDist) + ' WAYPOINT_DIST=' + WAYPOINT_DIST);
-        if (totalDist <= WAYPOINT_DIST * 1.5) {
+        // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ垂直差が大きくても直接アプローチ（往復防止）
+        const _xzDist = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
+        console.log('[goto-trace] totalDist=' + Math.round(totalDist) + ' xzDist=' + Math.round(_xzDist) + ' WAYPOINT_DIST=' + WAYPOINT_DIST);
+        if (totalDist <= WAYPOINT_DIST * 1.5 || _xzDist <= WAYPOINT_DIST) {
             let directOk = false;
             try {
                 await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
@@ -2441,9 +2443,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 if (_checkTotalTimeout()) break;
                 const pos = bot.entity.position;
                 const remaining = pos.distanceTo(target);
-                console.log('[goto-trace] waypoint loop: remaining=' + Math.round(remaining) + ' pos=(' + Math.round(pos.x) + ',' + Math.round(pos.y) + ',' + Math.round(pos.z) + ')');
+                const _xzRemaining = Math.sqrt((x - pos.x)**2 + (z - pos.z)**2);
+                console.log('[goto-trace] waypoint loop: remaining=' + Math.round(remaining) + ' xzRemaining=' + Math.round(_xzRemaining) + ' pos=(' + Math.round(pos.x) + ',' + Math.round(pos.y) + ',' + Math.round(pos.z) + ')');
                 if (remaining <= min_distance + 1) break;
-                if (remaining <= WAYPOINT_DIST * 1.5) {
+                // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ直接アプローチ（垂直移動で往復防止）
+                if (remaining <= WAYPOINT_DIST * 1.5 || _xzRemaining <= WAYPOINT_DIST) {
                     console.log('[goto-trace] final approach');
                     try {
                         await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
