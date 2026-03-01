@@ -2614,10 +2614,22 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                     }
                     // BFS も失敗したら pathfinder にフォールバック
                 }
-                console.log('[goto-trace] segment to (' + Math.round(wpX) + ',' + Math.round(wpZ) + ') timeout=' + SEGMENT_TIMEOUT_MS);
-                log(bot, `Waypoint: (${Math.round(wpX)}, ${Math.round(wpZ)}), ${Math.round(remaining)} blocks left.`);
+                // [mindaxis-patch:milestone-v1] pathfinder ゴールを BFS で到達可能な地点（マイルストーン）に補正
+                // naive wpX/wpZ（30ブロック先の直線点）は水・崖の上になりうるので、
+                // BFS で heading 方向に実際に歩ける最遠点を探してゴールに使う
+                const _msH = { x: dx/dist2d, z: dz/dist2d };
+                const _ms = _bfsFurthest(bot, 40, null, _msH, 8);
+                const _msX = (_ms && _ms.headScore > 5) ? _ms.x : wpX;
+                const _msZ = (_ms && _ms.headScore > 5) ? _ms.z : wpZ;
+                if (_ms && _ms.headScore > 5) {
+                    console.log('[goto-trace] milestone BFS: (' + Math.round(_msX) + ',' + Math.round(_msZ) + ') headScore=' + Math.round(_ms.headScore));
+                } else {
+                    console.log('[goto-trace] milestone BFS failed, using naive waypoint (' + Math.round(wpX) + ',' + Math.round(wpZ) + ')');
+                }
+                console.log('[goto-trace] segment to (' + Math.round(_msX) + ',' + Math.round(_msZ) + ') timeout=' + SEGMENT_TIMEOUT_MS);
+                log(bot, `Waypoint: (${Math.round(_msX)}, ${Math.round(_msZ)}), ${Math.round(remaining)} blocks left.`);
                 try {
-                    await goWithTimeout(new pf.goals.GoalXZ(wpX, wpZ), SEGMENT_TIMEOUT_MS); // [mindaxis-patch:waypoint-goalxz] Y不問
+                    await goWithTimeout(new pf.goals.GoalXZ(_msX, _msZ), SEGMENT_TIMEOUT_MS); // [mindaxis-patch:milestone-v1]
                     console.log('[goto-trace] segment OK, moved to (' + Math.round(bot.entity.position.x) + ',' + Math.round(bot.entity.position.z) + ')');
                     stuckCount = 0;
                 } catch (e) {
