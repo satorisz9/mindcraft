@@ -2072,8 +2072,14 @@ async function _bfsDigDown(bot, targetX, targetY, targetZ) {
     const maxSteps = Math.abs(Math.floor(bot.entity.position.y) - targetY) + 20;
     log(bot, `[bfs-dig-down] Digging down from y=${Math.floor(bot.entity.position.y)} to y=${targetY}...`);
 
+    let _lastY = Math.floor(bot.entity.position.y);
+    let _noProgressCount = 0;
     for (let step = 0; step < maxSteps * 2; step++) {
         if (bot.interrupt_code) return false;
+        // 進捗チェック: 5ステップ連続で Y が変わらなければ abort
+        const _curY2 = Math.floor(bot.entity.position.y);
+        if (_curY2 >= _lastY) { _noProgressCount++; } else { _noProgressCount = 0; _lastY = _curY2; }
+        if (_noProgressCount >= 5) { log(bot, '[bfs-dig-down] No Y progress, aborting.'); return false; }
         const pos = bot.entity.position;
         if (pos.y <= targetY + 1.5) break;
 
@@ -2378,14 +2384,15 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         }
         if (_bdfYDown >= 5 && !_bdfInWater && !bot._bfsDigInProgress && !_bdfNearHouse) {
             bot._bfsDigInProgress = true;
+            bot._pauseWatchdog = true;
             try {
                 const _bdfOk = await _bfsDigDown(bot, x, y, z);
-                bot._bfsDigInProgress = false;
-                if (_bdfOk) return true;
-                // 到達できなかった場合は以下の pathfinder で継続試行
+                if (_bdfOk) { bot._bfsDigInProgress = false; bot._pauseWatchdog = false; return true; }
             } catch(e) {
                 log(bot, '[bfs-dig-down] Error: ' + e.message);
+            } finally {
                 bot._bfsDigInProgress = false;
+                bot._pauseWatchdog = false;
             }
         }
     }
@@ -3739,9 +3746,17 @@ export async function digDown(bot, distance = 10) {
 }
 
 export async function goToSurface(bot) {
-    // [mindaxis-patch:gotosurface-watchdog] ピラー中に watchdog で中断されないよう延長
-    bot._requestWatchdogMs = 300000;
-    // [mindaxis-patch:gotosurface-pillar] v6: dig staircase upward + 水泳脱出 + 家ガード
+    // [mindaxis-patch:gotosurface-watchdog] 長時間ピラー中は watchdog を一時停止（内部で進捗チェック）
+    bot._pauseWatchdog = true;
+    try {
+        return await _goToSurfaceInner(bot);
+    } finally {
+        bot._pauseWatchdog = false;
+    }
+}
+
+async function _goToSurfaceInner(bot) {
+    // [mindaxis-patch:gotosurface-pillar] v6: dig staircase upward + 水泳脱出 + 家ガード（watchdog は呼び出し元で一時停止済み）
     const pos = bot.entity.position;
 
     // 家の範囲内かつ家のフロアレベルにいる場合はピラージャンプ禁止 — ドアを使うべき

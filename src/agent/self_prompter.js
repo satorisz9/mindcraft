@@ -380,6 +380,8 @@ export class SelfPrompter {
             const _scheduleWatchdog = (remainingMs) => {
                 clearTimeout(_wdHandle);
                 _wdHandle = setTimeout(() => {
+                    // [mindaxis-patch:watchdog-pause] 長時間処理が一時停止を要求している場合は 10s 後に再チェック
+                    if (_wdBot._pauseWatchdog) { _scheduleWatchdog(10000); return; }
                     // コマンドが延長要請していれば延長する
                     if (_wdBot._requestWatchdogMs && _wdBot._requestWatchdogMs > _wdActiveMs) {
                         _wdActiveMs = _wdBot._requestWatchdogMs;
