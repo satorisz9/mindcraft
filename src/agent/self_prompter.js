@@ -160,6 +160,12 @@ export class SelfPrompter {
                     const _dzStr = _dzones.slice(0, 5).map(z => `(${z.x},${z.y},${z.z})=${z.cause}×${z.count}`).join(', ');
                     planHint += ' KNOWN DANGER ZONES: ' + _dzStr + '. These locations have caused death before — approach with extreme caution or avoid entirely. Water zones (drown) are especially lethal; do not enter without an escape plan.';
                 }
+                // [mindaxis-patch:nitwit-area-hint] ニットウィットエリアをプロンプトに追加
+                const _nareas = this.agent.bot._nitwitAreas || [];
+                if (_nareas.length > 0) {
+                    const _naStr = _nareas.map(na => `(x=${na.x},z=${na.z})`).join(', ');
+                    planHint += ` NITWIT AREAS — NO TRADERS (permanently blacklisted): ${_naStr}. NEVER navigate within 200 blocks of these coordinates. Do NOT use !goToRememberedPlace("village") if it points near these areas. Search in a completely different direction — use !moveAway(500) to get far away first.`;
+                }
                 // --- マクロプランヒント ---
                 try {
                     const _fs = await import('fs');

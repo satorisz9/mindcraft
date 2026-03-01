@@ -1047,8 +1047,18 @@ export const actionsList = [
         perform: runAsAction(async (agent, name) => {
             const pos = agent.memory_bank.recallPlace(name);
             if (!pos) {
-            skills.log(agent.bot, `No location named "${name}" saved.`);
-            return;
+                skills.log(agent.bot, `No location named "${name}" saved.`);
+                return;
+            }
+            // [mindaxis-patch:goto-remembered-nitwit-guard] 'village' がニットウィットエリアに近い場合はナビゲーション拒否
+            if (name === 'village') {
+                const _areas = agent.bot._nitwitAreas || [];
+                const _close = _areas.find(na => Math.hypot(pos[0] - na.x, pos[2] - na.z) < 200);
+                if (_close) {
+                    agent.memory_bank.forgetPlace(name);
+                    skills.log(agent.bot, `Blocked: saved "village" at (${Math.round(pos[0])}, ${Math.round(pos[2])}) is within 200 blocks of blacklisted nitwit area (${_close.x}, ?, ${_close.z}). Entry deleted — search in a different direction.`);
+                    return;
+                }
             }
             await skills.goToPosition(agent.bot, pos[0], pos[1], pos[2], 1);
         })

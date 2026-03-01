@@ -91,7 +91,9 @@ export class History {
                 // [mindaxis-patch:saved-places-persist] MemoryBank の saved_places を永続化
                 saved_places: this.agent.memory_bank.getJson(),
                 // [mindaxis-patch:villager-blacklist-persist] ニットウィット永続ブラックリスト
-                blocked_nitwit_ids: this.agent.bot._blockedVillagerIds ? [...this.agent.bot._blockedVillagerIds] : []
+                blocked_nitwit_ids: this.agent.bot._blockedVillagerIds ? [...this.agent.bot._blockedVillagerIds] : [],
+                // [mindaxis-patch:nitwit-area-persist] ニットウィットエリアブラックリスト永続化
+                nitwit_areas: this.agent.bot._nitwitAreas || []
             };
             writeFileSync(this.memory_fp, JSON.stringify(data, null, 2));
             console.log('Saved memory to:', this.memory_fp);
@@ -121,6 +123,11 @@ export class History {
             if (data.blocked_nitwit_ids && Array.isArray(data.blocked_nitwit_ids) && data.blocked_nitwit_ids.length > 0) {
                 this.agent._pendingBlockedNitwitIds = new Set(data.blocked_nitwit_ids.map(String));
                 console.log('[mindaxis] Queued blocked nitwit IDs:', data.blocked_nitwit_ids.join(', '));
+            }
+            // [mindaxis-patch:nitwit-area-persist] ニットウィットエリアを復元
+            if (data.nitwit_areas && Array.isArray(data.nitwit_areas) && data.nitwit_areas.length > 0) {
+                this.agent._pendingNitwitAreas = data.nitwit_areas;
+                console.log('[mindaxis] Queued nitwit areas:', data.nitwit_areas.map(a => `(${a.x},${a.z})`).join(', '));
             }
             console.log('Loaded memory:', this.memory);
             return data;

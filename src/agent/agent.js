@@ -107,6 +107,12 @@ export class Agent {
                 console.log('[mindaxis] Restored blocked nitwit IDs to bot:', [...this._pendingBlockedNitwitIds].join(', '));
                 this._pendingBlockedNitwitIds = null;
             }
+            // [mindaxis-patch:nitwit-area-restore] ニットウィットエリアを bot に適用
+            this.bot._nitwitAreas = this._pendingNitwitAreas || [];
+            if (this.bot._nitwitAreas.length > 0) {
+                console.log('[mindaxis] Restored nitwit areas:', this.bot._nitwitAreas.map(a => `(${a.x},${a.z})`).join(', '));
+            }
+            this._pendingNitwitAreas = null;
             
             // Set skin for profile, requires Fabric Tailor. (https://modrinth.com/mod/fabrictailor)
             if (this.prompter.profile.skin)
