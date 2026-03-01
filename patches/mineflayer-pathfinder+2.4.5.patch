@@ -133,7 +133,7 @@ index b38bd30..853d7ea 100644
        bot.setControlState('jump', true)
        bot.setControlState('sprint', false)
      } else if (stateMovements.allowSprinting && physics.canStraightLine(path, true)) {
-@@ -629,8 +700,13 @@ function inject (bot) {
+@@ -629,8 +700,15 @@ function inject (bot) {
      }
  
      // check for futility
