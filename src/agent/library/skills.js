@@ -2145,26 +2145,25 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
         let totalDist = bot.entity.position.distanceTo(target);
         // [mindaxis-patch:goto-xz-direct] XZ距離が小さければ垂直差が大きくても直接アプローチ（往復防止）
         const _xzDist = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
+        let _directOk = false;
         if (totalDist <= WAYPOINT_DIST * 1.5 || _xzDist <= WAYPOINT_DIST) {
-            let directOk = false;
             try {
                 await goWithTimeout(new pf.goals.GoalNear(x, y, z, min_distance), DIRECT_TIMEOUT_MS);
-                directOk = true;
+                _directOk = true;
             } catch (e) {
                 if (_ic()) { clearInterval(progressInterval); return false; }
-                log(bot, `Direct navigation failed: ${e.message}, trying manual nav...`);
+                log(bot, `Direct navigation failed: ${e.message}, trying BFS...`);
             }
-        } else {
-            // [mindaxis-patch:bfs-milestone-unified] 長距離: BFS マイルストーン → pathfinder を統一パターンで繰り返す
-            // 手動BFS歩き(lookAt+forward)は廃止。全移動を pathfinder に委ねる
-            log(bot, `Long distance (${Math.round(totalDist)} blocks), using BFS milestones.`);
-            // [mindaxis-patch:bfs-pause-water-watchdog] 長距離移動中は水没ウォッチドッグを一時停止
+        }
+        if (!_directOk && !_ic()) {
+            // BFS マイルストーン → pathfinder を統一パターンで繰り返す（短距離 direct 失敗時もフォールバック）
+            log(bot, `BFS navigation (${Math.round(totalDist)} blocks).`);
             bot._pauseWatchdog = true;
             let stuckCount = 0;
-            // [mindaxis-patch:bfs-xz-progress] XZ進捗チェック: N回連続で目標に近づかなければ打ち切り
             let _lastXZRemaining = Math.sqrt((x - bot.entity.position.x)**2 + (z - bot.entity.position.z)**2);
             let _noXZProgressCount = 0;
             const _BFS_NO_PROGRESS_MAX = 5;
+            let _escapeAttempts = 0;
             while (true) {
                 if (_ic()) break;
                 const pos = bot.entity.position;
@@ -2188,7 +2187,17 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const prevPos = pos.clone();
                 const milestone = _bfsFurthest(bot, 80, null, heading, 8);
                 if (!milestone || milestone.headScore < 5) {
-                    log(bot, 'BFS: no milestone toward target. Giving up.');
+                    // headScore が低い = 目標方向に進めない → 方向を問わず最遠点へ逃げて再試行
+                    if (_escapeAttempts < 3) {
+                        const _escape = _bfsFurthest(bot, 80);
+                        if (_escape && _escape.dist > 5) {
+                            _escapeAttempts++;
+                            log(bot, `BFS blocked (headScore=${milestone ? milestone.headScore : 0}), escaping ${_escapeAttempts}/3 to (${_escape.x},${_escape.z})...`);
+                            try { await goWithTimeout(new pf.goals.GoalXZ(_escape.x, _escape.z), SEGMENT_TIMEOUT_MS); } catch(e) { if (_ic()) break; }
+                            continue;
+                        }
+                    }
+                    log(bot, 'BFS: no path toward target. Giving up.');
                     bot._pauseWatchdog = false;
                     clearInterval(progressInterval);
                     return false;
