@@ -2028,6 +2028,11 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
                 const reached = await goToSurface(bot);
                 if (reached) {
                     log(bot, 'Reached surface, now navigating to target...');
+                } else {
+                    // [mindaxis-patch:precheck-surface-fail-abort] 地上脱出失敗時は BFS 続行しない（水に誘導される）
+                    log(bot, 'Could not reach surface. Aborting navigation.');
+                    bot._pillarPreUsed = false;
+                    return false;
                 }
             } catch (e) {
                 log(bot, `Pre-navigation surface failed: ${e.message}`);
@@ -3949,8 +3954,8 @@ async function _goToSurfaceInner(bot) {
             await _saveCaveFallZone(step);
             return true;
         }
-        if (_pilWater && curPos.y >= surfaceY - 2) {
-            // 水面付近 → ジャンプして step-up を試みる
+        if (_pilWater) {
+            // [mindaxis-patch:digup-water-jump-only] 水中では横掘り禁止。ジャンプのみで浮上する
             bot.setControlState('jump', true);
             bot.setControlState('sprint', true);
             await new Promise(r => setTimeout(r, 1000));
@@ -3959,8 +3964,9 @@ async function _goToSurfaceInner(bot) {
             const _pilAfterFt = bot.blockAt(new Vec3(Math.floor(bot.entity.position.x), Math.floor(bot.entity.position.y), Math.floor(bot.entity.position.z)));
             if (_pilAfterFt && _pilAfterFt.name !== 'water' && _pilAfterFt.name !== 'flowing_water') {
                 log(bot, 'Jumped out of water at y=' + Math.floor(bot.entity.position.y) + '!');
-                return true;
+                break; // 地面に出た → dig-up フェーズへ
             }
+            continue; // まだ水中 → 横掘りせずループ継続
         }
 
         let cx = Math.floor(curPos.x);
@@ -4077,6 +4083,7 @@ async function _goToSurfaceInner(bot) {
                 // 材料不足: 隣接壁を2ブロック（足元+頭）掘って補充（1ブロックでは横に入れない）
                 const _dirs = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
                 let _supplemented = false;
+                let _suppDx = 0, _suppDz = 0;
                 for (const _d of _dirs) {
                     const _wb0 = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
                     const _wb1 = bot.blockAt(new Vec3(cx + _d.x, curY + 1, cz + _d.z));
@@ -4087,13 +4094,18 @@ async function _goToSurfaceInner(bot) {
                     if (_ok0 || _ok1) {
                         try { if (_ok0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
                         try { if (_ok1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
+                        _suppDx = _d.x; _suppDz = _d.z;
                         _supplemented = true;
                         break;
                     }
                 }
                 if (!_supplemented) { log(bot, 'No blocks to build up.'); return false; }
-                pillarItem = findPillarItem();
-                if (!pillarItem) { log(bot, 'No blocks after digging supplement.'); return false; }
+                // [mindaxis-patch:supplement-step-in] 掘った空間に踏み込んでから次イテレーションで縦ピラーへ
+                await bot.lookAt(new Vec3(cx + _suppDx + 0.5, curY + 0.5, cz + _suppDz + 0.5));
+                bot.setControlState('forward', true);
+                await new Promise(r => setTimeout(r, 450));
+                bot.setControlState('forward', false);
+                continue;
             }
             await bot.equip(pillarItem, 'hand');
             // 足元への設置（targetPlaceY >= curY）はジャンプしながら置く
@@ -4145,6 +4157,7 @@ async function _goToSurfaceInner(bot) {
             // ブロックがなければ壁を2ブロック（足元+頭）掘って補充（横に入れるよう2ブロック必要）
             if (!findPillarItem()) {
                 const _dirs4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
+                let _npDx = 0, _npDz = 0;
                 for (const _d of _dirs4) {
                     const _wb0 = bot.blockAt(new Vec3(cx + _d.x, curY, cz + _d.z));
                     const _wb1 = bot.blockAt(new Vec3(cx + _d.x, curY + 1, cz + _d.z));
@@ -4155,8 +4168,16 @@ async function _goToSurfaceInner(bot) {
                     if (_ok0 || _ok1) {
                         try { if (_ok0) { await bot.tool.equipForBlock(_wb0); await bot.dig(_wb0); } } catch(e) {}
                         try { if (_ok1) { await bot.tool.equipForBlock(_wb1); await bot.dig(_wb1); } } catch(e) {}
+                        _npDx = _d.x; _npDz = _d.z;
                         break;
                     }
+                }
+                // [mindaxis-patch:noprogress-step-in] 掘った空間に踏み込む
+                if (_npDx !== 0 || _npDz !== 0) {
+                    await bot.lookAt(new Vec3(cx + _npDx + 0.5, curY + 0.5, cz + _npDz + 0.5));
+                    bot.setControlState('forward', true);
+                    await new Promise(r => setTimeout(r, 450));
+                    bot.setControlState('forward', false);
                 }
             }
             // 上も念のため再掘削
