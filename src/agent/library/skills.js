@@ -3938,6 +3938,58 @@ async function _goToSurfaceInner(bot) {
         let cx = Math.floor(curPos.x);
         let cz = Math.floor(curPos.z);
 
+        // PILLAR_PRECHECK: 掘る前に頭上ブロックを診断してリスク分岐
+        const _precheck4 = [{x:1,z:0},{x:-1,z:0},{x:0,z:1},{x:0,z:-1}];
+        let _precheckAborted = false;
+        for (let dy = 1; dy <= 5 && !_precheckAborted; dy++) {
+            const _ba = bot.blockAt(new Vec3(cx, curY + dy, cz));
+            if (!_ba) continue;
+            const _baName = _ba.name;
+
+            if (_baName === 'lava' || _baName === 'flowing_lava') {
+                // 溶岩検知 → 横掘りルートへ切替
+                log(bot, `[pillar-precheck] Lava at y+${dy}! Switching to sideways escape.`);
+                let _lavaEscaped = false;
+                for (const _d of _precheck4) {
+                    const _sb = bot.blockAt(new Vec3(cx+_d.x, curY, cz+_d.z));
+                    const _sb2 = bot.blockAt(new Vec3(cx+_d.x, curY+1, cz+_d.z));
+                    if (!_sb || _sb.name==='lava' || (_sb2 && _sb2.name==='lava')) continue;
+                    try { if (_sb.diggable && _sb.name!=='air') await bot.dig(_sb); } catch(e) {}
+                    try { if (_sb2 && _sb2.diggable && _sb2.name!=='air') await bot.dig(_sb2); } catch(e) {}
+                    cx += _d.x; cz += _d.z; _lavaEscaped = true; break;
+                }
+                if (!_lavaEscaped) { log(bot, '[pillar-precheck] Lava with no sideways escape, aborting.'); return false; }
+                _precheckAborted = true; // 座標変わったので次 iteration から再評価
+
+            } else if (_baName === 'water' || _baName === 'flowing_water') {
+                // 水検知 → 横に排水穴を掘って水源を断つ
+                log(bot, `[pillar-precheck] Water at y+${dy}, digging sideways drain.`);
+                for (const _d of _precheck4) {
+                    for (let _sd = 1; _sd <= 4; _sd++) {
+                        const _sb = bot.blockAt(new Vec3(cx+_d.x*_sd, curY+dy, cz+_d.z*_sd));
+                        if (!_sb || (!_sb.diggable && _sb.name!=='air') || _sb.name==='lava') break;
+                        if (_sb.diggable && _sb.name!=='air') { try { await bot.dig(_sb); } catch(e) {} }
+                    }
+                }
+                break; // 排水後に再dig
+
+            } else if (_baName === 'gravel' || _baName === 'sand' || _baName === 'red_sand' || _baName === 'suspicious_sand' || _baName === 'suspicious_gravel') {
+                // 落下系ブロック → 横に逃げ穴を1ブロック掘ってから素早く上を掘る
+                log(bot, `[pillar-precheck] Falling block (${_baName}) at y+${dy}, creating escape hole.`);
+                for (const _d of _precheck4) {
+                    const _sb = bot.blockAt(new Vec3(cx+_d.x, curY, cz+_d.z));
+                    const _sb2 = bot.blockAt(new Vec3(cx+_d.x, curY+1, cz+_d.z));
+                    if (!_sb || _sb.name==='lava' || (_sb2 && _sb2.name==='lava')) continue;
+                    if (_sb.name==='air' || _sb.name==='cave_air') { break; } // 既に逃げ穴あり
+                    try { if (_sb.diggable) await bot.dig(_sb); } catch(e) {}
+                    try { if (_sb2 && _sb2.diggable && _sb2.name!=='air') await bot.dig(_sb2); } catch(e) {}
+                    break;
+                }
+                break; // 逃げ穴確保後、通常dig継続
+            }
+        }
+        if (_precheckAborted) continue;
+
         // Step 1: Dig everything above (2-4 blocks up)
         for (let dy = 1; dy <= 4; dy++) {
             let block = bot.blockAt(new Vec3(cx, curY + dy, cz));
