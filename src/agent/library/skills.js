@@ -2746,10 +2746,25 @@ export async function goToNearestEntity(bot, entityType, min_distance=2, range=6
      * @param {number} range, the range to look for the entity. Defaults to 64.
      * @returns {Promise<boolean>} true if the entity was reached, false otherwise.
      **/
-    let entity = world.getNearestEntityWhere(bot, entity => entity.name === entityType, range);
-    if (!entity) {
-        log(bot, `Could not find any ${entityType} in ${range} blocks.`);
-        return false;
+    let entity;
+    // [mindaxis-patch:skip-nitwit-unemployed] 村人検索でニットウィット(11)/無職(0)をスキップ
+    if (entityType === 'villager') {
+        entity = world.getNearestEntityWhere(bot, e => {
+            if (e.name !== 'villager') return false;
+            const _pm = e.metadata && Object.values(e.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
+            const _pid = _pm != null ? _pm.villagerProfession : -1;
+            return _pid !== 11 && _pid !== 0; // skip nitwit and unemployed
+        }, range);
+        if (!entity) {
+            log(bot, `Could not find any trader villager in ${range} blocks. (All nearby villagers are nitwit or unemployed — move away and search in a new area.)`);
+            return false;
+        }
+    } else {
+        entity = world.getNearestEntityWhere(bot, entity => entity.name === entityType, range);
+        if (!entity) {
+            log(bot, `Could not find any ${entityType} in ${range} blocks.`);
+            return false;
+        }
     }
     let distance = bot.entity.position.distanceTo(entity.position);
     log(bot, `Found ${entityType} ${distance} blocks away.`);

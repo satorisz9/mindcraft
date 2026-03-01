@@ -978,7 +978,7 @@ export const actionsList = [
                         const _pm = _nearV.metadata && Object.values(_nearV.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
                         const _pid = _pm != null ? _pm.villagerProfession : -1;
                         if (_pid === 11 || _pid === 0) {
-                            skills.log(agent.bot, `Skipping village save — nearest villager is ${_pid === 11 ? 'nitwit' : 'unemployed'} (profId=${_pid}).`);
+                            skills.log(agent.bot, `Found ${_pid === 11 ? 'nitwit' : 'unemployed'} villager (profId=${_pid}) — NOT a trading village. Do NOT call !rememberHere("village") here. Move away and search in a completely different direction for a real village with traders.`);
                             return;
                         }
                     }
@@ -1021,6 +1021,20 @@ export const actionsList = [
         description: 'Save the current location with a given name.',
         params: {'name': { type: 'string', description: 'The name to remember the location as.' }},
         perform: async function (agent, name) {
+            // [mindaxis-patch:rememberhere-nitwit-guard] 'village' はニットウィット/無職近くでは保存しない
+            if (name === 'village') {
+                const _p = agent.bot.entity.position;
+                const _nearV = Object.values(agent.bot.entities).find(e =>
+                    e.name === 'villager' && e.position && e.position.distanceTo(_p) < 8
+                );
+                if (_nearV) {
+                    const _pm = _nearV.metadata && Object.values(_nearV.metadata).find(v => v && typeof v === 'object' && 'villagerProfession' in v);
+                    const _pid = _pm != null ? _pm.villagerProfession : -1;
+                    if (_pid === 11 || _pid === 0) {
+                        return `Blocked: nearest villager is ${_pid === 11 ? 'nitwit' : 'unemployed'} (profId=${_pid}). This is NOT a trading village — do NOT save as "village". Move away and search in a different direction.`;
+                    }
+                }
+            }
             const pos = agent.bot.entity.position;
             agent.memory_bank.rememberPlace(name, pos.x, pos.y, pos.z);
             return `Location saved as "${name}".`;
