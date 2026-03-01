@@ -573,8 +573,9 @@ export const actionsList = [
                 if (nextStep >= 0) {
                     skills.log(bot, 'Skipped step ' + (stepIdx+1) + '. Next: ' + plan.steps[nextStep].step);
                 } else {
-                    plan.status = 'completed';
-                    skills.log(bot, 'Skipped step ' + (stepIdx+1) + '. Plan completed!');
+                    // スキップで全ステップが終わった場合は partial 扱い（achievements には記録しない）
+                    plan.status = 'partial';
+                    skills.log(bot, 'Skipped step ' + (stepIdx+1) + '. Plan ended with skipped steps — marked as partial, NOT completed. Objectives were not fully achieved.');
                 }
                 fs.writeFileSync(planPath, JSON.stringify(pd, null, 2));
             } catch(e) {

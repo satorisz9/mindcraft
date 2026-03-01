@@ -2553,11 +2553,13 @@ export async function goToNearestBlock(bot, blockType,  min_distance=2, range=64
         block = blocks[0];
     }
     else {
-        // [mindaxis-patch:surface-prefer-v5] 地上ブロック優先 + デバッグログ
+        // [mindaxis-patch:surface-prefer-v6] 地上ブロック優先 + 鉱石は地下フィルタ無効
         const botY = bot.entity.position.y;
-        const minY = Math.max(botY - 20, 50);
+        // 鉱石・深層鉱石はY制限なし（地下採掘のため）
+        const _isOre = blockType.endsWith('_ore') || blockType.startsWith('deepslate_');
+        const minY = _isOre ? -64 : Math.max(botY - 20, 50);
         const candidates = world.getNearestBlocks(bot, blockType, range, 50);
-        console.log('[search-dbg] ' + blockType + ': ' + candidates.length + ' raw candidates within ' + range + ' blocks');
+        console.log('[search-dbg] ' + blockType + ': ' + candidates.length + ' raw candidates within ' + range + ' blocks' + (_isOre ? ' (ore mode, no minY filter)' : ' minY=' + minY));
         const _isWater = n => n && (n.name === 'water' || n.name === 'flowing_water');
         const surfaceCandidates = candidates.filter(b => {
             if (b.position.y < minY) { return false; }
