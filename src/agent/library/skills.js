@@ -4190,7 +4190,7 @@ function _bfsFurthest(bot, maxRadius = 80) {
                 if (_canStandAt(nx, ny, nz)) {
                     visited.add(nKey);
                     queue.push([nx, ny, nz, dist + 1 + Math.abs(dy), false]);
-                } else if (dy === 0 && _canSwimAt(nx, ny, nz)) {
+                } else if (_canSwimAt(nx, ny, nz)) {
                     visited.add(nKey);
                     queue.push([nx, ny, nz, dist + 3, true]);
                 }
