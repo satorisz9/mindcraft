@@ -584,13 +584,23 @@ export class Agent {
             const _self = this;
             setTimeout(() => {
                 try {
+                    // [mindaxis-patch:death-plan-reinsert-v2] diamond 個数チェック追加
                     const _KEY = [
-                        { name: 'diamond_pickaxe', phaseId: 'deep-mining' },
-                        { name: 'diamond_sword',   phaseId: 'deep-mining' },
+                        { name: 'diamond_pickaxe', phaseId: 'deep-mining', minCount: 1 },
+                        { name: 'diamond_sword',   phaseId: 'deep-mining', minCount: 1 },
+                        { name: 'diamond',         phaseId: 'deep-mining', minCount: 6 }, // 生ダイヤ6個以上を失った場合もリセット
                     ];
-                    const _curInv = _self.bot.inventory.items().map(i => i.name);
+                    const _curInvItems = _self.bot.inventory.items();
+                    const _curInv = _curInvItems.map(i => i.name);
+                    const _curInvCount = (name) => _curInvItems.filter(i => i.name === name).reduce((s, i) => s + i.count, 0);
+                    const _prevInvCount = (name) => _prevInv.filter(n => n === name).length; // death 時は配列（個数分 push してないので 1 のみ）
                     let _chestItems = [];
-                    try { _chestItems = JSON.parse(readFileSync(`./bots/${_self.name}/chest_summary.json`, 'utf8')).items || []; } catch(e) {}
+                    let _chestCounts = {};
+                    try {
+                        const _cs = JSON.parse(readFileSync(`./bots/${_self.name}/chest_summary.json`, 'utf8'));
+                        _chestItems = (_cs.items || []).map(i => i.name || i);
+                        for (const _ci of (_cs.items || [])) { _chestCounts[_ci.name || _ci] = (_chestCounts[_ci.name || _ci] || 0) + (_ci.count || 1); }
+                    } catch(e) {}
                     const _planPath = `./bots/${_self.name}/current_plan.json`;
                     if (!existsSync(_planPath)) return;
                     let _planData;
@@ -598,24 +608,28 @@ export class Agent {
                     let _changed = false;
                     for (const _ki of _KEY) {
                         if (!_prevInv.includes(_ki.name)) continue; // 死亡前に持っていなかった
-                        if (_curInv.includes(_ki.name) || _chestItems.includes(_ki.name)) continue; // 今も持っているかチェストにある
-                        // アイテムを失った → 対応プランを探してリセット
-                        const _pi = _planData.plans.findIndex(p => p.phaseId === _ki.phaseId);
-                        if (_pi < 0) continue;
-                        const _plan = _planData.plans[_pi];
-                        if (_plan.status !== 'completed' && _plan.status !== 'skipped') continue; // まだ未完了なので不要
-                        console.log(`[death-plan-reinsert] ${_ki.name} を死亡で失った → ${_ki.phaseId} プランをリセット`);
-                        _plan.status = 'in_progress';
-                        for (const _s of _plan.steps) { _s.done = false; }
-                        if (_planData.currentPlanIndex > _pi || _planData.plans[_planData.currentPlanIndex]?.status === 'completed') {
-                            _planData.currentPlanIndex = _pi;
-                        }
+                        const _nowCount = _curInvCount(_ki.name) + (_chestCounts[_ki.name] || 0);
+                        if (_nowCount >= (_ki.minCount || 1)) continue; // 今も十分持っている（インベントリ+チェスト合計）
+                        // アイテムを失った → 同じフェーズのプランを現在位置の直後に新規挿入
+                        const _existingPlan = _planData.plans.find(p => p.phaseId === _ki.phaseId);
+                        if (!_existingPlan) continue;
+                        if (_existingPlan.status !== 'completed' && _existingPlan.status !== 'skipped') continue;
+                        // 既に同フェーズの pending プランが直後にあれば挿入不要
+                        const _insertAt = _planData.currentPlanIndex + 1;
+                        const _alreadyQueued = _planData.plans.slice(_insertAt).some(p => p.phaseId === _ki.phaseId && p.status === 'pending');
+                        if (_alreadyQueued) continue;
+                        console.log(`[death-plan-reinsert] ${_ki.name} を死亡で失った → ${_ki.phaseId} を index ${_insertAt} に再挿入`);
+                        const _newPlan = JSON.parse(JSON.stringify(_existingPlan));
+                        _newPlan.status = 'pending';
+                        for (const _s of _newPlan.steps) { _s.done = false; delete _s.skipped; }
+                        _newPlan.reason = `死亡によりアイテムを消失 — 再取得のため再実行 (${new Date().toISOString()})`;
+                        _planData.plans.splice(_insertAt, 0, _newPlan);
                         _changed = true;
                     }
                     if (_changed) {
                         writeFileSync(_planPath, JSON.stringify(_planData, null, 2));
                         console.log('[death-plan-reinsert] current_plan.json を更新しました');
-                        _self.handleMessage('system', 'You died and lost key items (diamond_pickaxe or diamond_sword) that are not in your chest. The deep-mining plan has been reset. Please complete it again to re-obtain those items.');
+                        _self.handleMessage('system', 'You died and lost key items. A recovery plan has been inserted after the current plan step — complete the current step first, then re-obtain the lost items.');
                     }
                 } catch(e) { console.log('[death-plan-reinsert] エラー:', e.message); }
             }, 3000); // リスポーン後3秒待ってインベントリを確認
