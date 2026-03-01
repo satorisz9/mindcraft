@@ -303,40 +303,48 @@ export class SelfPrompter {
                             planHint += ' KNOWN LOCATIONS (use !goToRememberedPlace): ' + _knownPlaces.join(', ') + '.';
                         }
                     }
-                    // --- 地形マップから方向別サマリー ---
+                    // --- 2D ASCII マップ ---
+                    // [mindaxis-patch:ascii-map] terrain cache を ASCII グリッドで渡す
+                    // キー形式: "worldX_worldZ" (1ブロック1エントリ)
+                    // CELL=32ブロック, 21×21グリッド = 約672×672ブロックをカバー
                     if (_tmBot._terrainCache && Object.keys(_tmBot._terrainCache).length > 200) {
-                        const _tmPos = _tmBot.entity && _tmBot.entity.position;
-                        if (_tmPos) {
-                            const _tmDirs = [
-                                {name:'N',angle:270},{name:'NE',angle:315},{name:'E',angle:0},{name:'SE',angle:45},
-                                {name:'S',angle:90},{name:'SW',angle:135},{name:'W',angle:180},{name:'NW',angle:225},
-                            ];
-                            // [mindaxis-patch:unexplored-frontier] 近場(1-5)と遠場(6-15)を分けて判定
-                            // 遠場に未探索タイルがあれば "frontier"（その方向に行けば新地形に到達できる）
-                            const _tmResults = [];
-                            _tmDirs.forEach(d => {
-                                const _rad = d.angle * Math.PI / 180;
-                                const _dx = Math.cos(_rad), _dz = Math.sin(_rad);
-                                let _water = 0, _land = 0, _farMissing = 0;
-                                for (let _si = 1; _si <= 15; _si++) {
-                                    const _tx = Math.round(_tmPos.x + _dx * _si * 20);
-                                    const _tz = Math.round(_tmPos.z + _dz * _si * 20);
-                                    const _tile = _tmBot._terrainCache[_tx + '_' + _tz];
-                                    if (!_tile) { if (_si > 5) _farMissing++; continue; }
-                                    (_tile.block === 'water' || _tile.block === 'flowing_water') ? _water++ : _land++;
+                        const _mapPos = _tmBot.entity && _tmBot.entity.position;
+                        if (_mapPos) {
+                            const CELL = 32, HALF = 10; // 21×21 grid
+                            const bx = Math.round(_mapPos.x / CELL) * CELL;
+                            const bz = Math.round(_mapPos.z / CELL) * CELL;
+                            const rows = [];
+                            for (let tz = bz - HALF * CELL; tz <= bz + HALF * CELL; tz += CELL) {
+                                let row = '';
+                                for (let tx = bx - HALF * CELL; tx <= bx + HALF * CELL; tx += CELL) {
+                                    if (tx === bx && tz === bz) { row += '@'; continue; }
+                                    // CELL 中央付近を数点サンプルして多数決
+                                    let _w = 0, _l = 0;
+                                    for (const [sdx, sdz] of [[0,0],[8,0],[-8,0],[0,8],[0,-8]]) {
+                                        const t = _tmBot._terrainCache[(tx+sdx) + '_' + (tz+sdz)];
+                                        if (!t) continue;
+                                        (t.block === 'water' || t.block === 'flowing_water') ? _w++ : _l++;
+                                    }
+                                    if (_w + _l === 0) row += '?';
+                                    else row += (_w > _l ? '~' : '.');
                                 }
-                                if (_water + _land === 0) { _tmResults.push(d.name + '=unexplored'); return; }
-                                const _pct = Math.round(_water / (_water + _land) * 100);
-                                const _terrain = _pct >= 60 ? 'water' : _pct >= 30 ? 'mixed' : 'land';
-                                // 遠場(100-300ブロック先)に未探索タイルが3つ以上 → frontier
-                                _tmResults.push(d.name + '=' + (_farMissing >= 3 ? _terrain + '+frontier' : _terrain));
-                            });
-                            if (_tmResults.length >= 4) {
-                                planHint += ' WORLD MAP (' + Object.keys(_tmBot._terrainCache).length + ' tiles): ' + _tmResults.join(', ') + '.'
-                                    + ' SEARCH STRATEGY: (1) Target in KNOWN LOCATIONS? → !goToRememberedPlace directly.'
-                                    + ' (2) Not known? → !moveAway toward "unexplored" or "frontier" direction (new terrain = new resources).'
-                                    + ' (3) Only land/water? → !moveAway toward "land" direction.';
+                                rows.push(row);
                             }
+                            // 既知場所をマップ上に上書き
+                            if (_mbMem) {
+                                for (const [k, v] of Object.entries(_mbMem)) {
+                                    const ci = Math.round((v[0] - (bx - HALF*CELL)) / CELL);
+                                    const ri = Math.round((v[2] - (bz - HALF*CELL)) / CELL);
+                                    if (ri >= 0 && ri < rows.length && ci >= 0 && ci < rows[ri].length) {
+                                        rows[ri] = rows[ri].substring(0, ci) + k[0].toUpperCase() + rows[ri].substring(ci + 1);
+                                    }
+                                }
+                            }
+                            const _mapStr = rows.join('\n');
+                            planHint += '\n2D MAP (each char=' + CELL + 'blks, @=you, .=land, ~=water, ?=unexplored, N=top, E=right, uppercase=saved place):\n' + _mapStr
+                                + '\nSEARCH STRATEGY: (1) Target in KNOWN LOCATIONS? → !goToRememberedPlace directly.'
+                                + ' (2) Not known? → !moveAway toward "?" (unexplored) on the map.'
+                                + ' (3) No "?" nearby? → keep moving, unexplored terrain is always further out.';
                         }
                     }
                 } catch(_tme) {}
