@@ -2917,7 +2917,18 @@ export async function moveAway(bot, distance) {
             await goToSurface(bot);
             break;
         }
-        log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist}`);
+        log(bot, `BFS hop ${hop + 1}/${MAX_HOPS}: target=(${target.x},${target.y},${target.z}) bfsDist=${target.dist} inWater=${target.isWater}`);
+        // BFS ターゲットが水面 → 上方向に開口部がある可能性。goToSurface（ピラージャンプ）を先に試す
+        if (target.isWater) {
+            log(bot, `BFS target is water — trying goToSurface first (may pillar jump to opening above)`);
+            await goToSurface(bot);
+            if (!bot.entity.isInWater) {
+                totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
+                log(bot, `Escaped water via goToSurface. Moved ${totalMoved}/${distance} blocks.`);
+                continue; // 脱出成功、新位置からBFS再スキャン
+            }
+            // goToSurface で脱出できなかった場合、BFS水面ターゲットへ移動して次のホップへ
+        }
         await goToPosition(bot, target.x, target.y, target.z, 3);
         totalMoved = Math.round(bot.entity.position.distanceTo(startPos));
         log(bot, `Moved ${totalMoved}/${distance} blocks total.`);
