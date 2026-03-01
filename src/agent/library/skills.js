@@ -589,6 +589,18 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
         }, 64, 1);
 
         if (blocks.length === 0) {
+            // [mindaxis-patch:collect-search-deeper] 近くに見つからない場合、300ブロック先まで広域検索して移動
+            const _farBlock = bot.findBlock({
+                matching: b => blocktypes.includes(b.name),
+                maxDistance: 300,
+                useExtraInfo: false
+            });
+            if (_farBlock && collected < count) {
+                log(bot, `No ${blockType} within 64 blocks, found one at (${_farBlock.position.x},${_farBlock.position.y},${_farBlock.position.z}). Moving there...`);
+                await goToPosition(bot, _farBlock.position.x, _farBlock.position.y, _farBlock.position.z, 2);
+                if (bot.interrupt_code) break;
+                continue;
+            }
             if (collected === 0)
                 log(bot, `No ${blockType} nearby to collect.`);
             else
@@ -2942,10 +2954,10 @@ export async function moveAway(bot, distance) {
                 bot.setControlState('forward', true);
                 if (stepUp || inWater) bot.setControlState('jump', true);
                 const _stepStart = Date.now();
-                while (Date.now() - _stepStart < 2500) {
+                while (Date.now() - _stepStart < 800) { // [mindaxis-patch:bfs-step-timeout] 2500→800ms
                     const d = bot.entity.position.distanceTo(new Vec3(nx + 0.5, ny, nz + 0.5));
                     if (d < 0.9 || bot.interrupt_code) break;
-                    await new Promise(r => setTimeout(r, 80));
+                    await new Promise(r => setTimeout(r, 50));
                 }
                 bot.setControlState('jump', false);
             }
