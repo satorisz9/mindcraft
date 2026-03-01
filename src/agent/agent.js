@@ -172,17 +172,21 @@ export class Agent {
                             }
                         });
                     });
-                    // チャンク読み込み時間を計測
+                    // チャンクパケット受信時間を計測（デコード前後）
                     const _bot3 = this.bot;
-                    _bot3.on('chunkColumnLoad', (point) => {
-                        const _ct = performance.now();
-                        setImmediate(() => {
+                    const _origDispatch = _bot3._client.emit.bind(_bot3._client);
+                    _bot3._client.emit = function(event, ...args) {
+                        if (event === 'map_chunk') {
+                            const _ct = performance.now();
+                            const result = _origDispatch(event, ...args);
                             const _ce = performance.now() - _ct;
-                            if (_ce > 10) {
-                                console.log('[lag-monitor] chunkColumnLoad processing took ' + Math.round(_ce) + 'ms at ' + point.x + ',' + point.z);
+                            if (_ce > 50) {
+                                console.log('[lag-monitor] map_chunk decode took ' + Math.round(_ce) + 'ms');
                             }
-                        });
-                    });
+                            return result;
+                        }
+                        return _origDispatch(event, ...args);
+                    };
                 })();
 
                 // [mindaxis-patch:water-watchdog] 水中ウォッチドッグ — 頭が5秒以上水没なら現在のコマンドを中断
