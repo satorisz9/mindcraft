@@ -3775,6 +3775,11 @@ async function _goToSurfaceInner(bot) {
     function findPillarItem() {
         return bot.inventory.items().find(i => i.name === 'dirt')
             || bot.inventory.items().find(i => i.name === 'cobblestone')
+            || bot.inventory.items().find(i => i.name === 'gravel')
+            || bot.inventory.items().find(i => i.name === 'granite')
+            || bot.inventory.items().find(i => i.name === 'andesite')
+            || bot.inventory.items().find(i => i.name === 'diorite')
+            || bot.inventory.items().find(i => i.name === 'sand')
             || bot.inventory.items().find(i => i.name === 'netherrack')
             || bot.inventory.items().find(i => i.name.includes('planks'))
             || bot.inventory.items().find(i => i.name.includes('stone') || i.name.includes('deepslate'));
