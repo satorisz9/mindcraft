@@ -4251,7 +4251,11 @@ function _bfsFurthest(bot, maxRadius = 80, refPoint = null) {
             }
         }
     }
-    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} inWater=${furthest.isWater}`);
+    console.log(`[BFS] ${bfsCount} nodes, furthest=(${furthest.x},${furthest.y},${furthest.z}) dist=${furthest.dist} refDist=${Math.round(furthest.refDist)} initRefDist=${Math.round(_initRefDist)} inWater=${furthest.isWater}`);
+    // refPoint 指定時: 現在位置より startPos から遠い点なら dist が小さくても OK
+    if (refPoint) {
+        return (furthest.refDist > _initRefDist + 2 && furthest.dist >= 1) ? furthest : null;
+    }
     return furthest.dist >= 5 ? furthest : null;
 }
 
